@@ -162,6 +162,11 @@ impl PageWidth {
 /// which belong to this computer.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Settings {
+    /// Agent workspace, chosen explicitly rather than inferred from the note library.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_directory: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_width: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quick_note_size: Option<[f32; 2]>,
     /// Dragged sidebar width; `None` is the default.

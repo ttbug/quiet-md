@@ -321,7 +321,8 @@ impl TextField {
     }
 
     fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(t) = cx.read_from_clipboard().and_then(|i| i.text()) {
+        let fake = crate::clipboard::FAKE_CLIPBOARD.lock().unwrap().as_ref().map(|c| c.text.clone());
+        if let Some(t) = fake.or_else(|| cx.read_from_clipboard().and_then(|i| i.text())) {
             self.replace(self.sel.clone(), &t, cx);
         }
     }

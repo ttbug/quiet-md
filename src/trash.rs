@@ -37,7 +37,7 @@ pub(crate) fn page_header_with(ws: &Workspace, title: impl IntoElement, left: f3
         .items_center()
         // Clear of the traffic lights, like the document header.
         .pl(if ws.sidebar_open { px(left) } else { px(theme::TRAFFIC_LIGHTS_W) })
-        .pr(px(crate::ui::header_right_inset()))
+        .pr(px(crate::ui::header_right_inset() + ws.agent_header_space(cx)))
         .title_bar()
         .when(!ws.sidebar_open && cfg!(target_os = "windows"), |d| d.child(div().mr(px(12.)).child(ws.header_navigation(cx))))
         .when(!ws.sidebar_open && !cfg!(target_os = "windows"), |d| {

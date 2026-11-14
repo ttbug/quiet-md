@@ -219,6 +219,7 @@ pub struct Rename {
 }
 
 pub struct Workspace {
+    pub agent: Entity<crate::agent::Panel>,
     pub quick_note: bool,
     pub shortcut_recording: Option<String>,
     pub shortcut_strokes: Vec<String>,
@@ -357,7 +358,17 @@ impl Workspace {
             f.placeholder_color = Theme::text_disabled();
             f
         });
+        let workspace = cx.weak_entity();
+        let agent = cx.new(|cx| crate::agent::Panel::new(workspace, cx));
         let subs = vec![
+            cx.subscribe(&agent, |_, _, _: &crate::agent::Resized, cx| cx.notify()),
+            cx.subscribe(&agent, |w, panel, _: &crate::agent::Toggled, cx| {
+                if panel.read(cx).open && w.view == View::Doc
+                    && let (Some(id), Some(editor)) = (w.current.clone(), w.editor.clone()) {
+                    panel.update(cx, |p, cx| p.add_document(id, editor, cx));
+                }
+                cx.notify();
+            }),
             cx.subscribe(&settings_filter, |_, _, ev: &TextFieldEvent, cx| if matches!(ev, TextFieldEvent::Changed) { cx.notify(); }),
             cx.observe_window_bounds(window, |this, window, cx| crate::quick_note::remember(window, this.quick_note, cx)),
             // The system switched between light and dark (or the app's own look changed).
@@ -441,6 +452,7 @@ impl Workspace {
         .detach();
         let sidebar_width = store.settings().sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
         let mut ws = Workspace {
+            agent,
             quick_note: quick,
             shortcut_recording: None,
             shortcut_strokes: vec![],
@@ -1170,14 +1182,15 @@ impl Workspace {
     /// traffic lights and 展开侧栏) on the left, + on the right. Below a
     /// usable width it is None and the caller shows a search icon instead.
     pub(crate) fn header_search(&self, window: &Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
-        let main = f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. };
+        let agent_w = if !self.quick_note && self.agent.read(cx).open { (f32::from(window.viewport_size().width) * 0.45).min(380.) } else { 0. };
+        let main = f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. } - agent_w;
         let title = crate::settings::label(crate::settings::text("主页"));
         let title_w = f32::from(window.text_system().shape_line(title.clone().into(), px(17.), &[window.text_style().highlight(HighlightStyle { font_weight: Some(FontWeight::SEMIBOLD), ..Default::default() }).to_run(title.len())], None).width);
         // page_header's left inset (26 with the sidebar, else the traffic
         // lights plus the 4 + 28 + 12 of 展开侧栏), then 16 clear of the title.
         let left = if self.sidebar_open { 26. } else { theme::TRAFFIC_LIGHTS_W + 44. + if cfg!(target_os = "windows") { 32. } else { 0. } } + title_w + 16.;
         // + is 32 wide with an 8pt inset; 16 clear of it.
-        let right = HEADER_ACTIONS_H + crate::ui::header_right_inset() + 16.;
+        let right = HEADER_ACTIONS_H + crate::ui::header_right_inset() + self.agent_header_space(cx) + 16.;
         let half = (main / 2. - left).min(main / 2. - right);
         let width = (main - 320.).min(2. * half).min(360.);
         if width < 120. { return None }
@@ -1190,6 +1203,10 @@ impl Workspace {
             .when(width >= 200., |d| d.child(div().flex_none().text_size(px(11.)).text_color(Theme::text_placeholder()).child(crate::shortcuts::hint("workspace::FocusSearch", "⌘ + J").replace(" + ", " "))))
             .tip(crate::settings::tr("搜索文档", "Search documents"), Some(crate::shortcuts::hint("workspace::FocusSearch", "⌘ + J")))
             .on_click(cx.listener(|w, _, window, cx| w.open_search(window, cx))))
+    }
+
+    pub(crate) fn agent_header_space(&self, cx: &App) -> f32 {
+        if !self.quick_note && !self.agent.read(cx).open { 40. } else { 0. }
     }
 
     fn top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1267,7 +1284,7 @@ impl Workspace {
             .flex_none()
             .flex()
             .items_center()
-            .pr(px(crate::ui::header_right_inset()))
+            .pr(px(crate::ui::header_right_inset() + self.agent_header_space(cx)))
             // Clear of the traffic lights, which sit over the note when the sidebar is closed.
             .pl(if self.sidebar_open { px(18.) } else { px(theme::TRAFFIC_LIGHTS_W) })
             .title_bar()
@@ -1387,6 +1404,10 @@ impl Render for Workspace {
         let row_menu = self.render_row_menu(window, cx);
         let resize = self.sidebar_open.then(|| self.render_resize_handle(window, cx));
         let resize_overlay = self.render_resize_overlay(cx);
+        let (agent_resize, agent_resize_overlay) = if !self.quick_note && self.agent.read(cx).open {
+            let (handle, overlay) = self.agent.update(cx, |p, cx| p.render_resize(window, cx));
+            (Some(handle), overlay)
+        } else { (None, None) };
         let folder_drag_overlay = self.render_folder_drag_overlay(cx);
         let home_drag_overlay = self.render_home_drag_overlay(window, cx);
         let file_drop = self.render_file_drop(window, cx);
@@ -1446,6 +1467,10 @@ impl Render for Workspace {
                 .on_drag_move(cx.listener(|w, ev: &DragMoveEvent<ExternalPaths>, _, cx| w.file_drag_move(ev, cx)))
                 .on_drop(cx.listener(|w, paths: &ExternalPaths, window, cx| w.file_dropped(paths, window, cx))))
             .children(file_drop);
+        let note = note.when(self.agent_header_space(cx) > 0., |d| d.child(
+            crate::agent::toggle_button("agent-open", false).absolute().top(px(8.)).right(px(crate::ui::header_right_inset()))
+                .on_click(cx.listener(|w, _, window, cx| w.agent.update(cx, |p, cx| p.toggle(window, cx))))
+        ));
         div()
             .id("workspace")
             .key_context("Workspace")
@@ -1558,7 +1583,9 @@ impl Render for Workspace {
             }))
             .children(sidebar)
             .child(note)
+            .when(!self.quick_note && self.agent.read(cx).open, |d| d.child(self.agent.clone()))
             .children(resize)
+            .children(agent_resize)
             .children(crate::ui::window_controls(window))
             .children(row_menu)
             .children(doc_menu)
@@ -1574,6 +1601,7 @@ impl Render for Workspace {
             .children(export_md)
             .children(search)
             .children(resize_overlay)
+            .children(agent_resize_overlay)
             .children(folder_drag_overlay)
             .when(self.file_history.busy, |d| d.child(deferred(div().id("file-history-pending").absolute().inset_0().occlude()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

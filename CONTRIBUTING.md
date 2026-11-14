@@ -14,6 +14,18 @@ QUIET_MD_HOME=/tmp/lib ./target/release/quiet_md   # uses another library
 
 While developing, point `QUIET_MD_HOME` at a scratch directory; don't test against your real library.
 
+### Local Codex panel
+
+Assistant replies render Markdown with headings, inline styles, nested lists, quotes, links, code blocks and tables. User messages remain plain text. Code blocks offer Copy and horizontal scrolling; wide tables scroll horizontally. Streaming replies support unfinished code fences. Images are shown as text and equations as source; replies do not load remote images or create editable notes.
+
+Opening the sidebar while viewing a document adds a removable reference above the input. Reopening deduplicates by document ID; navigating to another document keeps existing references. Sending includes the latest text as Markdown, including unsaved edits from an open editor. Closed documents are read from the library. Adding a reference sends nothing by itself; images and attachments are not uploaded. New chats and working directory changes preserve visible references. If a reference cannot be read, the message remains unsent and the input is preserved.
+
+The model picker sits above the message input. The working directory selector sits below the input, to the left of Send/Stop. Folder names truncate, with the full path on hover. The picker reads the local Codex model catalog; **Follow Codex configuration** restores the model resolved when the conversation started. Model changes apply to the next message in the same conversation. Directory and model switching are unavailable while a response is running; a new chat resets model selection. No Codex configuration files are edited.
+
+Click the sidebar button in the upper-right corner to expand the panel, choose a working directory, and send a message. Drag the panel's left edge to resize; the width is saved on release. Folding removes the panel's full width and leaves only the header button. Install and sign in to Codex CLI in your terminal first; the panel uses that local installation. It currently supports Codex only. Folding preserves the conversation; **New chat**, changing directories, or closing the window ends it. The directory and panel width are remembered after restarting; chat history is not restored. Command and file approvals appear in the panel; unsupported interactions return an error. Avoid pointing the agent at notes currently open in the editor until save coordination is implemented.
+
+On a macOS development machine without the Metal command-line compiler, GPUI also supports runtime shader compilation: `cargo build --release --locked --features gpui/runtime_shaders,devtools`. This leaves the default release configuration unchanged. Run `python3 tools/harness/agent_panel.py` for a GUI regression with a fake Codex and temporary library. An optional real two-turn check is `cargo test --release --features gpui/runtime_shaders agent::codex::tests::live_codex_round_trip -- --ignored`; it uses your existing Codex login and sends two short model requests.
+
 The repository is a Cargo workspace: `crates/core` is the document engine (`fdl_core`), which does not depend on GPUI, and the root crate is the app. GPUI, taffy and xattr are locally patched copies in `vendor/`; the changes are listed in [vendor/PATCHES.md](vendor/PATCHES.md). `target/debug` can grow past 10 GB; if you only build release, `cargo clean --profile dev` clears it.
 
 ## Testing

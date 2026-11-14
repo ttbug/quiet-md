@@ -68,6 +68,7 @@ impl Workspace {
     }
 
     pub(crate) fn capture_file_history(&mut self, redo: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.agent.read(cx).is_focused(window, cx) { return }
         if self.rename.is_some() || self.search_open || self.move_dlg.is_some()
             || (!self.file_history.prefer_files && self.view == View::Doc) { return; }
         cx.stop_propagation();

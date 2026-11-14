@@ -16,6 +16,10 @@ FDL_BIN=/other/quiet_md python3 tools/harness/run.py my.txt
 
 ## 截图回归
 
+`python3 tools/harness/agent_panel.py` 使用临时文档库和模拟 Codex，验证右侧面板的多轮对话、折叠保留、审批、停止、新会话、目录切换及重启后的目录记忆，不启动真实 Agent。需要带 `devtools` 的构建；本机缺少 Metal 编译器时可同时启用 GPUI 自带的 `gpui/runtime_shaders`。
+
+同一回放还通过 `check-agent-references <阶段>` 在临时文档库构造可控的编辑器缓冲区，验证引用去重、添加后再次编辑、未保存正文、关闭后读取及重新打开后的最新缓冲区、跨窗口未保存内容、跨文档引用、移除、首页／设置不自动添加、读取失败保留输入。跨窗口阶段短暂打开不抢焦点的测试窗口并在结束时关闭。回归会核对模拟 Agent 实际收到的正文，不调用真实模型。
+
 ```sh
 python3 tools/harness/compare.py tools/harness/examples/menus.txt <旧版二进制> target/release/quiet_md
 ```
@@ -33,6 +37,10 @@ python3 tools/harness/compare.py tools/harness/examples/menus.txt <旧版二进�
 - 旧版二进制可以这样编：`git worktree add /tmp/old <提交>`，在那里用 `CARGO_TARGET_DIR=<本仓库>/target cargo build --release --features devtools`，再把二进制复制出来。
 
 ## 脚本命令
+
+`agent_panel.py` 还验证 AI 面板拖拽拉宽／拉窄、宽度上下限、窗口缩小时的约束、折叠重开与重启恢复，以及左右栏宽度独立保存；通过截图中的实际边缘位置和临时文档库设置核对。
+
+Markdown 回放保存 AI 回复行内样式、列表／引用、未闭合代码围栏和代码／表格截图，用户消息保留 Markdown 原文；代码复制通过模拟剪贴板粘回输入框，并核对模拟 Agent 收到的原始代码，不使用系统剪贴板或打开链接。
 
 每行一条命令；`#` 开头的是注释。完整说明见 `src/devtools.rs` 顶部。
 
