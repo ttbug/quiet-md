@@ -259,8 +259,9 @@ pub fn start(window: &mut Window, cx: &mut App) {
                 cx.update(|cx| {
                     let handle = cx.windows().into_iter().find_map(|w| w.downcast::<crate::app::Workspace>()).unwrap();
                     handle.update(cx, |ws, window, cx| match paths {
-                        Some(p) if drop => { FILE_DRAG.lock().unwrap().take(); ws.file_drag_at(at, p.clone(), cx); ws.file_drop_paths(p, window, cx); }
-                        Some(p) => ws.file_drag_at(at, p, cx),
+                        // Over the sidebar the tree takes it; otherwise the page.
+                        Some(p) if drop => { FILE_DRAG.lock().unwrap().take(); if ws.sidebar_drop_at(at, false, cx) { ws.sidebar_files_dropped(p, cx); } else { ws.file_drag_at(at, p.clone(), cx); ws.file_drop_paths(p, window, cx); } }
+                        Some(p) => { if !ws.sidebar_drop_at(at, false, cx) { ws.file_drag_at(at, p, cx); } }
                         None => cx.notify(),
                     }).unwrap();
                 }).unwrap();
@@ -693,9 +694,15 @@ fn frame(window: &mut Window, cx: &mut App) -> anyhow::Result<(usize, usize, Vec
 #[cfg(target_os = "macos")]
 fn capture(window: &mut Window, cx: &mut App, path: &str) -> anyhow::Result<()> {
     let (w, h, mut px) = frame(window, cx)?;
+    // The offscreen frame has no system glass or desktop behind the clear
+    // sidebar: lay it on the window colour full screen uses, not on black.
+    let bg = Rgba::from(crate::theme::ca(crate::theme::craft::WINDOW, 1.));
+    let bg = [bg.r, bg.g, bg.b].map(|c| c * 255.);
     for p in px.as_chunks_mut::<4>().0 {
         // BGRA (little-endian premultiplied first) → opaque RGBA.
         p.swap(0, 2);
+        let rest = 1. - p[3] as f32 / 255.;
+        for i in 0..3 { p[i] = (p[i] as f32 + bg[i] * rest).round().min(255.) as u8; }
         p[3] = 255;
     }
     image::save_buffer(path, &px, w as u32, h as u32, image::ColorType::Rgba8)?;

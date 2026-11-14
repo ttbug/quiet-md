@@ -31,6 +31,7 @@ mod docinfo;
 mod docmenu;
 mod editor;
 mod highlight;
+mod history;
 mod home;
 mod html;
 mod input;
@@ -47,6 +48,7 @@ mod search;
 mod sidebar;
 mod local_files;
 mod sidebar_drag;
+mod sidebar_drop;
 mod home_folder;
 mod folders;
 mod file_history;
@@ -75,7 +77,7 @@ use gpui::*;
 fn set_app_icon() {
     use objc::{class, msg_send, sel, sel_impl};
     use objc::runtime::Object;
-    let png = include_bytes!("../assets/branding/app-icon.png");
+    let Some(png) = crate::assets::get("branding/app-icon.png") else { return };
     unsafe {
         // A bundle with its own icon keeps it (the preview's has a dev ribbon);
         // only a bare binary (`cargo run`) borrows the app icon.
@@ -113,7 +115,7 @@ pub(crate) fn main_window_options(scripted: bool, at: Option<Bounds<Pixels>>, cx
             appears_transparent: cfg!(any(target_os = "macos", target_os = "windows")),
             traffic_light_position: Some(point(px(20.), px(app::HEADER_H / 2. - 7.))),
         }),
-        window_min_size: Some(size(px(480.), px(480.))),
+        window_min_size: Some(size(px(app::DOC_MIN_W), px(480.))),
         focus: !scripted,
         ..Default::default()
     }

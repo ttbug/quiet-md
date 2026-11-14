@@ -595,7 +595,8 @@ impl Core {
             if !out.is_empty() {
                 out.push('\n');
             }
-            out.push_str(&t.text[a.min(b)..b]);
+            // Equations as their LaTeX source (#69): copied text keeps them.
+            out.push_str(&t.slice(a.min(b)..b).plain_text());
         }
         out
     }
@@ -2833,7 +2834,7 @@ impl Core {
             ("~", |m| m.underline = true, true),
             ("`", |m| m.code = true, false),
         ];
-        let boundary = |c: Option<char>| c.is_none_or(char::is_whitespace);
+        let boundary = |c: Option<char>| c.is_none_or(|c| c.is_whitespace() || "，。；：！？、）】》”’".contains(c));
         // `$x$` and `$$x$$` become an inline equation.
         for delim in ["$$", "$"] {
             if !before.ends_with(delim) || t.slice(0..p.offset).runs.last().is_some_and(|r| r.marks.code) {
@@ -2842,7 +2843,9 @@ impl Core {
             let inner_end = before.len() - delim.len();
             let Some(open) = before[..inner_end].rfind(delim) else { continue };
             let inner = &before[open + delim.len()..inner_end];
-            if inner.trim().is_empty()
+            let src = crate::paste::markdown_equation_source(inner);
+            let money = delim == "$" && inner.starts_with(|c: char| c.is_ascii_digit()) && !crate::paste::is_numeric_math(inner);
+            if money || inner.trim().is_empty()
                 || inner.starts_with('$')
                 || inner.ends_with('$')
                 || inner.contains(EQUATION)
@@ -2854,7 +2857,7 @@ impl Core {
                 continue;
             }
             let mut marks = t.marks_at(open + delim.len());
-            marks.inline = Some(crate::docxml::to_inline(InlineKind::Equation(inner.to_string())));
+            marks.inline = Some(crate::docxml::to_inline(InlineKind::Equation(src)));
             self.checkpoint(EditKind::Other);
             self.break_coalescing();
             let mut ins = RichText::default();
@@ -3636,7 +3639,15 @@ mod tests {
 
     #[test]
     fn markdown_equations() {
-        for (typed_text, src) in [("x $a^2$", Some("a^2")), ("x $$b$$", Some("b")), ("x$a$", None), ("$ $", None)] {
+        for (typed_text, src) in [
+            ("x $a^2$", Some("a^2")),
+            ("x $$b$$", Some("b")),
+            ("x$a$", None),
+            ("$ $", None),
+            ("价格：$5", None),
+            ("QPS：$1000 / 30 = 33$", Some("1000 / 30 = 33")),
+            ("外推：$1 \\\\times 2 = 2$", Some("1 \\times 2 = 2")),
+        ] {
             let mut c = doc("<title>T</title><p></p>");
             let b = id(&c, 1);
             c.sel = Selection::caret(Pos::new(b, 0));
@@ -3644,8 +3655,8 @@ mod tests {
             let t = c.text_of(b).unwrap().text.clone();
             match src {
                 Some(src) => {
-                    assert_eq!(t, format!("x {EQUATION}"), "{typed_text}");
-                    assert_eq!(c.equation_source(Pos::new(b, 2)).as_deref(), Some(src));
+                    let at = t.rfind(EQUATION).unwrap();
+                    assert_eq!(c.equation_source(Pos::new(b, at)).as_deref(), Some(src), "{typed_text}");
                     assert_eq!(c.sel.head.offset, t.len());
                 }
                 None => assert!(!t.contains(EQUATION), "{typed_text}"),
@@ -3924,6 +3935,16 @@ mod tests {
         c.delete_selected_blocks();
         assert_eq!(xml(&c), "<title>T</title>\n<p>d</p>\n");
         assert_eq!(c.sel.head, Pos::new(d, 0));
+    }
+
+    #[test]
+    fn selected_text_keeps_equations() {
+        let mut c = doc("<title>T</title><p>ab</p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, 1));
+        let p = c.insert_equation("X_t").unwrap();
+        c.sel = Selection { anchor: Pos::new(b, 0), head: Pos::new(b, p.offset + EQUATION.len() + 1) };
+        assert_eq!(c.selected_text(), "aX_tb");
     }
 
     #[test]

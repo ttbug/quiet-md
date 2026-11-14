@@ -192,6 +192,14 @@ pub struct Settings {
     /// state, not document metadata.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub scroll_top: HashMap<String, [f32; 2]>,
+    /// 版本历史: snapshots kept per document (1–30). None is the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_limit: Option<u32>,
+}
+
+impl Settings {
+    pub fn history_limit(&self) -> u32 { crate::versions::clamp_limit(self.history_limit.unwrap_or(crate::versions::DEFAULT_LIMIT)) }
+    pub fn set_history_limit(&mut self, n: u32) { self.history_limit = Some(crate::versions::clamp_limit(n)); }
 }
 
 /// A document in the 回收站, as kept in `.quiet/trash/index.json`.
@@ -396,7 +404,7 @@ static ROOT: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
 
 /// Write `bytes` to `path` through a temporary file, so a crash leaves
 /// either the old or the new contents.
-fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<()> { write_atomic_then(path, bytes, true) }
+pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<()> { write_atomic_then(path, bytes, true) }
 
 /// `write_atomic`; without `sync_dir` the folder's entry is left for the
 /// caller to sync (a batch syncs each folder once, before its index).
@@ -475,13 +483,32 @@ fn save_json<T: Serialize>(path: &std::path::Path, v: &T) -> Result<()> {
 }
 
 /// Image path for an image block source (only local files are displayed).
-pub fn image_path(src: &str) -> Option<PathBuf> {
+pub fn image_path(src: &str) -> Option<PathBuf> { image_path_in(&Store::root_dir(), src) }
+
+pub fn image_path_in(root: &Path, src: &str) -> Option<PathBuf> {
     let p = PathBuf::from(src.strip_prefix("file://").unwrap_or(src));
     if p.is_absolute() {
-        return Some(p);
+        return Some(moved_asset(root, &p).unwrap_or(p));
     }
     // Relative to the library (`.assets/…`); not a URI or a cloud token.
-    (!src.is_empty() && !src.contains(':') && src.contains('/')).then(|| Store::root_dir().join(p))
+    (!src.is_empty() && !src.contains(':') && src.contains('/')).then(|| root.join(p))
+}
+
+/// Images and attachments are kept by absolute path (pasted ones too), so one
+/// that is gone may just have moved with the library: `assets/` became
+/// `.assets/` in the move to real folders (#213), or the library itself was
+/// moved. The same file in this library's images folder, when it is there.
+fn moved_asset(root: &Path, p: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    if p.exists() { return None; }
+    let parts: Vec<Component> = p.components().collect();
+    let dir = Store::assets_in(root);
+    // The last folder so named that leads to a file; a file may be named `assets` itself.
+    (0..parts.len()).rev().filter(|&i| matches!(parts[i].as_os_str().to_str(), Some("assets" | ".assets"))).find_map(|i| {
+        let rest = &parts[i + 1..];
+        if rest.is_empty() || !rest.iter().all(|c| matches!(c, Component::Normal(_))) { return None; }
+        Some(dir.join(rest.iter().collect::<PathBuf>())).filter(|q| q.exists())
+    })
 }
 
 /// Export only files belonging to this library, including after symlink resolution.
@@ -492,7 +519,7 @@ pub fn export_path(src: &str) -> Option<PathBuf> {
 pub fn export_path_in(root: &std::path::Path, src: &str) -> Option<PathBuf> {
     let root = root.canonicalize().ok()?;
     let raw = std::path::Path::new(src.strip_prefix("file://").unwrap_or(src));
-    let path = if raw.is_absolute() { raw.to_path_buf() } else { root.join(raw) }.canonicalize().ok()?;
+    let path = if raw.is_absolute() { moved_asset(&root, raw).unwrap_or_else(|| raw.to_path_buf()) } else { root.join(raw) }.canonicalize().ok()?;
     (path.starts_with(root) && path.is_file()).then_some(path)
 }
 
@@ -716,6 +743,9 @@ impl Store {
     }
 
     /// Where the library keeps its own files: `.quiet/`, the top in the old layout.
+    /// 版本历史 lives in `.quiet/` in either layout, so a library that has
+    /// not moved to folders yet never grows a visible `history/` folder.
+    fn history_base(&self) -> PathBuf { self.root.join(INTERNAL) }
     fn internal(&self) -> PathBuf { if self.flat { self.root.clone() } else { self.root.join(INTERNAL) } }
     fn index_file(&self) -> PathBuf { self.internal().join("index.json") }
     fn trash_index_file(&self) -> PathBuf { self.internal().join("trash").join("index.json") }
@@ -812,6 +842,15 @@ impl Store {
     /// The file a document is kept in.
     pub fn file_path(&self, id: &str) -> Option<PathBuf> {
         self.index.get(id).filter(|m| m.folder.is_none()).map(|_| self.path(id))
+    }
+
+    /// A folder on disk: `None` the library itself. The old flat layout keeps
+    /// folders only in its index, so they open as the library.
+    pub fn folder_dir(&self, id: Option<&str>) -> Option<PathBuf> {
+        match id {
+            None => Some(self.root.clone()),
+            Some(id) => self.index.get(id).filter(|m| m.folder.is_some()).map(|m| if self.flat { self.root.clone() } else { self.abs(&m.rel) }),
+        }
     }
 
     pub fn is_markdown(&self, id: &str) -> bool { self.index.get(id).is_some_and(|m| m.markdown) }
@@ -1363,6 +1402,18 @@ impl Store {
                 }
             }
             self.write_file(&self.path(id), xml.as_bytes())?;
+            // The previous text is already in `disk`: a snapshot costs no
+            // extra read. History is best-effort — it never fails the save.
+            if let Some(previous) = disk.as_deref()
+                && previous != xml.as_str()
+                && !self.index.get(id).is_some_and(Meta::local)
+            {
+                let ext = if self.is_markdown(id) { "md" } else { "xml" };
+                let limit = self.settings().history_limit();
+                if let Err(e) = crate::versions::snapshot(&self.history_base(), id, ext, previous, crate::time::now_ms(), limit, false) {
+                    self.warnings.push(format!("保存版本历史失败：{e}"));
+                }
+            }
         }
         self.loaded.borrow_mut().insert(id.to_string(), if same { disk.unwrap_or(xml) } else { xml });
         let title = doc.title.text.trim().to_string();
@@ -1391,10 +1442,12 @@ impl Store {
     /// child; the file is written there, never moved there afterwards.
     pub fn create_from_in(&mut self, doc: &Document, parent: Option<&str>) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
-        let _lock = self.begin_write()?;
+        let lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
         self.save_in(&id, doc, parent)?;
         self.record_file_change(&id, None);
+        // `move_in_tree` takes the lock itself: outside a batch, holding it here would wait on ourselves.
+        drop(lock);
         self.place_new(&id, parent)?;
         Ok(id)
     }
@@ -1406,7 +1459,7 @@ impl Store {
     /// `create_markdown` into folder `parent`, like `create_from_in`.
     pub fn create_markdown_in(&mut self, doc: &Document, front: &str, parent: Option<&str>) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
-        let _lock = self.begin_write()?;
+        let lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
         let t = now();
         if self.flat {
@@ -1421,6 +1474,7 @@ impl Store {
         let text = format!("{front}{}", crate::markdown::write_file(doc, "", None));
         if let Err(e) = self.write_file(&self.path(&id), text.as_bytes()).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
         self.record_file_change(&id, None);
+        drop(lock);
         self.place_new(&id, parent)?;
         Ok(id)
     }
@@ -1546,6 +1600,7 @@ impl Store {
             let from = self.path(id);
             let folder = self.index.get(id).is_some_and(|m| m.folder.is_some());
             if (!folder || from.is_dir()) && let Err(e) = std::fs::rename(&from, target) { failed = Some((n, e)); break; }
+            if !folder { crate::versions::move_to_trash(&self.history_base(), id); }
             self.index.remove(id);
             self.loaded.borrow_mut().remove(id);
             if record { self.record_file_change(id, before); }
@@ -1650,8 +1705,8 @@ impl Store {
             let p = self.trash_path(&id);
             let r = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
             match r {
-                Ok(()) => { self.trash.remove(&id); dirty = true; }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => { self.trash.remove(&id); dirty = true; }
+                Ok(()) => { self.trash.remove(&id); dirty = true; crate::versions::purge(&self.history_base(), &id); }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => { self.trash.remove(&id); dirty = true; crate::versions::purge(&self.history_base(), &id); }
                 Err(e) => self.warnings.push(format!("无法清理过期回收站文档 {id}：{e}")),
             }
         }
@@ -1719,6 +1774,7 @@ impl Store {
             }
             let _ = markdown;
             self.trash.remove(id);
+            if !folder { crate::versions::restore_from_trash(&self.history_base(), id); }
             self.save_index()?;
             self.record_file_change(id, None);
             return Ok(());
@@ -1750,6 +1806,7 @@ impl Store {
         self.index.insert(id.to_string(), meta);
         derive_tree(&mut self.index);
         self.trash.remove(id);
+        crate::versions::restore_from_trash(&self.history_base(), id);
         if let Some(doc) = doc {
             let out = self.serialize_doc(id, &doc, None);
             if text.as_deref() != Some(out.as_str()) && let Err(e) = write_atomic(&self.path(id), out.as_bytes()) {
@@ -1777,6 +1834,7 @@ impl Store {
                 Err(e) => return Err(e.into()),
             }
             self.trash.remove(&k);
+            crate::versions::purge(&self.history_base(), &k);
         }
         self.save_trash()
     }
@@ -1815,6 +1873,60 @@ impl Store {
             m.catalogue_closed = !pinned;
         }
         self.save_index()
+    }
+
+    /// 版本历史: snapshots of one document, newest first.
+    pub fn versions(&self, id: &str) -> Vec<crate::versions::Version> { crate::versions::list(&self.history_base(), id, false) }
+
+    pub fn version_text(&self, id: &str, name: &str) -> Result<String> { crate::versions::read(&self.history_base(), id, name, false) }
+
+    pub fn delete_version(&self, id: &str, name: &str) -> Result<()> { crate::versions::remove(&self.history_base(), id, name, false) }
+
+    /// Parse a snapshot into a document, for 另存副本.
+    pub fn version_document(&self, id: &str, name: &str) -> Result<Document> {
+        let text = self.version_text(id, name)?;
+        self.parse_doc(id, &text)
+    }
+
+    /// Diff a snapshot against a baseline. `None` is the document on disk
+    /// now; `Some(other)` compares two snapshots. Lines are ordered by time,
+    /// so `-` is always "only in the earlier version". The unchanged lines
+    /// are kept, so the same list doubles as a read-only preview.
+    pub fn version_diff(&self, id: &str, name: &str, baseline: Option<&str>) -> Result<Vec<crate::diff::Line>> {
+        let a = self.version_text(id, name)?;
+        let a_ms = crate::versions::stamp(name).unwrap_or(0);
+        let (b, b_ms) = match baseline {
+            Some(other) => (self.version_text(id, other)?, crate::versions::stamp(other).unwrap_or(0)),
+            None => (std::fs::read_to_string(self.path(id))?, u64::MAX),
+        };
+        let (old, new) = if a_ms <= b_ms { (a.as_str(), b.as_str()) } else { (b.as_str(), a.as_str()) };
+        Ok(crate::diff::diff(old, new, self.is_markdown(id)))
+    }
+
+    /// 命名版本: set or clear a snapshot's name.
+    pub fn set_version_label(&self, id: &str, name: &str, label: Option<&str>) -> Result<()> {
+        crate::versions::set_label(&self.history_base(), id, name, label, false)
+    }
+
+    /// Restore never loses the present: the current on-disk text becomes a
+    /// snapshot first, then the chosen version is parsed for `save` to write.
+    pub fn restore_version(&self, id: &str, name: &str) -> Result<Document> {
+        let text = self.version_text(id, name)?;
+        let current = std::fs::read_to_string(self.path(id)).unwrap_or_default();
+        let ext = if self.is_markdown(id) { "md" } else { "xml" };
+        let _ = crate::versions::snapshot(&self.history_base(), id, ext, &current, crate::time::now_ms(), self.settings().history_limit(), true);
+        self.parse_doc(id, &text)
+    }
+
+    /// 手动保存版本: bypass the interval, still capped by the retention limit.
+    /// `false` means the text matched the newest snapshot, so nothing was
+    /// written — the caller can say so instead of silently doing nothing.
+    pub fn save_version_now(&self, id: &str) -> Result<bool> {
+        let text = std::fs::read_to_string(self.path(id))?;
+        let ext = if self.is_markdown(id) { "md" } else { "xml" };
+        let before = self.versions(id).len();
+        crate::versions::snapshot(&self.history_base(), id, ext, &text, crate::time::now_ms(), self.settings().history_limit(), true)?;
+        Ok(self.versions(id).len() > before)
     }
 
     pub fn settings(&self) -> Settings {
@@ -1949,6 +2061,61 @@ mod tests {
         Document { title: crate::model::RichText::plain(title), ..Default::default() }
     }
 
+    fn doc_with(title: &str, body: &str) -> Document {
+        let mut d = doc(title);
+        d.blocks.push(crate::model::Block::text(body));
+        d
+    }
+
+    #[test]
+    fn saves_keep_previous_versions_and_follow_the_trash() {
+        let lib = Lib::new("versions");
+        let mut s = lib.open();
+        let id = s.create_from(&doc_with("first", "alpha")).unwrap();
+        s.load_for_edit(&id, false).unwrap();
+        s.save(&id, &doc_with("second", "beta")).unwrap();
+        assert_eq!(s.versions(&id).len(), 1);
+        // Snapshots stay in `.quiet/`: never a folder in the sidebar or the Finder,
+        // and still found after the retitle renamed the file.
+        assert!(lib.0.join(".quiet").join("history").join(&id).is_dir());
+        assert_eq!(s.list().iter().map(|e| e.id.clone()).collect::<Vec<_>>(), std::slice::from_ref(&id));
+        let name = s.versions(&id)[0].name.clone();
+        assert_eq!(s.version_text(&id, &name).unwrap(), docxml::serialize(&doc_with("first", "alpha")));
+        // Saving identical content again must not create another file.
+        s.save(&id, &doc_with("second", "beta")).unwrap();
+        assert_eq!(s.versions(&id).len(), 1);
+        // The diff compares the reader's text, not the XML tags.
+        let d = s.version_diff(&id, &name, None).unwrap();
+        assert!(d.iter().any(|l| l.text == "alpha" && l.kind == crate::diff::Kind::Removed));
+        assert!(d.iter().any(|l| l.text == "beta" && l.kind == crate::diff::Kind::Added));
+        // Two snapshots compare directly, always in time order: the older
+        // text is removed, the newer one added, whichever was picked first.
+        s.save_version_now(&id).unwrap();
+        let v = s.versions(&id);
+        assert_eq!(v.len(), 2);
+        // The same text again reports "nothing written" instead of piling up.
+        assert!(!s.save_version_now(&id).unwrap());
+        assert_eq!(s.versions(&id).len(), 2);
+        let d = s.version_diff(&id, &v[0].name, Some(&v[1].name)).unwrap();
+        assert!(d.iter().any(|l| l.text == "alpha" && l.kind == crate::diff::Kind::Removed));
+        assert!(d.iter().any(|l| l.text == "beta" && l.kind == crate::diff::Kind::Added));
+        let d = s.version_diff(&id, &v[1].name, Some(&v[0].name)).unwrap();
+        assert!(d.iter().any(|l| l.text == "alpha" && l.kind == crate::diff::Kind::Removed));
+        assert!(d.iter().any(|l| l.text == "beta" && l.kind == crate::diff::Kind::Added));
+        // Restoring first leaves a snapshot of the present.
+        let restored = s.restore_version(&id, &name).unwrap();
+        assert_eq!(restored.title.text, "first");
+        s.save(&id, &restored).unwrap();
+        assert!(s.versions(&id).len() >= 2);
+        s.delete(&id, None).unwrap();
+        assert!(s.versions(&id).is_empty());
+        assert!(lib.0.join(".quiet").join("history-trash").join(&id).is_dir());
+        s.restore(&id).unwrap();
+        assert!(!s.versions(&id).is_empty());
+        s.delete(&id, None).unwrap();
+        s.purge(&id).unwrap();
+    }
+
     #[test]
     fn file_history_ignores_external_creations() {
         let lib = Lib::new("file-journal");
@@ -2015,6 +2182,19 @@ mod tests {
         s.restore(&id).unwrap();
         assert!(file.is_file());
         assert_eq!(s.load(&id).unwrap().title.text, "Renamed");
+    }
+
+    /// Into a folder outside a batch (a 本机文件 dragged onto a sidebar folder):
+    /// placing it takes the write lock again, which must not wait on itself.
+    #[test]
+    fn creating_into_a_folder_outside_a_batch() {
+        let lib = Lib::new("create-into");
+        let mut s = lib.open();
+        let folder = s.create_folder("Notes", None).unwrap();
+        let (_, doc) = s.create().unwrap();
+        let md = s.create_markdown_in(&doc, "", Some(&folder)).unwrap();
+        let xml = s.create_from_in(&doc, Some(&folder)).unwrap();
+        for id in [md, xml] { assert_eq!(s.list().into_iter().find(|e| e.id == id).unwrap().meta.parent.as_deref(), Some(folder.as_str())); }
     }
 
     #[test]
@@ -2126,6 +2306,16 @@ mod tests {
         assert!(s.index[&id].parent.is_none());
         s.apply_file_history(&changes, true).unwrap();
         assert_eq!(s.index[&id].parent.as_deref(), Some(folder.as_str()));
+    }
+
+    #[test]
+    fn missing_move_anchor_is_rejected_without_panicking() {
+        let lib = Lib::new("missing-move-anchor");
+        let mut s = lib.open();
+        let id = s.create_from(&doc("moved")).unwrap();
+        let anchor = uuid::Uuid::new_v4().to_string();
+        let err = s.move_in_tree(&id, None, Some(&anchor)).unwrap_err();
+        assert!(err.to_string().contains("目标位置已改变，请重试"));
     }
 
     #[test]
@@ -2837,6 +3027,45 @@ mod tests {
         assert!(std::fs::read_to_string(s.abs("改名夹/乙.xml")).unwrap().contains("href=\"../夹/甲.xml\""));
         assert!(list.iter().find(|e| e.id == a).unwrap().meta.pinned);
         assert_eq!(s.settings().window_size, Some([1., 2.]));
+    }
+
+    /// Pasted images and attachments kept their absolute path in `assets/`;
+    /// after the move to real folders (`.assets/`), or after the library
+    /// itself moved, they are found where they are now (#213). Nothing
+    /// outside the library's images folder is reached that way.
+    #[test]
+    fn absolute_asset_paths_survive_the_move() {
+        use crate::model::{Block, BlockKind, FileBlock, FileView, RichText};
+        let lib = Lib::new("absolute-assets");
+        let mut old = Old::new(&lib, 3);
+        let abs = |rel: &str| lib.0.join(rel).to_string_lossy().into_owned();
+        let image = |src: String| Block::new(BlockKind::Image { src_kind: "src".into(), src, width: None, height: None, caption: None, crop: None }, RichText::default());
+        let moved = std::env::temp_dir().join("elsewhere/Quiet.md/assets/p.png").to_string_lossy().into_owned();
+        let d = Document { title: RichText::plain("图"), blocks: vec![
+            image(abs("assets/p.png")),
+            Block::new(BlockKind::File(FileBlock { src_kind: "path".into(), src: abs("assets/files/1234/报告.pdf"), name: "报告.pdf".into(), view: FileView::Card }), RichText::default()),
+            image(moved.clone()),
+            image(abs("assets/gone.png")),
+            // Only through `.assets/x/` once moved: the fallback must not follow it.
+            image(std::env::temp_dir().join("elsewhere/Quiet.md/assets/x/../../secret.png").to_string_lossy().into_owned()),
+        ], ..Default::default() };
+        let id = old.put(&d, Meta::default());
+        old.write();
+        std::fs::create_dir_all(lib.0.join("assets/files/1234")).unwrap();
+        std::fs::write(lib.0.join("assets/p.png"), b"png").unwrap();
+        std::fs::write(lib.0.join("assets/files/1234/报告.pdf"), b"pdf").unwrap();
+        std::fs::write(lib.0.join("secret.png"), b"s").unwrap();
+        let s = lib.migrated();
+        assert!(!lib.0.join("assets").exists());
+        std::fs::create_dir_all(lib.0.join(".assets/x")).unwrap();
+        let srcs = s.load(&id).unwrap().asset_sources();
+        let found: Vec<Option<PathBuf>> = srcs.iter().map(|src| image_path_in(&lib.0, src).filter(|p| p.is_file())).collect();
+        assert_eq!(found, [Some(lib.0.join(".assets/p.png")), Some(lib.0.join(".assets/files/1234/报告.pdf")), Some(lib.0.join(".assets/p.png")), None, None]);
+        assert!(export_path_in(&lib.0, &srcs[0]).is_some() && export_path_in(&lib.0, &srcs[1]).is_some());
+        assert!(export_path_in(&lib.0, &srcs[3]).is_none() && export_path_in(&lib.0, &srcs[4]).is_none());
+        // A path that still exists is used as it is.
+        std::fs::write(lib.0.join("here.png"), b"h").unwrap();
+        assert_eq!(image_path_in(&lib.0, &abs("here.png")), Some(lib.0.join("here.png")));
     }
 
     /// 恢复到迁移前: the backup comes back as it was, what the new layout

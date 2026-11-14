@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · 日本語 · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a>
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · 日本語 · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a> · <a href="README.fr.md">Français</a>
 </p>
 
 <p align="center">
@@ -62,7 +62,7 @@
 | プラットフォーム | パッケージ | 要件 |
 |---|---|---|
 | **macOS**（Apple シリコン） | [quiet-md-macos-arm64.zip](https://download.quiet.md/latest/quiet-md-macos-arm64.zip) | macOS 13 以降 |
-| **Windows**（x64） | [quiet-md-windows-x64-setup.exe](https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe) | Windows 10 バージョン 2004 以降 |
+| **Windows**（x64） | [quiet-md-windows-x64-setup.exe](https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe) | Windows 10 バージョン 1809 以降 |
 | **Linux**（x86_64、試験的） | [quiet-md-x86_64.AppImage](https://download.quiet.md/latest/quiet-md-x86_64.AppImage) | glibc 2.35 以降（Ubuntu 22.04 以降） |
 | **macOS**（Intel） | [quiet-md-macos-x86_64.zip](https://download.quiet.md/latest/quiet-md-macos-x86_64.zip) | macOS 13 以降 |
 
@@ -74,7 +74,7 @@
 
 初回の起動時に、表示言語、ライブラリの場所、クイックノートのショートカットを選び、Obsidian、Logseq、iA Writer、Typora のノートをコピーして取り込めます。空のライブラリには **Getting started** ガイドが入ります。主な機能を 10 分で紹介するツアーです。既存のノートが上書きされることはありません。
 
-インターフェースは英語、簡体字中国語、日本語、韓国語、スペイン語で利用できます。
+インターフェースは英語、簡体字中国語、日本語、韓国語、スペイン語、フランス語、アラビア語で利用できます。
 
 ## パフォーマンス
 
@@ -99,8 +99,9 @@
 ## 機能
 
 - **編集**: 見出し、番号付きリストと箇条書き、ToDo、引用、シンタックスハイライト付きのコードブロック、LaTeX の数式、表（セルの結合に対応）、コールアウト、段組み、画像、添付ファイル、カバー画像。`#`、`-`、`[]`、`>` などの Markdown のショートカットと、`/` のスラッシュメニュー。
+- **バージョン履歴**: 保存時に過去の本文を自動で保持（既定 20 件、設定 › ドキュメントで 1〜30 件に変更可）。右のドロワーが日付順に並べ、選んだ版を本文の位置でそのまま読み取り専用プレビュー。追加・書き換えたブロックは色付き、復元は 1 クリック。大切な版には名前を付けられる。
 - **整理**: ドキュメントのツリー、ピン留め、お気に入り、全文検索、ゴミ箱。
-- **インポートとエクスポート**: Markdown フォルダー（Obsidian の画像埋め込みとコールアウトを含む）と Feishu（Lark）の DocxXML のインポート、Markdown と PDF へのエクスポート、または直接の印刷。Feishu や Web ページから貼り付けても、構造が保たれます。
+- **インポートとエクスポート**: Markdown フォルダー（Obsidian の画像埋め込みとコールアウトを含む）と Feishu（Lark）の DocxXML のインポート、Markdown と PDF へのエクスポート、または直接の印刷。Finder からホームやサイドバーのフォルダーへファイルをドラッグして取り込めます。Feishu や Web ページから貼り付けても、構造が保たれます。
 - **ショートカット**: `⌘ /`（Windows では `Ctrl+/`）を押すと、すべて表示されます。どれも割り当てを変更できます。Windows では ⌘ の代わりに Ctrl を、⌥ の代わりに Alt を使います。アプリと Getting started のガイドには、お使いのシステムのキーが表示されます。
 - **テーマ**: Craft、Feishu、Notion、Obsidian の 4 つのスタイルを内蔵し、それぞれにダークのバリエーションがあります。CSS で自分のテーマを書くこともできます。[docs/THEMES.md](docs/THEMES.md) をご覧ください。
 
@@ -112,6 +113,7 @@ Quiet.md の開発に協力してくださったすべての方に感謝しま�
 
 ## 最近の更新
 
+- **0.1.12**（11 月 14 日）: Finder や「このコンピューターのファイル」から、サイドバーのフォルダーや行のあいだへ直接ドラッグして取り込めるように。ドラッグ中はページ全体がドロップ先になります。ホームのカードを連続曲線の角に刷新、「Finder で開く」を追加、パンくずは「マイドキュメント」から始まり、ウィンドウの最小幅はノートの領域を確保、フルスクリーンではサイドバーが不透明に。フォルダー内で書類を作成すると固まることがある問題を修正。
 - **0.1.11**（11 月 13 日）: ライブラリが本物のフォルダーになり、ファイルはタイトルで名前が付きます。以前のライブラリはバックアップを取ってから自動で移行します。表示言語・ライブラリの場所・クイックノートのショートカットを設定し、Obsidian などの Markdown アプリからノートを取り込める新しい初回起動。日本語・スペイン語・韓国語の表示、Markdown のディスプレイ数式、前回の読む位置への復帰、より速い起動と少ないメモリー使用量。
 - **0.1.10**（11 月 10 日）: 新規作成メニューで文書形式を選択、幅の広い表の横スクロール、Markdown 表の列揃えの保存、長い入力欄でのカーソル追従に対応。
 - **0.1.9**（11 月 8 日）: macOS の Cmd+Q で終了できない問題、Windows のウィンドウ操作ボタンが反応しない問題、背景色付きテキストの選択範囲が見えない問題を修正。

@@ -4,7 +4,6 @@ mod codex;
 mod markdown;
 
 use crate::input::{TextField, TextFieldEvent};
-use crate::editor::view::Editor;
 use crate::settings::tr;
 use crate::theme::Theme;
 use crate::ui;
@@ -93,14 +92,13 @@ impl Panel {
             model_menu: false, models_loading: false, model_error: None, model_anchor: Default::default(), _subscriptions: vec![sub, quit] }
     }
 
-    pub fn add_document(&mut self, id: String, editor: Entity<Editor>, cx: &mut Context<Self>) {
-        let title = crate::model::display_title(&editor.read(cx).core.doc.title.text);
+    pub fn add_document(&mut self, id: String, title: String, cx: &mut Context<Self>) {
         if let Some(r) = self.references.iter_mut().find(|r| r.id == id) { r.title = title; }
         else { self.references.push(Reference { id, title }); }
         cx.notify();
     }
 
-    fn panel_width(&self, window: &Window) -> f32 {
+    pub(crate) fn panel_width(&self, window: &Window) -> f32 {
         let max = 800_f32.min(f32::from(window.viewport_size().width) - crate::theme::SIDEBAR_MIN_CONTENT).max(300.);
         self.width.clamp(300., max)
     }
@@ -146,12 +144,14 @@ impl Panel {
         if let Some(workspace) = self.workspace.upgrade() {
             let w = workspace.read(cx);
             if w.current.as_deref() == Some(reference.id.as_str()) && let Some(editor) = &w.editor {
+                if let Some(preview) = &w.preview { return Ok(document_context(&preview.core.doc)) }
                 return Ok(document_context(&editor.read(cx).core.doc));
             }
         }
         for window in cx.windows().into_iter().filter_map(|w| w.downcast::<crate::app::Workspace>()) {
             let Ok(w) = window.read(cx) else { continue };
             if w.current.as_deref() == Some(reference.id.as_str()) && let Some(editor) = &w.editor {
+                if let Some(preview) = &w.preview { return Ok(document_context(&preview.core.doc)) }
                 return Ok(document_context(&editor.read(cx).core.doc));
             }
         }
@@ -464,6 +464,15 @@ pub(crate) fn check_references(phase: &str, cx: &mut App) {
             assert!(!document_context(&cx.global::<crate::shared_store::SharedStore>().load(&qa.a).unwrap()).markdown.contains("UNSAVEDA"));
         }
         "edit-a" => current_editor.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc("Reference A", "UPDATEDA")), cx)),
+        "preview-a" => {
+            handle.update(cx, |w, _, cx| {
+                let e = current_editor.read(cx);
+                w.preview = Some(crate::history::Preview { core: e.core.clone(), reading: e.read_only, name: "reference-qa".into() });
+                current_editor.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc("Historical A", "OLDA")), cx));
+                cx.notify();
+            }).unwrap();
+        }
+        "exit-preview" => { handle.update(cx, |w, _, cx| w.exit_preview(cx)).unwrap(); }
         "open-b" | "reopen-a" => {
             let current = handle.update(cx, |w, _, cx| {
                 let id = w.current.clone().unwrap();
@@ -496,8 +505,14 @@ pub(crate) fn check_references(phase: &str, cx: &mut App) {
             let peer = cx.open_window(WindowOptions { focus: false, ..Default::default() }, |window, cx| {
                 cx.new(|cx| Workspace::new_document_window(Some(qa.a.clone()), window, cx))
             }).unwrap();
-            peer.update(cx, |w, _, cx| w.editor.as_ref().unwrap().update(cx, |e, cx|
-                e.receive_document(&crate::editor::core::Core::new(doc("Reference A", "PEERA")), cx))).unwrap();
+            peer.update(cx, |w, _, cx| {
+                let editor = w.editor.as_ref().unwrap().clone();
+                editor.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc("Reference A", "PEERA")), cx));
+                let e = editor.read(cx);
+                w.preview = Some(crate::history::Preview { core: e.core.clone(), reading: e.read_only, name: "peer-qa".into() });
+                editor.update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc("Historical A", "PEEROLD")), cx));
+                cx.notify();
+            }).unwrap();
             cx.global_mut::<Qa>().peer = Some(peer);
         }
         "close-peer" => {

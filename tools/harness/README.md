@@ -9,7 +9,7 @@ python3 tools/harness/run.py my.txt /path/to/lib /tmp/my-run              # 自�
 FDL_BIN=/other/quiet_md python3 tools/harness/run.py my.txt
 ```
 
-- 截图：`<work_dir>/<name>.png`。
+- 截图：`<work_dir>/<name>.png`。`shot` 是离屏渲染，没有系统玻璃和桌面，透明的侧栏铺在窗口底色（和全屏时一样）上；要拍到真实的玻璃用 `deskshot`。和改动前（侧栏为黑色）的二进制做 `compare.py` 时，侧栏区域会有差异。
 - 日志：`<work_dir>/log`。性能数字用 `grep -a bench log` 查看。
 - `lib_clean/` 是一个审查用的文档库，含一篇「全部 Block 样式审查」和几张示例图片。
 - `winid.swift` 列出屏幕上 quiet_md 窗口的 window id（`swift winid.swift`），用来配合系统截图。
@@ -19,6 +19,8 @@ FDL_BIN=/other/quiet_md python3 tools/harness/run.py my.txt
 `python3 tools/harness/agent_panel.py` 使用临时文档库和模拟 Codex，验证右侧面板的多轮对话、折叠保留、审批、停止、新会话、目录切换及重启后的目录记忆，不启动真实 Agent。需要带 `devtools` 的构建；本机缺少 Metal 编译器时可同时启用 GPUI 自带的 `gpui/runtime_shaders`。
 
 同一回放还通过 `check-agent-references <阶段>` 在临时文档库构造可控的编辑器缓冲区，验证引用去重、添加后再次编辑、未保存正文、关闭后读取及重新打开后的最新缓冲区、跨窗口未保存内容、跨文档引用、移除、首页／设置不自动添加、读取失败保留输入。跨窗口阶段短暂打开不抢焦点的测试窗口并在结束时关闭。回归会核对模拟 Agent 实际收到的正文，不调用真实模型。
+
+版本历史适配回放分别在当前及另一窗口构造历史预览缓冲区，确认 AI 引用读取 `Preview::core` 保留的当前正文和标题；测试配置从 Cargo.toml 读取版本，避免合并新版本后的更新提示干扰界面操作。
 
 ```sh
 python3 tools/harness/compare.py tools/harness/examples/menus.txt <旧版二进制> target/release/quiet_md
@@ -80,7 +82,7 @@ Markdown 回放保存 AI 回复行内样式、列表／引用、未闭合代码�
 - 不用真实的 ⌘C / ⌘V 系统剪贴板；`key cmd-v` 只在 `clip` 之后使用。
 - 不抢焦点：不用 `activate`。窗口默认被挪到屏幕外渲染。
 - 不点：
-  - 设置 › 文档库的「在访达中显示」按钮；
+  - 设置 › 文档库的「在访达中显示」按钮，主页和文件夹页「…」菜单里的「在访达中打开」；
   - 链接、「网页搜索」、打开链接类按钮（会启动浏览器）；
   - 打印（会弹出系统打印面板）；
   - 快速查看 / `qlmanage -p`。

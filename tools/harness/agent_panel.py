@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from PIL import Image, ImageChops
 
 here = Path(__file__).resolve().parent
@@ -19,7 +20,7 @@ library = work / "library"
 shutil.copytree(here / "lib_clean", library)
 (library / "preferences.json").write_text(json.dumps({
     "language": "en", "english": True, "appearance": "light", "opaque_window": True,
-    "auto_update": False, "quick_hotkey": False, "seen_version": "0.1.11",
+    "auto_update": False, "quick_hotkey": False, "seen_version": tomllib.loads((repo / "Cargo.toml").read_text())["package"]["version"],
 }))
 project = work / "project with spaces and a deliberately long directory name for layout verification"
 project.mkdir()
@@ -336,10 +337,16 @@ click 1180 24
 wait 100
 check-agent-references check-a
 check-agent-references edit-a
+check-agent-references preview-a
+click 1170 24
+wait 100
+click 1180 24
+wait 100
 click 920 730
 type live-reference
 key enter
 wait 300
+check-agent-references exit-preview
 check-agent-references open-b
 wait 150
 click 920 730

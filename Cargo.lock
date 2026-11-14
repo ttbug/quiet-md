@@ -1701,7 +1701,7 @@ dependencies = [
 
 [[package]]
 name = "fdl_core"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "base64",
@@ -4256,7 +4256,7 @@ dependencies = [
 
 [[package]]
 name = "quiet_md"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "async-lock",
@@ -4274,6 +4274,7 @@ dependencies = [
  "markup5ever_rcdom",
  "minisign-verify",
  "objc",
+ "png 0.18.1",
  "quick-xml 0.37.5",
  "raw-window-handle",
  "regex",
