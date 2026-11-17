@@ -384,7 +384,7 @@ impl Editor {
         if matches!(self.menu, Some(Menu::Reminder { .. })) {
             self.menu = None;
         }
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         cx.notify();
     }
 
@@ -430,7 +430,7 @@ impl Editor {
                 if let Some(p) = &mut self.rm.panel {
                     p.drop = None;
                 }
-                window.focus(&self.focus);
+                window.focus(&self.focus, cx);
             }
             TextFieldEvent::Cancel => {
                 if self.rm.panel.as_ref().is_some_and(|p| p.drop.is_some()) {
@@ -469,7 +469,7 @@ impl Editor {
         let at_ = p.at;
         if d == Drop::Time {
             let fh = self.rm.time.read(cx).focus_handle(cx);
-            window.focus(&fh);
+            window.focus(&fh, cx);
             self.rm.time.update(cx, |f, cx| f.select_all_text(cx));
             if let Some(r) = self.core.reminder_at(at_) {
                 let t = r.expire - day_start(r.expire);
@@ -480,7 +480,7 @@ impl Editor {
                 self.rm.list.set_offset(point(px(0.), px(-y)));
             }
         } else {
-            window.focus(&self.focus);
+            window.focus(&self.focus, cx);
         }
         cx.notify();
     }
@@ -507,7 +507,7 @@ impl Editor {
                 ),
             );
         let x = rect.center().x - px(CARD_W / 2.);
-        Some(if up { at(self.rel(point(x, rect.top())), Corner::BottomLeft, el) } else { at(self.rel(point(x, rect.bottom())), Corner::TopLeft, el) })
+        Some(if up { at(self.rel(point(x, rect.top())), Anchor::BottomLeft, el) } else { at(self.rel(point(x, rect.bottom())), Anchor::TopLeft, el) })
     }
 
     /// The editor (`intact` popover): calendar, 设置时间, 提醒.
@@ -725,7 +725,7 @@ impl Editor {
         let above = f32::from(rect.top()) - view_top;
         let up = below < h && above > below;
         let x = rect.center().x - px(POPOVER_W / 2.);
-        Some(if up { at(self.rel(point(x, rect.top())), Corner::BottomLeft, el) } else { at(self.rel(point(x, rect.bottom())), Corner::TopLeft, el) })
+        Some(if up { at(self.rel(point(x, rect.top())), Anchor::BottomLeft, el) } else { at(self.rel(point(x, rect.bottom())), Anchor::TopLeft, el) })
     }
 
     /// The open select's list.
@@ -772,7 +772,7 @@ impl Editor {
                                 Drop::Time => e.apply_reminder(|r| at_time(r, v), window, cx),
                                 Drop::Jet => e.apply_reminder(|r| with_jet(r, v), window, cx),
                             }
-                            window.focus(&e.focus);
+                            window.focus(&e.focus, cx);
                         }),
                     ),
             );

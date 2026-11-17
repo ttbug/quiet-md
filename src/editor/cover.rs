@@ -226,7 +226,7 @@ impl Editor {
             {
                 let _ = this.update_in(cx, |e, _, cx| {
                     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_string();
-                    let stored = std::fs::read(&p).map_err(|_| super::image::BAD_FORMAT).and_then(|b| super::image::store_image(&b, &ext));
+                    let stored = fdl_core::vfs::read(&p).map_err(|_| super::image::BAD_FORMAT).and_then(|b| super::image::store_image(&b, &ext));
                     match stored {
                         Ok(p) => e.set_cover(Some(Cover { src: p.to_string_lossy().to_string(), x: 0., y: 0. }), cx),
                         Err(msg) => e.toast(msg, cx),
@@ -437,7 +437,7 @@ impl Editor {
 
     fn cover_popover_at(&self, el: impl IntoElement) -> Option<AnyElement> {
         let a = self.cover_ui.edit_bounds.get()?;
-        let (x, corner) = if self.core.doc.cover.is_none() { (a.left(), Corner::TopLeft) } else { (a.right(), Corner::TopRight) };
+        let (x, corner) = if self.core.doc.cover.is_none() { (a.left(), Anchor::TopLeft) } else { (a.right(), Anchor::TopRight) };
         Some(at(self.rel(point(x, a.bottom() + px(4.))), corner, el))
     }
 
@@ -629,7 +629,7 @@ impl Editor {
             .flex_col()
             .overflow_hidden()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .child(header)
             .child(body);
         self.cover_popover_at(el)

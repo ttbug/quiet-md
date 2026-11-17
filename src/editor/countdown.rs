@@ -12,11 +12,12 @@ use crate::model::{Block, BlockId, BlockKind, COUNTDOWN_COLORS, Countdown};
 use crate::editor_theme::{self as theme, Theme, craft};
 use crate::editor_ui::{ROW_RADIUS, TipExt, ToastKind, icon, popover};
 use gpui::{prelude::FluentBuilder, *};
+use web_time::Instant;
 use std::{
     cell::RefCell,
     collections::HashMap,
     rc::Rc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 const COLOR_NAMES: [&str; 7] = ["红色", "橙色", "黄色", "绿色", "蓝色", "紫色", "灰色"];
@@ -148,7 +149,7 @@ impl CdUi {
                         if let Some(d) = &mut e.cd.dialog {
                             d.drop = None;
                         }
-                        window.focus(&e.cd.focus);
+                        window.focus(&e.cd.focus, cx);
                         cx.notify();
                     }
                     TextFieldEvent::Cancel => e.cd_escape(window, cx),
@@ -473,13 +474,13 @@ impl Editor {
         self.cd.palette_in = [false; 2];
         self.cd.dialog = Some(Dialog { block: id, by_date: c.by_date, notify: c.notify, date, time, month: (date.0, date.1), drop: None });
         self.cd_set_mode(c.by_date, cx);
-        window.focus(&self.cd.focus);
+        window.focus(&self.cd.focus, cx);
         cx.notify();
     }
 
     fn close_countdown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.cd.dialog.take().is_some() {
-            window.focus(&self.focus);
+            window.focus(&self.focus, cx);
             cx.notify();
         }
     }
@@ -862,7 +863,7 @@ impl Editor {
                     if let Some(d) = &mut e.cd.dialog {
                         d.drop = None;
                     }
-                    window.focus(&e.cd.focus);
+                    window.focus(&e.cd.focus, cx);
                     cx.notify();
                 }, cx)
                 .w(px(64.))

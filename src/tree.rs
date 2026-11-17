@@ -177,7 +177,7 @@ impl Workspace {
             }
             cx.notify();
         })];
-        window.focus(&search.focus_handle(cx));
+        window.focus(&search.focus_handle(cx), cx);
         self.move_dlg = Some(MoveDialog { ids, target: None, expanded: HashSet::new(), search, scroll: ScrollHandle::new(), _subs: subs });
         cx.notify();
     }
@@ -185,7 +185,7 @@ impl Workspace {
     fn close_move(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.move_dlg = None;
         if let Some(ed) = &self.editor {
-            ed.read(cx).focus(window);
+            { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); }
         }
         cx.notify();
     }

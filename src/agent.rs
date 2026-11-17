@@ -71,7 +71,7 @@ impl EventEmitter<Resized> for Panel {}
 impl Panel {
     pub fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open = !self.open;
-        if !self.open { self.model_menu = false; window.blur(); }
+        if !self.open { self.model_menu = false; window.blur(cx); }
         cx.emit(Toggled);
         cx.notify();
     }
@@ -260,7 +260,7 @@ impl Panel {
 
     fn poll(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
-        let follow = -self.scroll.offset().y >= self.scroll.max_offset().height - px(24.);
+        let follow = -self.scroll.offset().y >= self.scroll.max_offset().y - px(24.);
         for _ in 0..256 {
             let event = match self.client.as_ref().map(|c| c.rx.try_recv()) {
                 Some(Ok(e)) => e,
@@ -317,7 +317,7 @@ impl Panel {
         if self.busy { return }
         if self.model_menu { self.model_menu = false; cx.notify(); return }
         if !self.connect(cx) { return }
-        window.focus(&self.input.focus_handle(cx));
+        window.focus(&self.input.focus_handle(cx), cx);
         self.model_menu = true;
         if self.models_loading { cx.notify(); return }
         self.models_loading = true;
@@ -370,7 +370,7 @@ impl Panel {
                 .overflow_y_scroll().py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows)
                 .when(self.models_loading, |d| d.child(div().p(px(8.)).child(tr("正在读取模型…", "Loading models…"))))
                 .when_some(self.model_error.as_ref(), |d, e| d.child(div().p(px(8.)).text_color(Theme::danger()).child(ui::ui_para(e.clone())))));
-        Some(deferred(anchored().anchor(Corner::BottomLeft).position(point(b.left(), b.top() - px(4.)))
+        Some(deferred(anchored().anchor(Anchor::BottomLeft).position(point(b.left(), b.top() - px(4.)))
             .snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 }

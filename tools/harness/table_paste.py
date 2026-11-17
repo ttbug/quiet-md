@@ -11,6 +11,7 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 
+from hlib import doc_file, docs
 from PIL import Image
 
 here = Path(__file__).resolve().parent
@@ -52,7 +53,7 @@ shot result
 
 def tables(folder):
     result = []
-    for path in (folder / "lib" / "docs").glob("*.xml"):
+    for path in docs(folder / "lib"):
         doc = ET.fromstring("<doc>" + path.read_text() + "</doc>")
         result.extend(doc.findall("table"))
     return result
@@ -88,12 +89,14 @@ expected = verify(pasted)
 verify(run("reopen", "", pasted / "lib"), expected)
 undone = run("undo", paste + "key cmd-z")
 assert not tables(undone), f"undo left a table; see {undone}"
-doc = ET.fromstring("<doc>" + (undone / "lib" / "docs" / f"{doc_id}.xml").read_text() + "</doc>")
+doc = ET.fromstring("<doc>" + doc_file(undone / "lib").read_text() + "</doc>")
 assert all(not "".join(p.itertext()) for p in doc.findall("p"))
 print("undo: restored empty paste target", flush=True)
 verify(run("redo", paste + "key cmd-z\nwait 200\nkey cmd-shift-z"), expected)
-imported = run("import", f"pick {clipboard}\nkey cmd-shift-i")
-files = list((imported / "lib" / "docs").glob("*.md"))
+# Importing leaves the current page open and writes the file in the background;
+# it then shows as the first sidebar row.
+imported = run("import", f"pick {clipboard}\nkey cmd-shift-i\nwait 3000\nclick 60 129")
+files = docs(imported / "lib", "md")
 assert len(files) == 1 and files[0].read_bytes() == clipboard.read_bytes()
 # Markdown files store text, not column widths. Check the rendered grid's
 # vertical borders in a blank strip below the first data row's text.

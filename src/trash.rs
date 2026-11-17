@@ -151,7 +151,7 @@ impl Workspace {
                 .on_click(cx.listener(move |w, ev: &ClickEvent, _, cx| {
                     cx.stop_propagation();
                     let p = ev.position();
-                    w.trash_menu = Some((id.clone(), point(p.x + px(12.), p.y + px(14.)), Corner::TopRight));
+                    w.trash_menu = Some((id.clone(), point(p.x + px(12.), p.y + px(14.)), Anchor::TopRight));
                     cx.notify();
                 }));
             list = list.child(
@@ -166,7 +166,7 @@ impl Workspace {
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
-                            w.trash_menu = Some((id2.clone(), ev.position, Corner::TopLeft));
+                            w.trash_menu = Some((id2.clone(), ev.position, Anchor::TopLeft));
                             cx.notify();
                         }),
                     )

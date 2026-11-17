@@ -3,6 +3,7 @@
 //! each page a column of grouped rows. Only what a
 //! user really needs to change lives here.
 
+use fdl_core::vfs::PathExt as _;
 use crate::{app::{View, Workspace}, theme::{self, craft, Theme}, themes, ui};
 use crate::ui::{TitleBarExt, TipExt};
 use crate::sidebar as sb;
@@ -64,7 +65,7 @@ pub fn browsers() -> Vec<&'static str> {
         .into_iter()
         .filter(|name| {
             let app = format!("{name}.app");
-            Path::new("/Applications").join(&app).exists() || user.as_ref().is_some_and(|u| u.join(&app).exists())
+            Path::new("/Applications").join(&app).fs_exists() || user.as_ref().is_some_and(|u| u.join(&app).fs_exists())
         })
         .take(BROWSERS_SHOWN)
         .collect()
@@ -125,7 +126,7 @@ pub struct Preferences {
 
 /// A week between asks to move the library to real folders.
 const MIGRATE_ASK_EVERY: u64 = 7 * 24 * 3600;
-fn unix_now() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
+fn unix_now() -> u64 { web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
 
 /// 稍后 on the move to real folders: remember when.
 pub fn migrate_later() {
@@ -175,7 +176,7 @@ pub(crate) fn show_lang(lang: Lang) {
 }
 
 pub fn load() {
-    let p = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice::<Preferences>(&b).ok()).unwrap_or_default();
+    let p = fdl_core::vfs::read(path()).ok().and_then(|b| serde_json::from_slice::<Preferences>(&b).ok()).unwrap_or_default();
     apply(p);
 }
 
@@ -228,12 +229,12 @@ pub fn prefs() -> Preferences {
 pub(crate) fn save(p: &Preferences) -> anyhow::Result<()> {
     use std::io::Write;
     let root = crate::store::Store::internal_dir();
-    std::fs::create_dir_all(&root)?;
+    fdl_core::vfs::create_dir_all(&root)?;
     let tmp = root.join("preferences.json.tmp");
-    let mut f = std::fs::File::create(&tmp)?;
+    let mut f = fdl_core::vfs::File::create(&tmp)?;
     f.write_all(&serde_json::to_vec_pretty(p)?)?;
     f.sync_all()?;
-    std::fs::rename(tmp, path())?;
+    fdl_core::vfs::rename(tmp, path())?;
     apply(p.clone());
     Ok(())
 }
@@ -274,7 +275,7 @@ fn open_in_editor(p: &std::path::Path, cx: &mut App) {
 
 /// Theme files are watched: saving one in an editor redraws at once.
 pub(crate) fn watch_themes(cx: &mut Context<Workspace>) {
-    static LAST: Mutex<Option<Vec<(std::path::PathBuf, std::time::SystemTime, u64)>>> = Mutex::new(None);
+    static LAST: Mutex<Option<Vec<(std::path::PathBuf, web_time::SystemTime, u64)>>> = Mutex::new(None);
     *LAST.lock().unwrap() = Some(themes::stamp());
     cx.spawn(async |this, cx| loop {
         cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
@@ -566,7 +567,7 @@ impl Workspace {
                 cx.notify();
             }))
             .child(div().id("theme-menu-list").w(px(200.)).max_h(px(302.)).overflow_y_scroll().py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
-        Some(deferred(anchored().anchor(Corner::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+        Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
     /// A choice as a dropdown button, like 界面语言's: the picked label, a menu of the rest.
@@ -606,7 +607,7 @@ impl Workspace {
                 cx.notify();
             }))
             .child(div().min_w(px(160.)).py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
-        Some(deferred(anchored().anchor(Corner::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+        Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
     fn pick_pref(&mut self, i: usize, cx: &mut Context<Self>) {
@@ -652,7 +653,7 @@ impl Workspace {
                 cx.notify();
             }))
             .child(div().w(px(160.)).py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
-        Some(deferred(anchored().anchor(Corner::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+        Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
     /// Keys while the language dropdown is open; true when used.
@@ -1040,7 +1041,7 @@ pub(crate) fn update_pill(cx: &mut Context<Workspace>) -> Option<AnyElement> {
     };
     let fill = if let State::Downloading(m) = &state { Some(crate::update::progress(m)) } else { None };
     let busy = matches!(state, State::Downloading(_) | State::Installing(_));
-    Some(div().id("update-pill").no_drag().flex_shrink().min_w_0().h(px(24.)).px(px(10.)).relative().overflow_hidden().flex().items_center().justify_center().rounded_full()
+    Some(div().id("update-pill").no_drag().flex_shrink_1().min_w_0().h(px(24.)).px(px(10.)).relative().overflow_hidden().flex().items_center().justify_center().rounded_full()
         .text_size(px(theme::ui_font_small())).line_height(px(theme::ui_font_small() + 4.)).font_weight(FontWeight::MEDIUM)
         .when(!busy, |d| d.cursor_pointer().bg(Theme::primary()).text_color(gpui::white()).hover(|s| s.opacity(0.9)))
         .when(busy, |d| d.bg(Theme::sidebar_hover()).text_color(Theme::text_caption()))
@@ -1560,6 +1561,7 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "关注文档更新" => "Follow document updates",
         "刚刚" => "just now",
         "文档不存在" => "Document not found",
+        "文档文件已不在原处，可能已被移动或删除" => "The document's file is no longer where it was. It may have been moved or deleted.",
         "文档已被另一个实例修改，未覆盖磁盘内容。请另存副本或重新载入磁盘版本" => "Another instance modified this document. The file was not overwritten. Save a copy or reload the version on disk.",
         "这个文档库由更新版本的 Quiet.md 创建，部分内容可能无法正确显示，请升级后再编辑" => "These documents were created by a newer version of Quiet.md. Update the app before editing them.",
         _ => text,
@@ -1631,6 +1633,7 @@ fn diagnostic_for(message: &str, english: bool) -> String {
 
 #[cfg(test)]
 mod localization_tests {
+    use fdl_core::vfs::PathExt as _;
     use super::{localize, diagnostic_for, display_title};
 
     #[test]
@@ -1642,11 +1645,11 @@ mod localization_tests {
             }
         }
         fn walk(dir: &std::path::Path, pattern: &regex::Regex) {
-            for entry in std::fs::read_dir(dir).unwrap() {
+            for entry in fdl_core::vfs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
-                if path.is_dir() { walk(&path, pattern); }
+                if path.fs_is_dir() { walk(&path, pattern); }
                 else if path.extension().is_some_and(|ext| ext == "rs") {
-                    let source = std::fs::read_to_string(path).unwrap();
+                    let source = fdl_core::vfs::read_to_string(path).unwrap();
                     for hit in pattern.captures_iter(source.split("#[cfg(test)]").next().unwrap()) { check(&hit[1]); }
                 }
             }

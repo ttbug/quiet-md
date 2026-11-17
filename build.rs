@@ -5,7 +5,10 @@ use std::fmt::Write;
 use std::path::Path;
 
 fn main() {
-    embed("assets", "assets.rs", SKIP);
+    // The bundled emoji font is for Linux only: macOS and Windows have color emoji fonts GPUI draws.
+    let linux = matches!(std::env::var("CARGO_CFG_TARGET_OS").as_deref(), Ok("linux" | "freebsd"));
+    let skip: Vec<&str> = SKIP.iter().copied().chain((!linux).then_some("fonts/emoji/")).collect();
+    embed("assets", "assets.rs", &skip);
     embed("shared-mock/library", "guides.rs", &[]);
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") { windows_resources(); }
 }

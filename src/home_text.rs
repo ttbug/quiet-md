@@ -71,7 +71,6 @@ fn widen(line: &mut WrappedLine, equations: &[Rc<Equation>], start: usize, width
     *target = Arc::new(WrappedLineLayout { unwrapped_layout: Arc::new(layout), wrap_boundaries: boundaries.into(), wrap_width: Some(width) });
 }
 
-impl IntoElement for PreviewText { type Element = Self; fn into_element(self) -> Self { self } }
 impl Element for PreviewText {
     type RequestLayoutState = Rc<RefCell<Option<Prepared>>>;
     type PrepaintState = ();
@@ -149,7 +148,7 @@ impl Element for PreviewText {
                 let origin = point(bounds.left() + placed.x + px(placed.equation.left), bounds.top() + placed.baseline);
                 match &placed.equation.body {
                     Body::Math(math) => { math.paint(origin, window, cx); if let Some(tag) = &math.tag { tag.paint(point(origin.x + px(math.width + 8. * super::bs::SCALE), origin.y), window, cx); } }
-                    Body::Invalid(line) => { let _ = line.paint(point(origin.x, origin.y - line.ascent), line.ascent + line.descent, window, cx); }
+                    Body::Invalid(line) => { let _ = line.paint(point(origin.x, origin.y - line.ascent), line.ascent + line.descent, TextAlign::Left, None, window, cx); }
                 }
             }
         });

@@ -260,7 +260,7 @@ impl Workspace {
         let right = btn.map_or(vw - px(120.), |b| b.right());
         let menu_top = btn.map_or(px(60.), |b| b.bottom() + px(MENU_GAP));
         let mut out = vec![
-            deferred(anchored().anchor(Corner::TopRight).position(point(right, menu_top)).child(menu))
+            deferred(anchored().anchor(Anchor::TopRight).position(point(right, menu_top)).child(menu))
                 .with_priority(2)
                 .into_any_element(),
         ];
@@ -336,7 +336,7 @@ impl Workspace {
         };
         if let Some((top, el)) = sub_el {
             out.push(
-                deferred(anchored().anchor(Corner::TopRight).position(point(sub_at.x, px(top))).snap_to_window_with_margin(px(8.)).child(el))
+                deferred(anchored().anchor(Anchor::TopRight).position(point(sub_at.x, px(top))).snap_to_window_with_margin(px(8.)).child(el))
                     .with_priority(2)
                     .into_any_element(),
             );

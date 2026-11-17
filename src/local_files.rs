@@ -3,6 +3,7 @@
 //! only remembers them: 从列表中移除 never touches the file, and 导入到文档库
 //! makes a copy.
 
+use fdl_core::vfs::PathExt as _;
 use crate::app::{RowMenu, Workspace};
 use crate::settings::tr;
 use crate::store::Entry;
@@ -123,7 +124,7 @@ impl Incoming {
     /// Markdown files named on the command line (Windows and Linux "Open with").
     pub fn from_args() -> Self {
         let me = Self::default();
-        me.0.borrow_mut().extend(std::env::args_os().skip(1).map(PathBuf::from).filter(|p| is_markdown_path(p) && p.is_file()));
+        me.0.borrow_mut().extend(std::env::args_os().skip(1).map(PathBuf::from).filter(|p| is_markdown_path(p) && p.fs_is_file()));
         me
     }
 
@@ -136,7 +137,7 @@ impl Incoming {
     pub fn deliver(self, cx: &mut App) {
         cx.spawn(async move |cx| loop {
             if !self.0.borrow().is_empty() {
-                let _ = cx.update(|cx| {
+                cx.update(|cx| {
                     let target = cx.active_window().and_then(|w| w.downcast::<Workspace>())
                         .or_else(|| cx.windows().into_iter().find_map(|w| w.downcast::<Workspace>()));
                     let Some(target) = target else { return };

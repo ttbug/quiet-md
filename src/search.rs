@@ -175,7 +175,7 @@ pub(crate) fn extra_line(e: &Entry) -> Div {
     extra.push(extra_segment(Some("pen-line"), crate::localized_format!("我在 {}修改过", "Modified {}", format_visit(e.meta.modified))));
     let last = extra.len() - 1;
     let extra = extra.into_iter().enumerate().flat_map(|(i, seg)| {
-        let seg = if i == last { seg.flex_shrink().min_w_0().overflow_hidden() } else { seg };
+        let seg = if i == last { seg.flex_shrink_1().min_w_0().overflow_hidden() } else { seg };
         [(i > 0).then(|| div().flex_none().child(" · ")), Some(seg)].into_iter().flatten()
     });
     div()
@@ -231,7 +231,7 @@ impl Workspace {
             s.line_height = 22.;
             s.set_text("", cx)
         });
-        window.focus(&search.focus_handle(cx));
+        window.focus(&search.focus_handle(cx), cx);
         self.search_scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
     }
@@ -242,7 +242,7 @@ impl Workspace {
         }
         self.search_open = false;
         if let Some(ed) = &self.editor {
-            ed.read(cx).focus(window);
+            { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); }
         }
         cx.notify();
     }
@@ -257,7 +257,7 @@ impl Workspace {
         self.close_search(window, cx);
         self.open(&id, window, cx);
         if let Some(ed) = &self.editor {
-            ed.read(cx).focus(window);
+            { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); }
         }
     }
 
@@ -359,7 +359,7 @@ impl Workspace {
                 d.child(input_button("search-clear", "search-clear", 18., Theme::text_disabled()).ml(px(8.)).on_click(cx.listener(
                     |w, _, window, cx| {
                         w.search.update(cx, |s, cx| s.set_text("", cx));
-                        window.focus(&w.search.focus_handle(cx));
+                        window.focus(&w.search.focus_handle(cx), cx);
                         w.search_sel = Some(0);
                         w.search_scroll.set_offset(point(px(0.), px(0.)));
                         cx.notify();

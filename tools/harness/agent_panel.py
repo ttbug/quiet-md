@@ -1,6 +1,6 @@
 """Agent panel regression using a fake local Codex, never the user's agent or library.
 
-Build with --release --features devtools (on CLT-only Macs also gpui/runtime_shaders).
+Build with --release --features devtools (on CLT-only Macs also gpui_platform/runtime_shaders).
 Run python3 tools/harness/agent_panel.py (needs Pillow). Artifacts stay in a temporary directory.
 """
 import json

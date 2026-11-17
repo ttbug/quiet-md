@@ -69,7 +69,7 @@ impl Editor {
         }
         self.refresh_find(true, cx);
         let field = self.find_field.clone();
-        window.focus(&field.focus_handle(cx));
+        window.focus(&field.focus_handle(cx), cx);
         field.update(cx, |f, cx| f.select_all_text(cx));
         self.scroll_to_current(window);
         cx.notify();
@@ -83,7 +83,7 @@ impl Editor {
             self.core.sel = Selection { anchor: Pos::new(id, r.start), head: Pos::new(id, r.end) };
             self.toolbar_hidden = true;
         }
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         cx.notify();
     }
 
@@ -248,7 +248,7 @@ impl Editor {
                         f.replace = to_replace;
                     }
                     let field = e.find_field.clone();
-                    window.focus(&field.focus_handle(cx));
+                    window.focus(&field.focus_handle(cx), cx);
                     cx.notify();
                 }))
         };

@@ -33,7 +33,7 @@ impl Workspace {
                 match &parent { Some(p) => { self.expanded.insert(p.clone()); } None => self.folded[1] = false }
                 self.search.update(cx, |s, cx| s.set_text("", cx));
                 self.open(&id, window, cx);
-                if let Some(ed) = &self.editor { ed.read(cx).focus(window); }
+                if let Some(ed) = &self.editor { { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); } }
             }
             Err(e) => self.status = crate::app::SaveStatus::Failed(crate::localized_format!("新建失败：{}", "Could not create document: {}", crate::settings::diagnostic(&e.to_string()))),
         }
@@ -110,7 +110,7 @@ impl Workspace {
         self.doc_menu = false;
         self.expanded.insert(id.to_string());
         self.reveal_in_tree(id);
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         cx.notify();
         true
     }
@@ -140,7 +140,7 @@ impl Workspace {
         let folder_parent = parent.clone();
         let row = |id: &'static str, glyph: &'static str, label: &'static str| crate::ui::menu_row(id, SharedString::from(id)).child(icon(glyph, 16., Theme::icon())).child(label);
         let (doc_parent, md_parent, board_parent) = (parent.clone(), parent.clone(), parent.clone());
-        Some(deferred(anchored().anchor(Corner::TopLeft).position(pos).snap_to_window_with_margin(px(8.)).child(
+        Some(deferred(anchored().anchor(Anchor::TopLeft).position(pos).snap_to_window_with_margin(px(8.)).child(
             popover().id("create-items").occlude().w(px(180.)).py(px(crate::ui::MENU_PAD_Y))
                 .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.create_menu = None; cx.notify(); }))
                 .child(row("create-document", "doc", tr("文档", "Document")).on_click(cx.listener(move |w, _, window, cx| w.create_doc(false, doc_parent.clone(), window, cx))))

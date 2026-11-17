@@ -591,7 +591,7 @@ impl R<'_> {
                         e.core.toggle_fold(id);
                         e.core.fix_selection();
                         e.keep_read_only_fold();
-                        e.fold_anim = Some((id, std::time::Instant::now()));
+                        e.fold_anim = Some((id, web_time::Instant::now()));
                         if selection == (e.core.sel, e.core.block_sel) {
                             e.changed_preserving_viewport(window, cx);
                         } else {
@@ -727,7 +727,7 @@ impl R<'_> {
                         MouseButton::Left,
                         cx.listener(move |e, _, window, cx| {
                             cx.stop_propagation();
-                            window.focus(&e.focus);
+                            window.focus(&e.focus, cx);
                             e.core.toggle_todo(id);
                             e.changed_preserving_viewport(window, cx);
                         }),
@@ -1345,7 +1345,7 @@ impl Editor {
         if !matches!(req, Reveal::Block(_))
             && let Some((scroll, _)) = self.code_hscroll.borrow().get(&block)
         {
-            let (b, off, max) = (scroll.bounds(), scroll.offset(), scroll.max_offset().width);
+            let (b, off, max) = (scroll.bounds(), scroll.offset(), scroll.max_offset().x);
             let pad = px(16.);
             let dx = if t.left() < b.left() + pad { b.left() + pad - t.left() } else if t.right() > b.right() - pad { b.right() - pad - t.right() } else { px(0.) };
             let x = (off.x + dx).clamp(-max, px(0.));
@@ -1464,7 +1464,7 @@ impl Editor {
                     }
                 }
                 if pointer_hidden {
-                    window.set_window_cursor_style(CursorStyle::None);
+                    cx.hide_cursor_until_mouse_moves();
                     let e = entity.clone();
                     window.on_mouse_event(move |_: &MouseMoveEvent, phase, _, cx| {
                         if phase == DispatchPhase::Bubble {
@@ -1663,7 +1663,7 @@ fn code_rows(cache: &HashMap<BlockId, super::text::TextLayout>) -> HashMap<Block
 
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t0 = std::time::Instant::now();
+        let t0 = web_time::Instant::now();
         // A board open over the whole window covers the note: only the board
         // renders (the note would otherwise be laid out again on every frame
         // the board draws, and its keys and pointer handlers sit under it).
@@ -2023,7 +2023,7 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                         MouseButton::Left,
                         cx.listener(move |e, _, window, cx| {
                             cx.stop_propagation();
-                            window.focus(&e.focus);
+                            window.focus(&e.focus, cx);
                             e.core.toggle_todo(id);
                             e.changed_preserving_viewport(window, cx);
                         }),

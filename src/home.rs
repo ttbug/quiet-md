@@ -166,7 +166,9 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
             let media = div().relative().flex_none().w_full().max_w_full().overflow_hidden().when_some(*width, |d, w| d.w(px(w * s)))
                 .map(|mut d| { d.style().aspect_ratio = Some(ratio); d });
             node = node.child(if let Some(path) = path {
-                media.child(picture(&path, thumb_long(width.unwrap_or(690.).min(690.), ratio) * s).absolute().inset_0().size_full().min_w_0().min_h_0().rounded(px(bs::RADIUS * s)).object_fit(ObjectFit::Contain)).into_any_element()
+                // The web demo fetches pictures on first use: an empty frame until then.
+                if fdl_core::vfs::pending(&path) { media.into_any_element() } else {
+                media.child(picture(&path, thumb_long(width.unwrap_or(690.).min(690.), ratio) * s).absolute().inset_0().size_full().min_w_0().min_h_0().rounded(px(bs::RADIUS * s)).object_fit(ObjectFit::Contain)).into_any_element() }
             } else {
                 media.rounded(px(bs::RADIUS * s)).bg(bs::code_surface()).flex().items_center().justify_center().child(icon("image-broken", 24. * s, Theme::text_disabled())).into_any_element()
             });
@@ -332,7 +334,7 @@ pub struct Home {
     sort: HomeSort,
     folders_first: bool,
     pub sort_menu: bool,
-    thumbs: RefCell<HashMap<String, (u64, Thumb, std::time::Instant)>>,
+    thumbs: RefCell<HashMap<String, (u64, Thumb, web_time::Instant)>>,
     /// Last-frame bounds of the controls the popovers hang from.
     anchors: Rc<RefCell<HashMap<&'static str, Bounds<Pixels>>>>,
     /// Folder cards and dragging into them (`home_folder.rs`).
@@ -490,7 +492,7 @@ impl Workspace {
         // If the preview contains no sibling subpages, modified + settings uniquely
         // identifies it without rebuilding the whole tree on every frame.
         if let Some((m, t, used)) = self.home.thumbs.borrow_mut().get_mut(&e.id)
-            && !t.has_subpages && *m == base_stamp { *used = std::time::Instant::now(); return t.clone(); }
+            && !t.has_subpages && *m == base_stamp { *used = web_time::Instant::now(); return t.clone(); }
         // A child-page list shows the other pages in the document's folder, as in
         // the open document (`sync_sub_pages`).
         let tree = crate::tree::Tree::new(&self.entries);
@@ -501,7 +503,7 @@ impl Workspace {
         for child in &children { (&child.id, &child.title, &child.icon).hash(&mut full_stamp); }
         let full_stamp = full_stamp.finish();
         if let Some((m, t, used)) = self.home.thumbs.borrow_mut().get_mut(&e.id)
-            && *m == full_stamp { *used = std::time::Instant::now(); return t.clone(); }
+            && *m == full_stamp { *used = web_time::Instant::now(); return t.clone(); }
         // The derived rows exist only in this preview tree and never enter the editor/store.
         fn subpages(blocks: &mut [crate::model::Block], entries: &[&Entry], budget: &mut usize) {
             for b in blocks {
@@ -535,21 +537,21 @@ impl Workspace {
             let oldest = thumbs.iter().min_by_key(|(_, (_, _, used))| *used).map(|(id, _)| id.clone());
             if let Some(id) = oldest { thumbs.remove(&id); }
         }
-        thumbs.insert(e.id.clone(), (stamp, t.clone(), std::time::Instant::now()));
+        thumbs.insert(e.id.clone(), (stamp, t.clone(), web_time::Instant::now()));
         t
     }
 
     fn open_row_menu(&mut self, id: &str, key: &str, cx: &mut Context<Self>) {
         let b = self.more_bounds.borrow().get(key).copied();
         let Some(b) = b else { return };
-        self.row_menu = Some(RowMenu { id: id.to_string(), pos: point(b.right(), b.bottom() + px(2.)), corner: Corner::TopRight, sub: false, batch: false });
+        self.row_menu = Some(RowMenu { id: id.to_string(), pos: point(b.right(), b.bottom() + px(2.)), corner: Anchor::TopRight, sub: false, batch: false });
         cx.notify();
     }
 
     pub(crate) fn home_more(&self, e: &Entry, key: String, cx: &mut Context<Self>) -> Stateful<Div> {
         let id = e.id.clone();
         let (rec, k2) = (self.more_bounds.clone(), key.clone());
-        let open = self.row_menu.as_ref().is_some_and(|m| m.id == e.id && m.pos.x > px(0.) && m.corner == Corner::TopRight);
+        let open = self.row_menu.as_ref().is_some_and(|m| m.id == e.id && m.pos.x > px(0.) && m.corner == Anchor::TopRight);
         div()
             .id(SharedString::from(key.clone()))
             .relative()
@@ -749,8 +751,8 @@ impl Workspace {
         let cols = self.home.cols();
         let sort = self.home.sort_col();
         // The title is sized at about three times a column.
-        let title_cell = || div().flex_grow().flex_shrink().flex_basis(relative(0.)).min_w(px(200.));
-        let col_cell = || div().flex_grow().flex_shrink().flex_basis(relative(0.)).max_w(px(240.)).min_w(px(120.));
+        let title_cell = || div().flex_grow_1().flex_shrink_1().flex_basis(relative(0.)).min_w(px(200.));
+        let col_cell = || div().flex_grow_1().flex_shrink_1().flex_basis(relative(0.)).max_w(px(240.)).min_w(px(120.));
         // The list: 13pt tertiary headers over a hairline; the
         // sorted column in the text colour, semibold, with its arrow.
         let mut header = div()
@@ -818,7 +820,7 @@ impl Workspace {
                 .when(check.is_none(), |d| d.on_mouse_down(
                     MouseButton::Right,
                     cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
-                        w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Corner::TopLeft, sub: false, batch: false });
+                        w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch: false });
                         cx.notify();
                     }),
                 ))
@@ -874,11 +876,13 @@ impl Workspace {
                     }))
             }).collect()
         }))
-        // The last row's own 16 plus 16 more: 32 below the cards, like the
-        // list view's 24 and clear of the window's rounded corner.
+        // The last row's own 16 plus 32 more: 48 below the cards at the end,
+        // clear of the window's rounded corner.
         // The top padding sits inside the list's clip, so a folder's papers can
-        // rise above the first row without being cut off.
-        .flex_1().min_h_0().pt(px(14.)).pb(px(16.)).track_scroll(grid_scroll.clone());
+        // rise above the first row without being cut off. (28 and 32: GPUI
+        // 0.2's uniform_list counted its padding twice, and the cards sit and
+        // end where that put them.)
+        .flex_1().min_h_0().pt(px(28.)).pb(px(32.)).track_scroll(grid_scroll);
         let scroll = grid_scroll.0.borrow().base_handle.clone();
         div().relative().flex_1().min_h_0().mt(px(-4.)).flex().flex_col()
             .on_mouse_move(cx.listener(|w, ev: &MouseMoveEvent, _, cx| w.track_home_press(ev, cx)))
@@ -954,7 +958,7 @@ impl Workspace {
                     .when(check.is_none(), |d| d.on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
-                            w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Corner::TopLeft, sub: false, batch: false });
+                            w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch: false });
                             cx.notify();
                         }),
                     ))
@@ -980,7 +984,7 @@ impl Workspace {
         if self.view != crate::app::View::Home {
             return out;
         }
-        let place = |pos: Point<Pixels>, corner: Corner, menu: Stateful<Div>| {
+        let place = |pos: Point<Pixels>, corner: Anchor, menu: Stateful<Div>| {
             deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element()
         };
         if self.home.sort_menu
@@ -1007,7 +1011,7 @@ impl Workspace {
                     .child(menu_label(crate::settings::tr("文件夹优先", "Folders first"), g.clone(), gpui::white()).flex_1())
                     .when(self.home.folders_first && self.home.sort != HomeSort::Manual, |d| d.child(menu_glyph("check", 14., g)))
                     .on_click(cx.listener(|w, _, _, cx| { if w.home.sort == HomeSort::Manual { return; } w.home.folders_first = !w.home.folders_first; w.save_home(); w.home.sort_menu = false; cx.notify(); })));
-                out.push(place(point(b.right(), b.bottom() + px(4.)), Corner::TopRight, menu));
+                out.push(place(point(b.right(), b.bottom() + px(4.)), Anchor::TopRight, menu));
             }
         out
     }

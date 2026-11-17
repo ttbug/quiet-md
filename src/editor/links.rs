@@ -335,7 +335,7 @@ impl Editor {
             .child(list);
         let vh = f32::from(window.viewport_size().height);
         let below = point(p.x, p.y + lh);
-        Some(if vh - f32::from(below.y) < 380. { at(self.rel(p), Corner::BottomLeft, el) } else { at(self.rel(below), Corner::TopLeft, el) })
+        Some(if vh - f32::from(below.y) < 380. { at(self.rel(p), Anchor::BottomLeft, el) } else { at(self.rel(below), Anchor::TopLeft, el) })
     }
 
     // ---- 反向引用 / 本文引用

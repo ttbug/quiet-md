@@ -644,7 +644,10 @@ fn span_color(spec: &TextSpec, m: &Marks) -> Hsla {
 
 use crate::editor_ui::{CJK_PUNCT_FONT, is_cjk_punct};
 
+#[cfg(not(target_family = "wasm"))]
 const QUOTE_FONT: &str = "Helvetica Neue";
+#[cfg(target_family = "wasm")]
+const QUOTE_FONT: &str = crate::theme::UI_FONT;
 
 /// Shaped in place of an equation's U+FFFC: same UTF-8 length, a glyph of
 /// the text font (so the line's ascent is unchanged).
@@ -757,13 +760,6 @@ pub fn build_runs(
         }
     }
     runs
-}
-
-impl IntoElement for RichTextElement {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
 }
 
 impl Element for RichTextElement {
@@ -1145,12 +1141,13 @@ impl Element for RichTextElement {
                 EqBody::Reminder { .. } => self.paint_reminder(eq, window, cx),
                 EqBody::Text { line, at, icon } => {
                     let top = o.y + px(at[1]) - line.ascent;
-                    let _ = line.paint(point(o.x + px(at[0]), top), line.ascent + line.descent, window, cx);
+                    let _ = line.paint(point(o.x + px(at[0]), top), line.ascent + line.descent, TextAlign::Left, None, window, cx);
                     if let Some(i) = icon {
                         let b = Bounds::new(point(o.x + px(i[0]), o.y + px(i[1])), size(px(14.), px(14.)));
                         let _ = window.paint_svg(
                             b,
                             "editor-icons/equation-error.svg".into(),
+                            None,
                             TransformationMatrix::unit(),
                             theme::c(0xff9200),
                             cx,
@@ -1221,7 +1218,7 @@ impl RichTextElement {
         let shadows = if lifted { crate::editor::button::shadow_s4() } else { crate::editor::button::shadow_s1() };
         // Content stays crisp: buttons in the text round at 5.
         let radius = px(5.);
-        window.paint_shadows(v, Corners::all(radius), &shadows);
+        window.paint_drop_shadows(v, Corners::all(radius), &shadows);
         window.paint_quad(fill(v, bg).corner_radii(radius));
         // A done to-do: `.todo-line-through .docx-button-component` draws
         // a 1.6px `--icon-n2` line at 55% behind the label; `opacity: .7`.
@@ -1234,7 +1231,7 @@ impl RichTextElement {
         let line = window.text_system().shape_line(line.text.clone(), line.font_size, &[run], None);
         let clip = Bounds::new(point(v.left() + px(*pad), v.top()), size((v.size.width - px(pad * 2.)).max(px(0.)), v.size.height));
         window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
-            let _ = line.paint(point(v.left() + px(*pad), v.top()), px(*bh), window, cx);
+            let _ = line.paint(point(v.left() + px(*pad), v.top()), px(*bh), TextAlign::Left, None, window, cx);
         });
     }
 
@@ -1253,7 +1250,7 @@ impl RichTextElement {
         let line = window.text_system().shape_line(line.text.clone(), line.font_size, &[run], None);
         let clip = Bounds::new(point(o.x + px(*text_x), v.top()), size((v.size.width - px(text_x + 2.)).max(px(0.)), v.size.height));
         window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
-            let _ = line.paint(point(o.x + px(*text_x), v.top()), v.size.height, window, cx);
+            let _ = line.paint(point(o.x + px(*text_x), v.top()), v.size.height, TextAlign::Left, None, window, cx);
         });
     }
 
@@ -1272,12 +1269,12 @@ impl RichTextElement {
         let ib = Bounds::new(point(o.x + px(icon[0]), o.y + px(icon[1])), size(px(icon[2]), px(icon[2])));
         match emoji {
             Some(e) => {
-                let _ = e.paint(point(ib.origin.x, v.top()), v.size.height, window, cx);
+                let _ = e.paint(point(ib.origin.x, v.top()), v.size.height, TextAlign::Left, None, window, cx);
             }
             None => {
                 let c = if *deleted { Theme::text_disabled() } else { Theme::primary_500() };
-                let _ = window.paint_svg(ib, "editor-icons/doc-blue.svg".into(), TransformationMatrix::unit(), c, cx);
-                let _ = window.paint_svg(ib, "editor-icons/doc-blue-lines.svg".into(), TransformationMatrix::unit(), Theme::bg_body(), cx);
+                let _ = window.paint_svg(ib, "editor-icons/doc-blue.svg".into(), None, TransformationMatrix::unit(), c, cx);
+                let _ = window.paint_svg(ib, "editor-icons/doc-blue-lines.svg".into(), None, TransformationMatrix::unit(), Theme::bg_body(), cx);
             }
         }
         let color = if *deleted { Theme::text_disabled() } else if hovered { Theme::link_hover() } else { Theme::link() };
@@ -1285,7 +1282,7 @@ impl RichTextElement {
         let line = window.text_system().shape_line(line.text.clone(), line.font_size, &[run], None);
         let clip = Bounds::new(point(o.x + px(*text_x), v.top()), size((v.size.width - px(text_x + 2.)).max(px(0.)), v.size.height));
         window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
-            let _ = line.paint(point(o.x + px(*text_x), v.top()), v.size.height, window, cx);
+            let _ = line.paint(point(o.x + px(*text_x), v.top()), v.size.height, TextAlign::Left, None, window, cx);
         });
     }
 
@@ -1299,9 +1296,9 @@ impl RichTextElement {
         let o = eq.origin;
         let ib = Bounds::new(point(o.x + px(icon[0]), o.y + px(icon[1])), size(px(icon[2]), px(icon[2])));
         let path = if *filled { "editor-icons/reminder-filled.svg" } else { "editor-icons/reminder.svg" };
-        let _ = window.paint_svg(ib, path.into(), TransformationMatrix::unit(), *icon_color, cx);
+        let _ = window.paint_svg(ib, path.into(), None, TransformationMatrix::unit(), *icon_color, cx);
         let lh = px(self.spec.line_height);
-        let _ = line.paint(point(o.x + px(*text_x), o.y), lh, window, cx);
+        let _ = line.paint(point(o.x + px(*text_x), o.y), lh, TextAlign::Left, None, window, cx);
     }
 
     /// Pointer cursor, hover and `:active` repaints for equation views.
@@ -1547,9 +1544,29 @@ mod tests {
     /// Editor text shapes CJK through CoreText's PingFang fallback, while CJK
     /// punctuation loads the PingFang SC family (`CJK_PUNCT_FONT`): both must
     /// keep drawing the right glyphs.
+    ///
+    /// CoreText's fallback copy of PingFang SC shares its PostScript name with
+    /// the PingFang SC family but not its glyph table (vendor patch
+    /// fallback-font-identity). Shapes the text in the system font before and
+    /// after loading that family, and checks every glyph against its face.
     #[test]
     fn cjk_fallback_glyphs() {
-        gpui::check_fallback_glyphs("周末规划一背景本季度目标").unwrap();
+        use gpui::{FontFallbacks, FontRun, PlatformTextSystem, px};
+        let text = "周末规划一背景本季度目标";
+        let fonts = gpui_apple::AppleTextSystem::new();
+        let mut ui = gpui::font(".SystemUIFont");
+        ui.fallbacks = Some(FontFallbacks::from_fonts(vec!["PingFang SC".into()]));
+        let font_id = fonts.font_id(&ui).unwrap();
+        for pass in 0..2 {
+            if pass == 1 { fonts.font_id(&gpui::font("PingFang SC")).unwrap(); }
+            let layout = fonts.layout_line(text, px(16.), &[FontRun { font_id, len: text.len() }]);
+            for run in &layout.runs {
+                for g in &run.glyphs {
+                    let ch = text[g.index..].chars().next().unwrap_or_default();
+                    assert_eq!(fonts.glyph_for_char(run.font_id, ch), Some(g.id), "{ch:?} drawn from the wrong face (pass {pass})");
+                }
+            }
+        }
     }
 
     #[test]

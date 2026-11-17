@@ -20,7 +20,8 @@
 
 use gpui::*;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 fn fps() -> f64 {
     std::env::var("FDL_RECORD_FPS").ok().and_then(|v| v.parse().ok()).filter(|&f: &f64| f > 0.).unwrap_or(30.)
@@ -118,7 +119,7 @@ pub fn start(window: &mut Window, cx: &mut App) {
                     cx.background_executor().timer(Duration::from_millis(16).min(end - Instant::now())).await;
                     let _ = handle.update(cx, |_, window, cx| {
                         if window.needs_draw() {
-                            window.draw(cx).clear();
+                            window.draw(cx).clear(cx);
                         }
                     });
                 }
@@ -151,7 +152,7 @@ pub fn start(window: &mut Window, cx: &mut App) {
                     let t1 = Instant::now();
                     let _ = handle.update(cx, |_, window, cx| {
                         RENDER_NS.store(0, std::sync::atomic::Ordering::Relaxed);
-                        window.draw(cx).clear();
+                        window.draw(cx).clear(cx);
                         let render = RENDER_NS.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e6;
                         samples.push(((t1 - t0).as_secs_f64() * 1e3, t1.elapsed().as_secs_f64() * 1e3, render));
                     });
@@ -215,7 +216,7 @@ pub fn start(window: &mut Window, cx: &mut App) {
                     let mut done = 0.;
                     for i in 1..=steps {
                         let to = n[2] * ease(i as f32 / steps as f32);
-                        let event = ScrollWheelEvent {
+                        let event = ScrollEvent {
                             position: point(px(n[0]), px(n[1])),
                             // Positive dy scrolls the content up (reading on).
                             delta: ScrollDelta::Pixels(point(px(0.), px(done - to))),
@@ -223,7 +224,7 @@ pub fn start(window: &mut Window, cx: &mut App) {
                         };
                         done = to;
                         let _ = handle.update(cx, |_, window, cx| {
-                            window.dispatch_event(PlatformInput::ScrollWheel(event), cx);
+                            window.dispatch_event(PlatformInput::Scroll(event), cx);
                         });
                         cx.background_executor().timer(Duration::from_millis(16)).await;
                     }
@@ -252,7 +253,7 @@ pub fn start(window: &mut Window, cx: &mut App) {
                 cx.update(|cx| {
                     let handle = cx.windows().into_iter().find_map(|w| w.downcast::<crate::app::Workspace>()).unwrap();
                     handle.update(cx, |ws, window, cx| ws.check_export_safety(window, cx)).unwrap();
-                }).unwrap();
+                });
                 continue;
             }
             // `filedrag x y a|b`, `filedrop x y`, `fileleave`: files dragged in from the Finder.
@@ -283,15 +284,15 @@ pub fn start(window: &mut Window, cx: &mut App) {
                         Some(p) => { if !ws.sidebar_drop_at(at, false, cx) { ws.file_drag_at(at, p, cx); } }
                         None => cx.notify(),
                     }).unwrap();
-                }).unwrap();
+                });
                 continue;
             }
             if cmd == "check-save-safety" {
-                cx.update(|cx| crate::app::check_save_safety(rest.trim(), cx)).unwrap();
+                cx.update(|cx| crate::app::check_save_safety(rest.trim(), cx));
                 continue;
             }
             if cmd == "check-agent-references" {
-                cx.update(|cx| crate::agent::check_references(rest.trim(), cx)).unwrap();
+                cx.update(|cx| crate::agent::check_references(rest.trim(), cx));
                 continue;
             }
             #[cfg(target_os = "macos")]
@@ -302,7 +303,7 @@ pub fn start(window: &mut Window, cx: &mut App) {
                 let _ = handle.update(cx, |_, window, cx| run(cmd, rest, window, cx));
             }
             if quit {
-                let _ = cx.update(|cx| cx.quit());
+                cx.update(|cx| cx.quit());
                 return;
             }
             // Let the frame settle before the next step.
@@ -647,7 +648,7 @@ fn run(cmd: &str, rest: &str, window: &mut Window, cx: &mut App) {
         }
         "key" => {
             for k in rest.split_whitespace() {
-                match Keystroke::parse(k) {
+                match crate::shortcuts::parse_key(k) {
                     Ok(ks) => {
                         let handled = window.dispatch_keystroke(ks, cx);
                         if std::env::var_os("FDL_TRACE").is_some() {
@@ -713,14 +714,14 @@ fn run(cmd: &str, rest: &str, window: &mut Window, cx: &mut App) {
         "wheel" => {
             let n = nums(rest);
             if n.len() >= 3 {
-                let event = ScrollWheelEvent {
+                let event = ScrollEvent {
                     position: point(px(n[0]), px(n[1])),
                     // An optional fourth number is a sideways component, as a
                     // trackpad swipe carries; positive reveals content on the right.
                     delta: ScrollDelta::Pixels(point(px(-n.get(3).copied().unwrap_or(0.)), px(-n[2]))),
                     ..Default::default()
                 };
-                window.dispatch_event(PlatformInput::ScrollWheel(event), cx);
+                window.dispatch_event(PlatformInput::Scroll(event), cx);
             }
         }
         "resize" => {
@@ -740,9 +741,13 @@ fn run(cmd: &str, rest: &str, window: &mut Window, cx: &mut App) {
 /// to the window server's copy, which also has the system-drawn traffic lights.
 fn frame(window: &mut Window, cx: &mut App) -> anyhow::Result<(usize, usize, Vec<u8>)> {
     if std::env::var_os("FDL_WINDOW_CAPTURE").is_none()
-        && let Some(image) = window.render_offscreen(cx)
+        && let Ok(image) = window.render_offscreen(cx)
     {
-        return Ok(image);
+        let (w, h) = (image.width() as usize, image.height() as usize);
+        let mut px = image.into_raw();
+        // RGBA → BGRA, as the window server's capture has it.
+        for p in px.as_chunks_mut::<4>().0 { p.swap(0, 2); }
+        return Ok((w, h, px));
     }
     grab(window)
 }

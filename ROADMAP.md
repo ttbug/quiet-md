@@ -2,10 +2,11 @@
 
 ## 当前阶段
 
-右侧 Agent 面板第一版已实现；当前合并 main 的 0.1.12 更新，保留版本历史与本机 Codex 面板。
+右侧 Agent 面板第一版已实现；当前合并 main 的 0.1.13 更新，保留本机 Codex 面板并适配新的 GPUI 平台组件。
 
 ## 已完成
 
+- 2026-11-18 合并 main（`159e3d4`）：解决 CONTRIBUTING.md 冲突，保留 AI 面板使用说明及 main 的 `vendor/zed` 维护流程；适配新版 GPUI 的焦点、滚动边界、菜单锚点和异步测试回调 API。构建说明改用 `gpui_platform/runtime_shaders`，未修改 vendor 源码。
 - 2026-11-15 合并 main（`672a1ad`）：解决 README 功能列表与窗口渲染冲突，保留版本历史、拖拽导入和 AI 面板；标题栏／搜索按实际 AI 面板宽度布局。历史预览期间，当前及其他窗口的 AI 引用仍读取当前版本的正文和标题。
 - 可折叠面板、目录选择与重启后的目录记忆；折叠保留会话。
 - AI 面板左边缘支持手工拖拽宽度，交互沿用左侧栏；默认 380，最小 300，最大 800 并随窗口限制。松开后独立保存宽度，折叠展开和重启恢复，窗口缩小时收紧显示宽度。
@@ -24,7 +25,7 @@
 
 ## 进行中
 
-- main（`672a1ad`）合并到 `feat/own`：冲突已解决并通过验证，等待创建合并提交；保留合并状态，尚未提交。
+- main（`159e3d4`）合并到 `feat/own`：冲突及 GPUI 兼容问题已解决并通过验证，等待创建合并提交；保留合并状态，尚未提交。
 
 ## 待办
 
@@ -35,11 +36,13 @@
 
 ## 阻塞
 
-- 本机仅有 Command Line Tools，缺少 `metal` 编译器，默认预编译着色器的构建检查受阻。已使用 GPUI 自带的 `gpui/runtime_shaders` 完成构建与验证，不改变默认构建配置。
+- 本机仅有 Command Line Tools，缺少 `metal` 编译器，默认预编译着色器的构建检查受阻。已使用 GPUI 平台层的 `gpui_platform/runtime_shaders` 完成构建与验证，不改变默认构建配置。
 - 指南重拍脚本的桌面捕获返回 `CGWindowListCreateImage returned null`，且系统返回的壁纸路径已失效；需要可用的系统屏幕捕获环境。面板本身已使用应用内部截图回放验证。
 
 ## 最近验证
 
+- 2026-11-18 合并验证：普通／devtools Release workspace 测试均为 847 项通过、6 项忽略，两种配置的 Clippy（`--all-targets -- -D warnings`）通过；本机命令均设置 `MACOSX_DEPLOYMENT_TARGET=13.0` 并启用 `gpui_platform/runtime_shaders`。2000 个随机种子的编辑测试、指南 XML 往返和 6 个指南资源一致性通过。完整 Agent 界面回放及模型菜单截图检查通过，覆盖对话、折叠、审批、停止、模型／目录切换、目录及宽度记忆、Markdown／代码复制和滚动、跨窗口与历史预览引用、读取失败保留输入及子进程清理。
+- 本轮冲突标记及未解决索引项已清除，本次修改的 6 个文件空白检查通过。全量暂存 diff 有 95 处上游空白提示，涉及 30 个 vendor／许可证文件；逐个核对内容哈希均与 `MERGE_HEAD` 一致，未修改第三方源码或补丁上下文。
 - 2026-11-15 合并验证：普通／devtools Release workspace 测试均为 239 项通过、5 项忽略；两种配置的 Clippy（`--all-targets -- -D warnings`）通过，均附加 `gpui/runtime_shaders`。2000 个随机种子的编辑测试、指南 XML 往返、6 个指南资源一致性及完整 AI 面板界面回放通过；回放新增本窗口和其他窗口历史预览时读取当前正文、预览标题与当前标题隔离的场景，测试配置从 Cargo.toml 读取当前版本以避免更新弹窗干扰。冲突标记、未解决索引项及 diff 空白检查通过。
 - 本机 Codex CLI 为 `0.169.0`，支持 App Server 和协议 schema 导出。
 - `cargo test --release --locked --workspace --features gpui/runtime_shaders,devtools`：210 项通过，5 项按原约定忽略，含需要单独运行的真实 Agent 测试；覆盖模型分页、过滤、恢复配置模型、失败重试、文档引用 Markdown 导出和消息边界，以及回复 Markdown 结构／样式、有序编号和逐字符流式前缀。

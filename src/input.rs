@@ -424,7 +424,7 @@ impl TextField {
     }
 
     fn on_down(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         let i = self.index_for(ev.position);
         if ev.click_count >= 2 {
             self.select_all_text(cx);
@@ -627,7 +627,7 @@ impl Render for TextField {
                     move |bounds, _, window, cx| {
                         window.handle_input(&focus, ElementInputHandler::new(bounds, entity.clone()), cx);
                         if pointer_hidden {
-                            window.set_window_cursor_style(CursorStyle::None);
+                            cx.hide_cursor_until_mouse_moves();
                             let e = entity.clone();
                             window.on_mouse_event(move |_: &MouseMoveEvent, phase, _, cx| {
                                 if phase == DispatchPhase::Bubble {

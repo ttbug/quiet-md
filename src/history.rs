@@ -113,7 +113,7 @@ impl Workspace {
             Some(name) => self.preview_version(&name, window, cx),
             None => {
                 self.preview = None;
-                window.focus(&self.focus);
+                window.focus(&self.focus, cx);
                 cx.notify();
             }
         }
@@ -348,7 +348,7 @@ impl Workspace {
             f
         });
         let focus = field.focus_handle(cx);
-        window.focus(&focus);
+        window.focus(&focus, cx);
         let subs = vec![
             cx.subscribe_in(&field, window, |w, _, ev: &TextFieldEvent, window, cx| match ev {
                 TextFieldEvent::Submit => w.finish_version_rename(true, window, cx),
@@ -373,7 +373,7 @@ impl Workspace {
         if let Some(v) = self.history.as_mut().and_then(|h| h.versions.iter_mut().find(|v| v.name == r.name)) {
             v.label = label;
         }
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         cx.notify();
     }
 

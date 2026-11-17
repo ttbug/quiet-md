@@ -107,7 +107,7 @@ impl Editor {
         self.boards.saved_once = false;
         self.menu = None;
         self.slash = None;
-        view.update(cx, |v, _| v.focus(window));
+        view.update(cx, |v, cx| v.focus(window, cx));
         self.boards.open = Some((id, view, sub));
         cx.notify();
     }
@@ -130,7 +130,7 @@ impl Editor {
         if self.board_file {
             cx.emit(EditorEvent::Leave);
         } else {
-            window.focus(&self.focus);
+            window.focus(&self.focus, cx);
         }
         cx.notify();
     }

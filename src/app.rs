@@ -2,6 +2,7 @@
 //! (see `sidebar.rs`) and the editor on the right, with the
 //! 64px top bar (breadcrumb title + save status) above the page.
 
+use fdl_core::vfs::PathExt as _;
 use crate::docinfo::DocInfo;
 use crate::docmenu::DocSub;
 use crate::editor::view::{Editor, EditorEvent};
@@ -15,7 +16,8 @@ use gpui::{prelude::FluentBuilder, *};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// Autosave waits for this pause in editing, but never longer than
 /// SAVE_MAX_DELAY after the oldest change not yet on disk.
@@ -45,6 +47,7 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::separator(),
                 MenuItem::action(tr("退出 Quiet.md", "Quit Quiet.md"), Quit),
             ],
+            disabled: false,
         },
         Menu {
             name: tr("文件", "File").into(),
@@ -57,6 +60,7 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::separator(),
                 MenuItem::action(tr("关闭窗口", "Close Window"), CloseWindow),
             ],
+            disabled: false,
         },
         // The standard Edit menu: its items act on the focused editor, and
         // macOS adds 听写 and 表情与符号 to it.
@@ -75,6 +79,7 @@ pub fn set_menus(cx: &mut App) {
                     MenuItem::os_action(tr("全选", "Select All"), k::SelectAll, OsAction::SelectAll),
                 ]
             },
+            disabled: false,
         },
         Menu {
             name: tr("窗口", "Window").into(),
@@ -84,15 +89,16 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::separator(),
                 MenuItem::action(tr("进入 / 退出全屏幕", "Enter / Exit Full Screen"), ToggleFullScreen),
             ],
+            disabled: false,
         },
     ]);
 }
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("secondary-z", crate::editor::keymap::Undo, Some("Workspace")),
-        KeyBinding::new("secondary-shift-z", crate::editor::keymap::Redo, Some("Workspace")),
-        KeyBinding::new("secondary-y", crate::editor::keymap::Redo, Some("Workspace")),
+        KeyBinding::new("cmd-z", crate::editor::keymap::Undo, Some("Workspace")),
+        KeyBinding::new("cmd-shift-z", crate::editor::keymap::Redo, Some("Workspace")),
+        KeyBinding::new("cmd-y", crate::editor::keymap::Redo, Some("Workspace")),
         KeyBinding::new("cmd-n", NewDoc, None),
         KeyBinding::new("cmd-shift-n", crate::quick_note::QuickNew, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
@@ -176,7 +182,7 @@ pub fn switch_library(root: std::path::PathBuf, cx: &mut App) {
         return;
     }
     let mine = crate::store::Store::internal_dir().join("preferences.json");
-    if !mine.exists() { let _ = std::fs::create_dir_all(mine.parent().unwrap()).and_then(|_| std::fs::copy(&prefs, &mine)); }
+    if !mine.fs_exists() { let _ = fdl_core::vfs::create_dir_all(mine.parent().unwrap()).and_then(|_| fdl_core::vfs::copy(&prefs, &mine)); }
     cx.restart();
 }
 
@@ -195,7 +201,7 @@ pub struct RowMenu {
     pub id: String,
     pub pos: Point<Pixels>,
     /// Which corner of the menu sits at `pos`.
-    pub corner: Corner,
+    pub corner: Anchor,
     /// 下载 submenu open.
     pub sub: bool,
     /// The 批量操作 menu for the checked rows.
@@ -336,7 +342,7 @@ pub struct Workspace {
     /// 回收站 rows, refreshed when the page opens or changes.
     pub trash: Vec<crate::store::TrashEntry>,
     /// A 回收站 row's menu: the page and where it opens.
-    pub trash_menu: Option<(String, Point<Pixels>, Corner)>,
+    pub trash_menu: Option<(String, Point<Pixels>, Anchor)>,
     /// The toast and when it appeared.
     pub toast: Option<(ToastKind, SharedString, Instant)>,
     toast_task: Option<Task<()>>,
@@ -373,7 +379,7 @@ pub struct Workspace {
 
 /// A macOS notification (only logged when scripted).
 fn notify_system(title: &str, body: &str) {
-    if crate::devtools::scripted() {
+    if crate::devtools::scripted() || cfg!(target_family = "wasm") {
         return eprintln!("notification: {title} / {body}");
     }
     let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
@@ -741,7 +747,7 @@ impl Workspace {
         }));
         // Opening a document puts the caret in it, unless the user is typing a search.
         if !self.search_open {
-            editor.read(cx).focus(window);
+            { let f = editor.read(cx).focus.clone(); window.focus(&f, cx); }
         }
         // A 画板 opens straight into its board, over the whole window.
         editor.update(cx, |e, cx| e.open_board_file(window, cx));
@@ -975,7 +981,7 @@ impl Workspace {
             f
         });
         let focus = field.focus_handle(cx);
-        window.focus(&focus);
+        window.focus(&focus, cx);
         let subs = vec![
             cx.subscribe_in(&field, window, |w, _, ev: &TextFieldEvent, window, cx| match ev {
                 TextFieldEvent::Submit => w.finish_rename(true, window, cx),
@@ -1021,7 +1027,7 @@ impl Workspace {
         }
         if refocus
             && let Some(ed) = &self.editor {
-                ed.read(cx).focus(window);
+                { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); }
             }
         self.sync_sub_pages(cx);
         cx.notify();
@@ -1571,7 +1577,7 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Clicks no longer take focus from the editor (see the root's mouse
         // down), so leaving the document hands it back to the window's keys.
-        if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus); }
+        if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus, cx); }
         crate::editor::image::frame_drawn(window, cx);
         // Full screen: the sidebar is solid (`Theme::window`) and the native glass stays hidden.
         crate::theme::set_fullscreen(window.is_fullscreen());
@@ -1583,7 +1589,8 @@ impl Render for Workspace {
             self.min_w = min_w;
             window.set_window_min_size(size(px(min_w), px(480.)));
             let vs = window.viewport_size();
-            if f32::from(vs.width) < min_w - 0.5 && !window.is_fullscreen() { window.resize(size(px(min_w), vs.height)); }
+            // The web build's window is the page: never resized from here.
+            if f32::from(vs.width) < min_w - 0.5 && !window.is_fullscreen() && !cfg!(target_family = "wasm") { window.resize(size(px(min_w), vs.height)); }
         }
         let sidebar = if self.sidebar_open { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
         let row_menu = self.render_row_menu(window, cx);
@@ -1740,7 +1747,7 @@ impl Render for Workspace {
             }))
             // Esc leaves 批量操作 (closing its menu or confirmation first), even from the editor.
             .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, _, cx| {
-                let undo = ev.keystroke.modifiers.secondary() && matches!(ev.keystroke.key.as_str(), "z" | "y");
+                let undo = ev.keystroke.modifiers.secondary(cx) && matches!(ev.keystroke.key.as_str(), "z" | "y");
                 if w.store.file_task_busy() || (w.file_history.busy && !undo) { cx.stop_propagation(); return; }
                 // 版本历史: the editor keeps the caret, so Esc has to be taken
                 // before it reaches the read-only key handler.
@@ -1825,7 +1832,7 @@ impl Workspace {
             w.onboarding = None;
             // The language may have changed on the first page.
             crate::settings::refresh_all(w, cx);
-            window.focus(&w.focus);
+            window.focus(&w.focus, cx);
             cx.notify();
         }).detach();
         self.onboarding = Some(o);
@@ -1858,7 +1865,7 @@ pub(crate) fn check_save_safety(phase: &str, cx: &mut App) {
                 ws.unsaved = true;
             }).unwrap();
             if name != "C" {
-                std::fs::write(store.file_path(&id).unwrap(), crate::docxml::serialize(&doc(&format!("disk-{name}")))).unwrap();
+                fdl_core::vfs::write(store.file_path(&id).unwrap(), crate::docxml::serialize(&doc(&format!("disk-{name}")))).unwrap();
             }
             windows.push((handle, id));
         }

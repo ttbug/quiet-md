@@ -127,11 +127,11 @@ pub fn capture_layer(me: &BoardView, cx: &mut Context<BoardView>) -> Option<Div>
             if phase == DispatchPhase::Bubble { let _ = view.update(cx, |me, cx| moved(me, ev, window, cx)); }
         });
     }).absolute().size_full();
-    Some(div().absolute().inset_0().occlude().cursor(cursor(me)).on_scroll_wheel(cx.listener(wheel)).child(listen))
+    Some(div().absolute().inset_0().occlude().cursor(cursor(me)).on_scroll(cx.listener(wheel)).child(listen))
 }
 
 pub fn listeners(d: Stateful<Div>, cx: &mut Context<BoardView>) -> Stateful<Div> {
-    d.on_scroll_wheel(cx.listener(wheel))
+    d.on_scroll(cx.listener(wheel))
         .on_mouse_down(MouseButton::Left, cx.listener(down))
         .on_mouse_down(MouseButton::Middle, cx.listener(down))
         .on_mouse_down(MouseButton::Right, cx.listener(right_down))
@@ -162,7 +162,7 @@ pub fn listeners(d: Stateful<Div>, cx: &mut Context<BoardView>) -> Stateful<Div>
 }
 
 /// `handleWheel`: GPUI's deltas point the other way from the DOM's.
-fn wheel(me: &mut BoardView, ev: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<BoardView>) {
+fn wheel(me: &mut BoardView, ev: &ScrollEvent, _: &mut Window, cx: &mut Context<BoardView>) {
     let (dx, dy) = match ev.delta {
         ScrollDelta::Pixels(p) => (-f32::from(p.x) as f64, -f32::from(p.y) as f64),
         ScrollDelta::Lines(l) => (-l.x as f64 * 40., -l.y as f64 * 40.),
@@ -184,7 +184,7 @@ fn wheel(me: &mut BoardView, ev: &ScrollWheelEvent, _: &mut Window, cx: &mut Con
 }
 
 fn down(me: &mut BoardView, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<BoardView>) {
-    me.focus(window);
+    me.focus(window, cx);
     me.pointer = ev.position;
     me.menu = None;
     me.help = false;
@@ -227,7 +227,7 @@ fn down(me: &mut BoardView, ev: &MouseDownEvent, window: &mut Window, cx: &mut C
 /// `handleCanvasContextMenu`: selects what's under the pointer (unless it's
 /// part of the selection) and opens the menu.
 fn right_down(me: &mut BoardView, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<BoardView>) {
-    me.focus(window);
+    me.focus(window, cx);
     me.finish_pending(window, cx);
     let p = me.scene_point(ev.position);
     let hit = me.element_at(p, false, false).map(|e| e.id.clone());

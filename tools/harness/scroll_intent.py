@@ -12,6 +12,7 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 
+from hlib import doc_file, docs
 from PIL import Image, ImageChops
 
 here = Path(__file__).resolve().parent
@@ -61,14 +62,15 @@ def stable(folder, frames=("after",)):
 
 
 def saved_matches(folder, expected):
-    saved = ET.fromstring("<doc>" + (folder / "lib/docs" / f"{doc_id}.xml").read_text() + "</doc>")
+    saved = ET.fromstring("<doc>" + doc_file(folder / "lib").read_text() + "</doc>")
     canonical = lambda tree: ET.canonicalize(ET.tostring(tree, encoding="unicode"), strip_text=True)
     assert canonical(saved) == canonical(expected), f"Unexpected document/selection change; see {folder}"
 
 
 def setup(selection=False):
     return ("key cmd-f\ntype CARET_ANCHOR\nkey escape\n" + ("" if selection else "key left\n")
-            + "wheel 1100 500 700\nwait 500\nmove 1150 820\nwait 200\nshot before\n")
+            # The wheel waits for the find bar to close; earlier it is sometimes dropped.
+            + "wait 500\nwheel 1100 500 700\nwait 500\nmove 1150 820\nwait 200\nshot before\n")
 
 
 save = "wait 700\nkey cmd-s\nwait 300\n"
@@ -128,7 +130,7 @@ def grid_resize(name):
     folder = run_script(name, source, steps)
     stable(folder, ('during', 'after'))
     expected.find('p').text = marker + "CARET_ANCHOR"
-    saved = ET.fromstring("<doc>" + (folder / "lib/docs" / f"{doc_id}.xml").read_text() + "</doc>")
+    saved = ET.fromstring("<doc>" + doc_file(folder / "lib").read_text() + "</doc>")
     ratios = [float(c.get('width-ratio')) for c in saved.findall('.//column')]
     assert len(ratios) == 2 and ratios[0] > .5 and abs(sum(ratios) - 1) < .001, f"Resize missed; see {folder}"
     for col, ratio in zip(expected.findall('.//column'), saved.findall('.//column')):
