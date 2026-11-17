@@ -753,6 +753,9 @@ pub enum BlockKind {
     Countdown(Countdown),
     /// 视频或文件 (`<source>`, or `<figure view-type><source/></figure>`).
     File(FileBlock),
+    /// 画板 (`<whiteboard type="excalidraw">`): an Excalidraw scene, shared
+    /// between undo snapshots until it changes.
+    Board(std::sync::Arc<crate::whiteboard::Board>),
     /// Any element we don't model; kept verbatim for round-tripping.
     Raw { tag: String, xml: String },
 }
@@ -1007,6 +1010,15 @@ impl Document {
                     out.push_str(&b.text.plain_text());
                 }
                 walk(&b.children, out);
+                if let BlockKind::Board(bd) = &b.kind {
+                    let t = bd.plain_text();
+                    if !t.is_empty() {
+                        if !out.is_empty() {
+                            out.push('\n');
+                        }
+                        out.push_str(&t);
+                    }
+                }
                 if let BlockKind::Table(t) = &b.kind {
                     for row in &t.rows {
                         for cell in row {
