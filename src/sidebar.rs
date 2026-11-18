@@ -493,7 +493,7 @@ impl Workspace {
     fn row_base(&self, e: &Entry, key: &str, cx: &mut Context<Self>) -> Stateful<Div> {
         let id = e.id.clone();
         let id2 = e.id.clone();
-        let in_lib = key == "doc";
+        let (in_lib, pinned) = (key == "doc", key == "pinned");
         div()
             .id(SharedString::from(format!("{key}-{}", e.id)))
             .group("doc-row")
@@ -502,7 +502,7 @@ impl Workspace {
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
+                cx.listener(move |w, ev: &MouseDownEvent, window, cx| {
                     if w.rename.as_ref().is_some_and(|r| r.id == id) {
                         return;
                     }
@@ -514,6 +514,8 @@ impl Workspace {
                         return;
                     }
                     if in_lib { w.arm_folder_drag(&id, ev.position, cx); }
+                    // A 置顶 row opens on press, as it did before 本机文件 rows moved to click (#272).
+                    else if pinned { w.open(&id, window, cx); }
                 }),
             )
             // A 本机文件 row opens on click, and can be carried up into the tree to import it.

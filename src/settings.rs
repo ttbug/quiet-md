@@ -183,6 +183,7 @@ pub fn load() {
 fn apply(p: Preferences) {
     FEISHU.store(p.feishu, Ordering::Relaxed);
     LANG.store(p.lang() as u8, Ordering::Relaxed);
+    crate::model::set_untitled(translate(crate::model::UNTITLED, p.lang()));
     MOTION_HIGH.store(p.motion == "high", Ordering::Relaxed);
     // Before the themes are read (startup) the base comes from `feishu`.
     themes::select(&p.theme_id());
@@ -1576,10 +1577,7 @@ macro_rules! localized_format {
 }
 
 /// User titles are content, not translation keys.
-pub fn display_title(title: &str) -> String {
-    let title = title.trim();
-    if title.is_empty() { text(crate::model::UNTITLED).to_string() } else { title.to_string() }
-}
+pub fn display_title(title: &str) -> String { crate::model::display_title(title) }
 
 /// Core diagnostics stay independent of UI language. Only known message templates
 /// are translated here; captured paths, document IDs and OS errors are preserved.
