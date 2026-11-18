@@ -1454,6 +1454,7 @@ impl Workspace {
             ];
         }
         let record_more = self.more_btn_bounds.clone();
+        let doc_open = self.doc_menu;
         div()
             .id("top-bar").relative()
             .h(px(HEADER_H))
@@ -1546,8 +1547,11 @@ impl Workspace {
                                 .when(self.doc_menu, |d| d.bg(Theme::fill_hover()))
                                 .when(!self.doc_menu, |d| d.tip(crate::settings::tr("更多", "More"), None))
                                 .child(canvas(move |b, _, _| record_more.set(Some(b)), |_, _, _, _| {}).absolute().inset_0())
-                                .on_click(cx.listener(|w, _, _, cx| {
-                                    w.doc_menu = !w.doc_menu;
+                                // Toggle on mouse-down from the render-time state: the menu's outside-press
+                                // handler has already cleared `doc_menu` by the time a click would fire.
+                                .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| {
+                                    cx.stop_propagation();
+                                    w.doc_menu = !doc_open;
                                     w.doc_sub = None;
                                     cx.notify();
                                 })),

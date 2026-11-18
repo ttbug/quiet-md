@@ -563,6 +563,9 @@ impl Workspace {
                 MouseButton::Left,
                 cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
+                    // The row menu's outside-click handler has already closed it on this press, so
+                    // a press on its own button closes it rather than reopening it (see `open`).
+                    if open { w.row_menu = None; cx.notify(); return; }
                     // Hang the menu from the button; a negative x marks "from the button".
                     let b = lookup.borrow().get(&slot2).copied();
                     let pos = b.map_or(ev.position, |b| point(-b.left() - px(1.), b.top()));

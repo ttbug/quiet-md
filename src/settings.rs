@@ -997,8 +997,7 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// 更改…: a folder picked as the next library; `library_in` decides
-    /// whether it is used as it is or gets a Quiet.md folder inside.
+    /// 更改…: a folder picked as the next library, used as it is (see `library_in`).
     fn pick_library(&mut self, cx: &mut Context<Self>) {
         let picked = crate::devtools::take_pick();
         let prompt = picked.is_none().then(|| cx.prompt_for_paths(PathPromptOptions { files: false, directories: true, multiple: false, prompt: Some(tr("选择", "Choose").into()), extensions: None }));
