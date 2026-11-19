@@ -262,6 +262,7 @@ pub struct Rename {
 }
 
 pub struct Workspace {
+    window_id: WindowId,
     pub agent: Entity<crate::agent::Panel>,
     pub quick_note: bool,
     pub shortcut_recording: Option<String>,
@@ -549,6 +550,7 @@ impl Workspace {
         let sidebar_width = settings.sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
         let history_limit = settings.history_limit();
         let mut ws = Workspace {
+            window_id: window.window_handle().window_id(),
             agent,
             quick_note: quick,
             shortcut_recording: None,
@@ -1155,8 +1157,9 @@ impl Workspace {
             return
         }
         // A newly opened sibling can be clean while its source view still has a pending edit.
-        if cx.windows().into_iter().filter_map(|h| h.downcast::<Workspace>()?.entity(cx).ok())
-            .filter(|p| p.entity_id() != cx.entity_id())
+        // Activation callbacks already borrow this window; exclude it before reading its entity.
+        if cx.windows().into_iter().filter(|h| h.window_id() != self.window_id)
+            .filter_map(|h| h.downcast::<Workspace>()?.entity(cx).ok())
             .any(|p| { let w = p.read(cx); w.current.as_ref() == Some(&id) && w.unsaved }) { return }
         if let Ok(Some(doc)) = self.store.with(|s| s.refresh_markdown(&id)) {
             self.adopt_markdown(&id, doc, cx);
@@ -1183,9 +1186,9 @@ impl Workspace {
             cx.notify();
         };
         install(self, cx);
-        for handle in cx.windows().into_iter().filter_map(|h| h.downcast::<Workspace>()) {
+        for handle in cx.windows().into_iter().filter(|h| h.window_id() != self.window_id).filter_map(|h| h.downcast::<Workspace>()) {
             let Ok(peer) = handle.entity(cx) else { continue };
-            if peer.entity_id() != cx.entity_id() && peer.read(cx).current.as_deref() == Some(id) {
+            if peer.read(cx).current.as_deref() == Some(id) {
                 peer.update(cx, install);
             }
         }
@@ -1221,9 +1224,8 @@ impl Workspace {
                 // A mirrored edit was saved by this window. A sibling must not
                 // later write it a second time over a newer external edit.
                 if meta.markdown {
-                    for handle in cx.windows().into_iter().filter_map(|h| h.downcast::<Workspace>()) {
+                    for handle in cx.windows().into_iter().filter(|h| h.window_id() != self.window_id).filter_map(|h| h.downcast::<Workspace>()) {
                         let Ok(peer) = handle.entity(cx) else { continue };
-                        if peer.entity_id() == cx.entity_id() { continue }
                         let w = peer.read(cx);
                         if w.unsaved && w.current.as_ref() == Some(&id) && w.preview.is_none()
                             && w.editor.as_ref().is_some_and(|e| e.read(cx).core.doc == ed.read(cx).core.doc) {
@@ -1944,6 +1946,46 @@ impl Workspace {
 }
 
 /// Fault injection against real window/save code, available only in the harness build.
+#[cfg(feature = "devtools")]
+pub(crate) fn check_markdown_refresh(cx: &mut App) {
+    use crate::model::{Document, RichText};
+    let doc = |body: &str| Document { title: RichText::plain("Markdown refresh"), blocks: crate::paste::markdown_to_blocks(body, Default::default()), ..Default::default() };
+    let store = cx.global::<SharedStore>().clone();
+    let id = store.with(|s| s.create_markdown(&doc("initial"), "")).unwrap();
+    let mut windows = vec![];
+    for _ in 0..2 {
+        let id = id.clone();
+        windows.push(cx.open_window(WindowOptions { focus: false, ..Default::default() }, |window, cx| {
+            cx.new(|cx| Workspace::new_document_window(Some(id), window, cx))
+        }).unwrap());
+    }
+    // The window is on GPUI's stack here, as in its activation callback.
+    windows[0].update(cx, |ws, _, cx| ws.refresh_markdown(cx)).unwrap();
+    let path = store.file_path(&id).unwrap();
+    fdl_core::vfs::write(&path, "external\n").unwrap();
+    windows[0].update(cx, |ws, _, cx| ws.refresh_markdown(cx)).unwrap();
+    for handle in &windows {
+        handle.update(cx, |ws, _, cx| assert!(ws.editor.as_ref().unwrap().read(cx).core.doc.plain_text().contains("external"))).unwrap();
+    }
+    let pending = crate::editor::core::Core::new(doc("pending"));
+    windows[1].update(cx, |ws, _, cx| {
+        ws.editor.as_ref().unwrap().update(cx, |ed, cx| ed.receive_markdown(&pending, cx));
+        ws.unsaved = true;
+    }).unwrap();
+    fdl_core::vfs::write(&path, "new external\n").unwrap();
+    windows[0].update(cx, |ws, _, cx| {
+        ws.refresh_markdown(cx);
+        assert!(!ws.editor.as_ref().unwrap().read(cx).core.doc.plain_text().contains("new external"));
+        ws.editor.as_ref().unwrap().update(cx, |ed, cx| ed.receive_markdown(&pending, cx));
+        ws.unsaved = true;
+        assert!(ws.flush(cx));
+    }).unwrap();
+    windows[1].update(cx, |ws, _, _| assert!(!ws.unsaved)).unwrap();
+    assert!(fdl_core::vfs::read_to_string(&path).unwrap().contains("pending"));
+    for handle in windows { handle.update(cx, |_, window, _| window.remove_window()).unwrap(); }
+    eprintln!("markdown-refresh: PASS; borrowed window, external reload, dirty sibling and mirrored save");
+}
+
 #[cfg(feature = "devtools")]
 #[derive(Clone)]
 struct SaveSafetyQa(Vec<(WindowHandle<Workspace>, String)>);

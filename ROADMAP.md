@@ -6,6 +6,8 @@
 
 ## 已完成
 
+- 2026-11-19 修复恢复 Markdown 文档后窗口激活闪退：`Workspace` 保存所属窗口 ID，刷新、接收外部版本及保存后的兄弟窗口同步均在读取实体前排除当前窗口，避免 GPUI 的窗口重入 panic。新增 `tools/harness/markdown_refresh.py`，不激活窗口，仅操作临时文档库。
+- 2026-11-19 按当前源码 `11fcd6e` 重新构建 0.1.13 本地 Apple Silicon DMG：`dist-release.local-wrf3kk5d/quiet-md-0.1.13-release-macos-arm64.dmg`。使用 dist 优化及 `gpui_platform/runtime_shaders`，关闭 `devtools`；临时签名、未公证，未公开发布，保留旧包、已安装应用和真实文档库。
 - 2026-11-18 合并 main（`159e3d4`）：解决 CONTRIBUTING.md 冲突，保留 AI 面板使用说明及 main 的 `vendor/zed` 维护流程；适配新版 GPUI 的焦点、滚动边界、菜单锚点和异步测试回调 API。构建说明改用 `gpui_platform/runtime_shaders`，未修改 vendor 源码。
 - 2026-11-15 合并 main（`672a1ad`）：解决 README 功能列表与窗口渲染冲突，保留版本历史、拖拽导入和 AI 面板；标题栏／搜索按实际 AI 面板宽度布局。历史预览期间，当前及其他窗口的 AI 引用仍读取当前版本的正文和标题。
 - 可折叠面板、目录选择与重启后的目录记忆；折叠保留会话。
@@ -41,6 +43,9 @@
 
 ## 最近验证
 
+- 2026-11-19 修复版 DMG：`dist-release.local-prz7w6rp/quiet-md-0.1.13-release-macos-arm64.dmg`，30,586,936 字节，SHA-256 `15487d7b044af9ff8b2334f039f8169506516d13fc0aff51b4df760462ccdb3e`。dist 构建、镜像 CRC、只读挂载、签名、arm64、包内二进制及 dSYM UUID 匹配通过，验证挂载已卸载。成品在临时库启动 15 秒无 panic，核对本机打开记录确认实际打开已有 `Startup.md`，随后仅结束本次测试进程。临时签名、未公证，关闭 `devtools`，未公开发布或替换已安装应用；验证文件与调试符号保留在产物目录。
+- 2026-11-19 Markdown 闪退回归：修复前在窗口回调栈内刷新稳定复现 `attempted to read a window that is already on the stack`；修复后，同一回归覆盖回调内刷新、外部版本同步到两个窗口、未保存内容保护及镜像保存状态，全部通过。Release workspace 测试 852 项通过、6 项忽略，普通／devtools 两种 Release Clippy（`--all-targets -- -D warnings`）、指南 XML 往返、指南资源一致性及 `git diff --check` 通过；本机均使用 `gpui_platform/runtime_shaders`，未修改文档内核或用户数据。
+- 2026-11-19 本地 DMG 重建：dist 构建、Release workspace 测试（852 项通过、6 项忽略）、普通／devtools 两种 Release Clippy（`--all-targets -- -D warnings`）、指南 XML 原样往返及 6 个指南资源一致性通过。恢复文件测试首轮受沙箱权限阻止，沙箱外完整重跑通过。DMG CRC、只读挂载、Applications 入口、版本、签名、thin arm64、包内二进制一致性及 dSYM UUID 检查通过，验证挂载已卸载。新包在临时文档库启动 15 秒仍存活、无 panic，随后仅结束本次测试进程；不代表已定位或修复此前报告的闪退。DMG 为 30,586,334 字节，SHA-256 `147a17ca29cb4cf9b527ac4a6677e6ad29898ca013b0f07b980e0b9e0a6d4865`，验证记录和调试符号位于产物目录。
 - 2026-11-18 合并验证：普通／devtools Release workspace 测试均为 847 项通过、6 项忽略，两种配置的 Clippy（`--all-targets -- -D warnings`）通过；本机命令均设置 `MACOSX_DEPLOYMENT_TARGET=13.0` 并启用 `gpui_platform/runtime_shaders`。2000 个随机种子的编辑测试、指南 XML 往返和 6 个指南资源一致性通过。完整 Agent 界面回放及模型菜单截图检查通过，覆盖对话、折叠、审批、停止、模型／目录切换、目录及宽度记忆、Markdown／代码复制和滚动、跨窗口与历史预览引用、读取失败保留输入及子进程清理。
 - 本轮冲突标记及未解决索引项已清除，本次修改的 6 个文件空白检查通过。全量暂存 diff 有 95 处上游空白提示，涉及 30 个 vendor／许可证文件；逐个核对内容哈希均与 `MERGE_HEAD` 一致，未修改第三方源码或补丁上下文。
 - 2026-11-15 合并验证：普通／devtools Release workspace 测试均为 239 项通过、5 项忽略；两种配置的 Clippy（`--all-targets -- -D warnings`）通过，均附加 `gpui/runtime_shaders`。2000 个随机种子的编辑测试、指南 XML 往返、6 个指南资源一致性及完整 AI 面板界面回放通过；回放新增本窗口和其他窗口历史预览时读取当前正文、预览标题与当前标题隔离的场景，测试配置从 Cargo.toml 读取当前版本以避免更新弹窗干扰。冲突标记、未解决索引项及 diff 空白检查通过。

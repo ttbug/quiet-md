@@ -291,6 +291,10 @@ pub fn start(window: &mut Window, cx: &mut App) {
                 cx.update(|cx| crate::app::check_save_safety(rest.trim(), cx));
                 continue;
             }
+            if cmd == "check-markdown-refresh" {
+                cx.update(crate::app::check_markdown_refresh);
+                continue;
+            }
             if cmd == "check-agent-references" {
                 cx.update(|cx| crate::agent::check_references(rest.trim(), cx));
                 continue;
