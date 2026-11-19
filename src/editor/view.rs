@@ -28,6 +28,7 @@ pub enum EditorEvent {
     Catalogue(bool),
     /// A 子页面列表 item or an @文档 link was clicked.
     OpenDoc(String),
+    OpenRelative(String),
     /// A 反向引用 line: that document, scrolled to its nth block.
     OpenDocAt(String, usize),
     /// The reference list's close button.
@@ -236,6 +237,9 @@ pub struct Editor {
     pub(super) img: super::image::ImageUi,
     pub(super) cd: super::countdown::CdUi,
     pub(super) boards: super::board::BoardUi,
+    pub(super) datatables: super::datatable::DataTablesUi,
+    /// A standalone 数据表 (`.sqlite`): its table fills the pane.
+    pub table_file: bool,
     pub(super) btn: super::button::BtnUi,
     pub(super) rm: super::reminder::RmUi,
     pub(super) file: super::file::FileUi,
@@ -483,6 +487,8 @@ impl Editor {
             restore_top: None,
             cd,
             boards: Default::default(),
+            datatables: Default::default(),
+            table_file: false,
             btn,
             rm,
             _subs: subs,
@@ -983,6 +989,14 @@ impl Editor {
                 self.core.sel = Selection::caret(Pos::new(p, 0));
                 self.changed(window, cx);
                 return self.open_board(nid, window, cx);
+            }
+            // an empty 数据表 in a file of its own, shown in the page
+            SlashKind::DataTable => {
+                let Some(src) = new_table_file() else { return };
+                let nid = self.core.insert_block(Block::new(BlockKind::DataTable(crate::table::TableRef::new(src)), RichText::default()));
+                let p = self.core.ensure_paragraph_after(nid);
+                self.core.sel = Selection::caret(Pos::new(p, 0));
+                return self.changed(window, cx);
             }
             SlashKind::Table => {
                 let (rows, cols) = size.unwrap_or((3, 3));
@@ -2887,7 +2901,7 @@ fn guard<A: Action, F: Fn(&mut Editor, &A, &mut Window, &mut Context<Editor>) + 
     f: F,
 ) -> impl Fn(&A, &mut Window, &mut App) + 'static {
     cx.listener(move |e, a: &A, w, cx| {
-        if e.cd.dialog.is_none() {
+        if e.cd.dialog.is_none() && !e.tables_focused(w, cx) {
             f(e, a, w, cx)
         } else {
             cx.propagate()
@@ -2896,3 +2910,14 @@ fn guard<A: Action, F: Fn(&mut Editor, &A, &mut Window, &mut Context<Editor>) + 
 }
 
 impl Editor { pub(crate) fn refresh_theme(&mut self) { self.items_key = None; self.menu = None; } }
+
+/// A blank `.sqlite` in the library's assets for a new 数据表 block; its path relative to the library.
+#[cfg(not(target_family = "wasm"))]
+fn new_table_file() -> Option<String> {
+    let name = format!("{}.sqlite", uuid::Uuid::new_v4());
+    let path = crate::store::Store::assets_dir().join(&name);
+    crate::table::sqlite::create(&path, &crate::table::Base::blank(crate::table::field::now())).ok()?;
+    path.strip_prefix(crate::store::Store::root_dir()).ok().map(|r| r.to_string_lossy().replace('\\', "/"))
+}
+#[cfg(target_family = "wasm")]
+fn new_table_file() -> Option<String> { None }

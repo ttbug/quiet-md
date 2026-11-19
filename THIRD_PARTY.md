@@ -1,16 +1,16 @@
-# 第三方组件与素材
+# Third-party components and assets
 
-Quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随它一起分发的第三方代码和素材。
+Quiet.md is distributed under the [MIT license](LICENSE). The following third-party code and assets ship with the application.
 
-## Rust 依赖
+## Rust dependencies
 
-由 `cargo metadata` 生成，共 764 个包。许可逐项列于下表，其中也包含 MPL-2.0；本表记录依赖声明，不替代各组件的许可文本。
+This table lists 772 packages from `cargo metadata` and their declared licenses, including MPL-2.0. Consult each component's license text for its terms.
 
-要重新生成这张表：`scripts/licences.sh`（从 `cargo metadata` 取全部依赖）。
+Run `scripts/licences.sh` to regenerate the table from the full dependency list.
 
-GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`collections`、`refineable`、`derive_refineable`、`sum_tree`、`scheduler`、`http_client`、`ztracing`、`ztracing_macro`）来自 [Zed](https://github.com/zed-industries/zed)，以 Apache-2.0 发布。它们按 Zed 的一个固定提交复制在 `vendor/zed/crates`，许可全文在 `vendor/zed/LICENSE-APACHE`；本项目的改动是 `vendor/zed/patches` 里的补丁，改动处带 `quiet.md:` 注释，说明见 [vendor/PATCHES.md](vendor/PATCHES.md)。
+GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive_refineable`, `sum_tree`, `scheduler`, `http_client`, `ztracing` and `ztracing_macro` packages at versions 0.1.0 / 0.2.2 in the table) come from [Zed](https://github.com/zed-industries/zed) under Apache-2.0. The pinned snapshot lives in `vendor/zed/crates`, with the full license in `vendor/zed/LICENSE-APACHE`. Local patches in `vendor/zed/patches` mark changes with `quiet.md:` comments. See [Vendored patches](vendor/PATCHES.md).
 
-| 包 | 版本 | 许可 |
+| Package | Version | License |
 |---|---|---|
 | accesskit | 0.24.1 | MIT OR Apache-2.0 |
 | accesskit_atspi_common | 0.19.1 | MIT OR Apache-2.0 |
@@ -158,6 +158,8 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | event-listener | 5.4.2 | Apache-2.0 OR MIT |
 | event-listener-strategy | 0.5.4 | Apache-2.0 OR MIT |
 | exr | 1.74.2 | BSD-3-Clause |
+| fallible-iterator | 0.3.0 | MIT/Apache-2.0 |
+| fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 |
 | fastrand | 2.5.0 | Apache-2.0 OR MIT |
 | fax | 0.2.7 | MIT |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 |
@@ -225,6 +227,7 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | hashbrown | 0.14.5 | MIT OR Apache-2.0 |
 | hashbrown | 0.16.1 | MIT OR Apache-2.0 |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 |
+| hashlink | 0.12.2 | MIT OR Apache-2.0 |
 | heapless | 0.9.3 | MIT OR Apache-2.0 |
 | heck | 0.4.1 | MIT OR Apache-2.0 |
 | heck | 0.5.0 | MIT OR Apache-2.0 |
@@ -267,6 +270,9 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | is-wsl | 0.4.0 | MIT |
 | itertools | 0.14.0 | MIT OR Apache-2.0 |
 | itoa | 1.0.18 | MIT OR Apache-2.0 |
+| jiff | 1.0.1 | Unlicense OR MIT |
+| jiff-core | 1.0.1 | Unlicense OR MIT |
+| jiff-static | 1.0.1 | Unlicense OR MIT |
 | jni-sys | 0.3.1 | MIT OR Apache-2.0 |
 | jni-sys | 0.4.1 | MIT OR Apache-2.0 |
 | jni-sys-macros | 0.4.1 | MIT OR Apache-2.0 |
@@ -285,6 +291,7 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | libloading | 0.8.9 | ISC |
 | libm | 0.2.16 | MIT |
 | libredox | 0.1.25 | MIT |
+| libsqlite3-sys | 0.40.0 | MIT |
 | linebender_resource_handle | 0.1.1 | Apache-2.0 OR MIT |
 | linux-raw-sys | 0.4.15 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
@@ -456,6 +463,8 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | rgb | 0.8.53 | MIT |
 | roxmltree | 0.20.0 | MIT OR Apache-2.0 |
 | roxmltree | 0.21.2 | MIT OR Apache-2.0 |
+| rsqlite-vfs | 0.2.0 | MIT |
+| rusqlite | 0.43.0 | MIT |
 | rustc-demangle | 0.1.28 | MIT/Apache-2.0 |
 | rustc-hash | 1.1.0 | Apache-2.0/MIT |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
@@ -505,6 +514,7 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | spin | 0.9.9 | MIT |
 | spin | 0.10.1 | MIT |
 | spirv | 0.4.0+sdk-1.4.341.0 | Apache-2.0 |
+| sqlite-wasm-rs | 0.6.3 | MIT |
 | stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 |
 | static_assertions | 1.1.0 | MIT OR Apache-2.0 |
 | strict-num | 0.1.1 | MIT |
@@ -555,6 +565,7 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | tracing | 0.1.44 | MIT |
 | tracing-attributes | 0.1.31 | MIT |
 | tracing-core | 0.1.36 | MIT |
+| trash | 5.4.0 | MIT |
 | ttf-parser | 0.25.1 | MIT OR Apache-2.0 |
 | typenum | 1.20.1 | MIT OR Apache-2.0 |
 | uds_windows | 1.2.1 | MIT |
@@ -570,6 +581,7 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | unicode-vo | 0.1.0 | MIT/Apache-2.0 |
 | unicode-width | 0.2.2 | MIT OR Apache-2.0 |
 | url | 2.5.8 | MIT OR Apache-2.0 |
+| urlencoding | 2.1.3 | MIT |
 | usvg | 0.46.0 | Apache-2.0 OR MIT |
 | utf-8 | 0.7.6 | MIT OR Apache-2.0 |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT |
@@ -578,6 +590,7 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | value-bag | 1.14.1 | Apache-2.0 OR MIT |
 | value-bag-serde1 | 1.14.1 | Apache-2.0 OR MIT |
 | value-bag-sval2 | 1.14.1 | Apache-2.0 OR MIT |
+| vcpkg | 0.2.15 | MIT/Apache-2.0 |
 | vello_common | 0.3.0 | Apache-2.0 OR MIT |
 | vello_cpu | 0.3.0 | Apache-2.0 OR MIT |
 | version_check | 0.9.5 | MIT/Apache-2.0 |
@@ -726,23 +739,23 @@ GPUI 和它依赖的 Zed crate（表中版本为 0.1.0 / 0.2.2 的 `gpui*`、`co
 | zvariant_derive | 5.15.1 | MIT |
 | zvariant_utils | 4.2.0 | MIT |
 
-## 移植的源码
+## Ported source
 
-画板（`crates/core/src/board/`、`src/board/`）是下面这些项目源码的 Rust 移植，每个文件开头注明对应的上游文件。
+The whiteboard (`crates/core/src/board/` and `src/board/`) ports code from the projects below to Rust. Each file identifies its upstream source.
 
-| 项目 | 版本 | 许可 | 移植到 |
+| Project | Version | License | Port |
 |---|---|---|---|
-| [Excalidraw](https://github.com/excalidraw/excalidraw) | `3a317b5`（0.18.0） | MIT | 元素模型、几何、编辑算法、撤销、剪贴板与文件格式、工具与界面逻辑 |
-| [rough.js](https://github.com/rough-stuff/rough) | 4.6.4 | MIT（Preet Shihn） | `rough/`（生成器、手绘笔触、全部填充方式）、`random.rs`（Park–Miller 随机数） |
-| [hachure-fill](https://github.com/pshihn/hachure-fill) | 0.5.2 | MIT（Preet Shihn） | `rough/fillers.rs`（扫描线） |
-| [points-on-curve](https://github.com/pshihn/bezier-points) | 0.2.0 / 1.0.1 | MIT（Preet Shihn） | `rough/curve.rs`（贝塞尔取点、简化） |
-| [points-on-path](https://github.com/pshihn/points-on-path) | 0.2.1 | MIT（Preet Shihn） | `rough/path_data.rs`（路径取点） |
-| [path-data-parser](https://github.com/pshihn/path-data-parser) | 0.1.0 | MIT（Preet Shihn） | `rough/path_data.rs`（SVG 路径解析、规范化） |
-| [perfect-freehand](https://github.com/steveruizok/perfect-freehand) | 1.2.0 | MIT（Steve Ruiz） | `freehand.rs`（画笔轮廓） |
-| [fractional-indexing](https://github.com/rocicorp/fractional-indexing)（经 Excalidraw 内置的副本） | — | CC0 | `fractional_index.rs` |
-| [nanoid](https://github.com/ai/nanoid) | — | MIT（Andrey Sitnik） | `random.rs`（只用了 id 字母表） |
+| [Excalidraw](https://github.com/excalidraw/excalidraw) | `3a317b5` (0.18.0) | MIT | Element model, geometry, editing algorithms, undo, clipboard and file formats, tools and UI logic |
+| [rough.js](https://github.com/rough-stuff/rough) | 4.6.4 | MIT (Preet Shihn) | `rough/` generation, sketch strokes and all fill methods, plus Park–Miller RNG in `random.rs` |
+| [hachure-fill](https://github.com/pshihn/hachure-fill) | 0.5.2 | MIT (Preet Shihn) | Scanlines in `rough/fillers.rs` |
+| [points-on-curve](https://github.com/pshihn/bezier-points) | 0.2.0 / 1.0.1 | MIT (Preet Shihn) | Bézier sampling and simplification in `rough/curve.rs` |
+| [points-on-path](https://github.com/pshihn/points-on-path) | 0.2.1 | MIT (Preet Shihn) | Path sampling in `rough/path_data.rs` |
+| [path-data-parser](https://github.com/pshihn/path-data-parser) | 0.1.0 | MIT (Preet Shihn) | SVG path parsing and normalization in `rough/path_data.rs` |
+| [perfect-freehand](https://github.com/steveruizok/perfect-freehand) | 1.2.0 | MIT (Steve Ruiz) | Stroke outlines in `freehand.rs` |
+| [fractional-indexing](https://github.com/rocicorp/fractional-indexing) (via Excalidraw's bundled copy) | — | CC0 | `fractional_index.rs` |
+| [nanoid](https://github.com/ai/nanoid) | — | MIT (Andrey Sitnik) | ID alphabet only, in `random.rs` |
 
-Excalidraw 的许可声明：
+Excalidraw license notice:
 
 ```
 MIT License
@@ -768,37 +781,41 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-rough.js、hachure-fill、points-on-curve、points-on-path、path-data-parser、perfect-freehand、nanoid 同为 MIT 许可，条款与上文相同，版权人见表。
+rough.js, hachure-fill, points-on-curve, points-on-path, path-data-parser, perfect-freehand and nanoid use the same MIT terms. Copyright holders are listed in the table.
 
-## 字体
+## Windows runtime
 
-| 素材 | 许可 |
+The Windows installer includes an unmodified Microsoft Visual C++ Runtime, `vcruntime140.dll`, copied from the Visual Studio x64 Redistributable directory. Microsoft's redistribution terms govern this DLL separately from Quiet.md's MIT license. The source repository does not contain the binary. See [Visual Studio 2022 Redistribution](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution).
+
+## Fonts
+
+| Asset | License |
 |---|---|
-| `assets/fonts/katex/`（20 个 KaTeX 字体） | KaTeX 字体，SIL Open Font License / MIT，见同目录 `LICENSE`。9 个粗体、斜体字重改过 OS/2 `fsSelection` 和 `head.macStyle` 的样式位（原文件都标成 Regular，Windows 和 Linux 会把斜体当正体选中），字形未改 |
-| `assets/fonts/excalidraw/`（画板文字用的 Excalidraw 字体，取自 Excalidraw `3a317b5` 的 `packages/excalidraw/fonts/`）：Excalifont（2024 Excalidraw，Ján Filípek / DizajnDesign）、Virgil（2011 Your Own Font Foundry）、Nunito Medium（Nunito Project Authors）、Lilita One（2011 Juan Montoreano）、Cascadia Code（2020 Microsoft）、Assistant 四个字重（Assistant Project Authors / Source Sans Pro Authors）、Xiaolai SC（2020 LXGW，瀬戸のぞみ；Excalidraw 去掉了非 CJK 字符、调过谚文和个别 CJK 字形的位置） | SIL Open Font License 1.1，全文和版权声明见同目录 `OFL.txt` |
-| `assets/fonts/emoji/NotoColorEmoji.ttf`（Noto Color Emoji 2.057，CBDT 彩色位图版，取自 googlefonts/noto-emoji `v2026-09-24-unicode18_0` 的 `2D/fonts/`；只编进 Linux 版） | SIL Open Font License 1.1（2022 Google Inc.），全文见同目录 `OFL.txt`；文件未改动 |
-| `assets/fonts/excalidraw/ComicShanns-Regular.ttf`（Comic Shanns Mono 1.3.0） | MIT（Shannon Miwa 等），见同目录 `LICENSE-ComicShanns.txt` |
-| 上面两项的加工 | 上游分发的是按 Unicode 区段切开的 WOFF2 子集；这里转成 TrueType，每个字族的子集合并成一个文件（用 fontTools 转换；字形轮廓、字宽、字距和 OpenType 特性不变，逐字比对过覆盖范围和轮廓）。Nunito、Comic Shanns、Cascadia、Xiaolai 的 name 表字族名改成 Excalidraw CSS 里用的名字（`Nunito`、`Comic Shanns`、`Cascadia`、`Xiaolai`）。Xiaolai 以 zlib 压缩存放（`Xiaolai-Regular.ttf.zlib`，14 MB，解开 21 MB），第一次用到 CJK 时才解开。上游还带的 Liberation Sans 1.05 是 GPL 加字体例外的许可，没有收入，改用与它等宽度的系统 Arial |
+| `assets/fonts/katex/` (20 KaTeX fonts) | SIL Open Font License / MIT. See `LICENSE` in the same directory. Nine bold or italic faces have updated OS/2 `fsSelection` and `head.macStyle` bits. The originals were marked Regular, which caused Windows and Linux to select italics as upright faces. The glyphs are unchanged. |
+| `assets/fonts/excalidraw/` (board fonts from Excalidraw `3a317b5`, `packages/excalidraw/fonts/`) | SIL Open Font License 1.1, full text and copyright notices in the adjacent `OFL.txt`. Excalifont (2024 Excalidraw, Ján Filípek / DizajnDesign), Virgil (2011 Your Own Font Foundry), Nunito Medium (Nunito Project Authors), Lilita One (2011 Juan Montoreano), Cascadia Code (2020 Microsoft), four Assistant weights (Assistant Project Authors / Source Sans Pro Authors), and Xiaolai SC (2020 LXGW, Seto Nozomi). Excalidraw removed non-CJK characters from Xiaolai and adjusted the positioning of Hangul and some CJK glyphs. |
+| `assets/fonts/emoji/NotoColorEmoji.ttf` (Noto Color Emoji 2.057, CBDT bitmap, from googlefonts/noto-emoji `v2026-09-24-unicode18_0`, `2D/fonts/`, embedded on Linux only) | SIL Open Font License 1.1 (2022 Google Inc.). Unmodified. See adjacent `OFL.txt`. |
+| `assets/fonts/excalidraw/ComicShanns-Regular.ttf` (Comic Shanns Mono 1.3.0) | MIT (Shannon Miwa et al.). See adjacent `LICENSE-ComicShanns.txt`. |
 
-## 图标
+Upstream distributes the Excalidraw board fonts as WOFF2 subsets by Unicode range. The project uses fontTools to convert and merge each family's subsets into one TrueType file. Coverage and outlines were compared glyph by glyph. Outlines, advance widths, kerning and OpenType features are preserved. The name tables for Nunito, Comic Shanns, Cascadia and Xiaolai match the family names in Excalidraw CSS. Xiaolai is stored as `Xiaolai-Regular.ttf.zlib` (14 MB, 21 MB uncompressed) and inflated on first CJK use. Upstream's Liberation Sans 1.05 (GPL with font exception) is omitted. System Arial supplies compatible widths.
 
-| 素材 | 许可 |
+## Icons
+
+| Asset | License |
 |---|---|
-| `assets/editor-icons/`（编辑器与文档里的 195 个图标） | 其中 49 个直接取自 Lucide（ISC，见同目录 `LICENSE-lucide`），其余按同一 24px / 2px 描边规格绘制 |
-| `assets/icons/`（界面外壳的 68 个图标，含一个在 Nucleo 图标上加了 MD 字样的 `doc-md.svg`；文档插入菜单里画板的 `whiteboard.svg` 取自同一授权下的 Nucleo UI Essential Outline 18。画板界面本身不用 Nucleo 图标，见下面的 `assets/icons/excalidraw/`） | Nucleo UI Outline / Fill 18。本项目持有 Nucleo 商业授权，按授权条款「公开源码项目中最多 100 个图标」使用（<https://nucleoapp.com/license>）。**这些图标不在 MIT 范围内**：fork 时请自行确认授权，或换成自己的图标；不得把它们抽出来做成图标库或图标包。 |
-| `assets/icons/folder.svg`、`assets/icons/disclosure.svg`、`assets/icons/import.svg`、`assets/icons/globe.svg` | 本项目绘制，MIT；不属于上述 68 个 Nucleo 图标 |
-| `assets/icons/excalidraw/`（画板界面的 96 个图标：工具栏、属性面板、菜单、页脚，含 6 个工具激活时的填充版 `*-filled.svg`） | 取自 Excalidraw `packages/excalidraw/components/icons.tsx` @ 3a317b5（MIT，© Excalidraw），其中多数由 tabler-icons（MIT，© Paweł Kuna）改来；每个文件开头注明对应的上游图标。由 `icons.tsx` 原样渲染成 SVG，只把 `var(--icon-fill-color)` 换成 `currentColor`、根元素上的 CSS 旋转换成 SVG 变换，编组 / 取消编组图标的白色手柄改成蒙版镂空（界面按单色绘制图标）。不属于上述 Nucleo 图标 |
-| `assets/branding/app-icon.png`、`assets/branding/app-icon-dev.png`（预览版，带 dev 丝带，由 `tools/branding/dev_icon.py` 生成） | 本项目自有 |
+| `assets/editor-icons/` (195 editor and document icons) | 49 are from Lucide (ISC, see the adjacent `LICENSE-lucide`). The others were drawn to the same 24 px grid and 2 px stroke specification. |
+| `assets/icons/` (68 interface icons, including `doc-md.svg`, which adds MD lettering to a Nucleo icon, and the insert menu’s `whiteboard.svg` from Nucleo UI Essential Outline 18 under the same license) | Nucleo UI Outline / Fill 18. The project holds a commercial license permitting up to 100 icons in an open-source project. **These icons are excluded from the MIT license.** If you fork the project, verify your own license coverage or replace the icons. You may not extract them to create an icon library or pack. See the [Nucleo license](https://nucleoapp.com/license). |
+| `assets/icons/folder.svg`, `assets/icons/disclosure.svg`, `assets/icons/import.svg`, `assets/icons/globe.svg` | Drawn by the project and distributed under MIT. These are counted separately from the 68 Nucleo icons. |
+| `assets/icons/excalidraw/` (96 board toolbar, property panel, menu and footer icons, including six active-tool `*-filled.svg` variants) | From Excalidraw `packages/excalidraw/components/icons.tsx` at 3a317b5 (MIT, © Excalidraw), mostly adapted from tabler-icons (MIT, © Paweł Kuna). SVG headers identify upstream icons. Rendering preserves the upstream SVG except for replacing `var(--icon-fill-color)` with `currentColor`, converting root CSS rotation to an SVG transform, and masking the white group/ungroup handles for monochrome drawing. These are separate from the Nucleo set. |
+| `assets/branding/app-icon.png`, `assets/branding/app-icon-dev.png` | Owned by the project. The preview icon has a dev ribbon generated by `tools/branding/dev_icon.py`. |
 
-## 封面与插画
+## Covers and illustrations
 
-`assets/covers/`（26 张封面及其缩略图）、`assets/illus/`（3 张空态插画，本项目绘制）随本项目以 MIT 分发。
+The 26 covers and their thumbnails in `assets/covers/` and the project-drawn illustrations in `assets/illus/` (three empty-state illustrations, and under `kinds/` the five colored kind icons of the New menu) are distributed under MIT.
 
-## 内置主题的样式数值
+## Built-in theme values
 
-`assets/themes/` 里有四套内置主题（Craft、飞书、Notion、Obsidian），各是一份写满全部属性当前值的 CSS。
-颜色、字号、间距这类数值本身不受版权保护，主题文件随本项目以 MIT 分发；这几个名字只用来标称风格，与各自的公司没有关系。
+`assets/themes/` contains four complete CSS themes (Craft, Feishu, Notion and Obsidian), each specifying the current value of every property. Individual color, font size and spacing values are not subject to copyright. The theme files are distributed under MIT. The names identify the styles and imply no affiliation with the respective companies.
 
-## 内置文档
+## Bundled documents
 
-`shared-mock/library/` 里的「开始指南」是本项目自己写的示例文档，随 MIT 分发。
+The project wrote the Getting Started sample documents in `shared-mock/library/` and distributes them under MIT.

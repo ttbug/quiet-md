@@ -24,7 +24,7 @@ use web_time::Instant;
 const SAVE_DELAY: Duration = Duration::from_millis(500);
 const SAVE_MAX_DELAY: Duration = Duration::from_secs(2);
 
-actions!(workspace, [NewDoc, OpenFile, ImportDoc, ImportFolder, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, CheckForUpdates, GoHome, CloseWindow, Quit,
+actions!(workspace, [NewDoc, OpenFile, OpenFolder, ImportDoc, ImportFolder, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, CheckForUpdates, GoHome, CloseWindow, Quit,
     ReplayOnboarding, HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen]);
 
 /// The menu bar, in the interface language.
@@ -55,6 +55,7 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(tr("新建文档", "New Document"), NewDoc),
                 MenuItem::action(tr("新建笔记窗口", "New Note Window"), crate::quick_note::QuickNew),
                 MenuItem::action(tr("打开 Markdown 文件…", "Open Markdown File…"), OpenFile),
+                MenuItem::action(tr("打开文件夹…", "Open Folder…"), OpenFolder),
                 MenuItem::action(tr("导入为文档…", "Import as Document…"), ImportDoc),
                 MenuItem::action(tr("导入文件夹…", "Import Folder…"), ImportFolder),
                 MenuItem::separator(),
@@ -106,6 +107,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-alt-shift-o", ReplayOnboarding, None),
         KeyBinding::new("cmd-shift-i", ImportDoc, None),
         KeyBinding::new("cmd-o", OpenFile, None),
+        KeyBinding::new("cmd-shift-o", OpenFolder, None),
         KeyBinding::new("cmd-alt-home", GoHome, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
         KeyBinding::new("cmd-]", ToggleSidebar, None),
@@ -369,7 +371,7 @@ pub struct Workspace {
     /// The 快捷键 drawer, and the help button's menu (open while hovered).
     pub shortcuts: bool,
     pub(crate) focus: FocusHandle,
-    save_task: Option<Task<()>>,
+    pub(crate) save_task: Option<Task<()>>,
     /// When the oldest edit not yet on disk was made: a save waits for a
     /// pause in typing, but never longer than `SAVE_MAX_DELAY` after it.
     dirty_since: Option<Instant>,
@@ -455,7 +457,7 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     if let Some(id) = &this.current { crate::quick_note::used(id, cx); }
-                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); this.refresh_markdown(cx); }
+                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); this.refresh_markdown(Some(window.window_handle().window_id()), cx); }
                     crate::update::check_if_stale(cx); cx.notify();
                 }
                 else if !this.store.file_task_busy() { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); this.flush(cx); }
@@ -498,15 +500,16 @@ impl Workspace {
         // A file written into the library from outside (a model writing a
         // note, say) joins it without going away and back: the library's
         // shape is compared every couple of seconds and the list re-read only
-        // when it changed.
+        // when it changed. The folders opened under 本机文件 are watched the same way.
         cx.spawn(async move |this, cx| {
             let bg = cx.background_executor().clone();
-            let shape = || bg.spawn(async { crate::store::Store::shape_at(&crate::store::Store::root_dir()) });
-            let mut last = shape().await;
+            let shape = |dirs: Vec<std::path::PathBuf>| bg.spawn(async move { (crate::store::Store::shape_at(&crate::store::Store::root_dir()), crate::store::Store::shape_of(&dirs)) });
+            let dirs = |cx: &mut AsyncApp| this.update(cx, |w, _| w.store.mount_dirs()).unwrap_or_default();
+            let mut last = shape(dirs(cx)).await;
             let mut last_file = None;
             loop {
                 bg.timer(Duration::from_secs(2)).await;
-                let now = shape().await;
+                let now = shape(dirs(cx)).await;
                 let Ok(path) = this.update(cx, |w, _| w.current.as_ref()
                     .filter(|id| !w.store.file_task_busy() && w.store.is_markdown(id))
                     .and_then(|id| w.store.file_path(id))) else { break };
@@ -516,7 +519,7 @@ impl Workspace {
                     Some((path, meta.modified().ok()?, meta.len()))
                 }).await;
                 if file != last_file {
-                    let _ = this.update(cx, |w, cx| w.refresh_markdown(cx));
+                    let _ = this.update(cx, |w, cx| w.refresh_markdown(None, cx));
                     last_file = file;
                 }
                 if now == last { continue }
@@ -630,11 +633,13 @@ impl Workspace {
         ws.load_home();
         // An empty library opens on 主页's empty state; only a quick note
         // window starts a document of its own. The main window returns to the
-        // document read last (#234), or the home page when that is set.
+        // document read last (#234), or the home page when that is set; the
+        // site's live demo always starts on 主页, so visitors see the whole
+        // notebook first.
         match document {
             Some(id) => ws.open(&id, window, cx),
             None if quick => ws.new_doc(window, cx),
-            None if !crate::settings::prefs().start_home => {
+            None if !crate::settings::prefs().start_home && !cfg!(target_family = "wasm") => {
                 // Nothing read yet (a fresh library, whose guides all start at
                 // `opened == 0`): the first document, as before — `max_by_key`
                 // keeps the last of equal maxima, which would open the last
@@ -712,10 +717,11 @@ impl Workspace {
             e.cat_pinned = pinned;
             e.markdown = meta.as_ref().is_some_and(|m| m.markdown);
             e.board_file = meta.as_ref().is_some_and(|m| m.kind == crate::store::DocKind::Board);
+            e.table_file = meta.as_ref().is_some_and(|m| m.kind == crate::store::DocKind::Table);
             if let Some(m) = &meta {
                 e.created = m.created;
                 e.info = m.info;
-                if !e.board_file { e.set_read_only(m.reading, cx); }
+                if !e.board_file && !e.table_file { e.set_read_only(m.reading, cx); }
             }
             e
         });
@@ -751,6 +757,7 @@ impl Workspace {
                 this.search.update(cx, |s, cx| s.set_text(q, cx));
                 this.search_sel = this.default_search_sel(cx);
             }
+            EditorEvent::OpenRelative(url) => this.open_relative(url, window, cx),
             EditorEvent::OpenDoc(id) => this.open(id, window, cx),
             EditorEvent::OpenDocAt(id, ordinal) => this.open_at(id, *ordinal, window, cx),
             EditorEvent::HideRefs => this.ask_refs(false, cx),
@@ -784,7 +791,7 @@ impl Workspace {
             { let f = editor.read(cx).focus.clone(); window.focus(&f, cx); }
         }
         // A 画板 opens straight into its board, over the whole window.
-        editor.update(cx, |e, cx| e.open_board_file(window, cx));
+        editor.update(cx, |e, cx| { e.open_board_file(window, cx); e.open_table_file(window, cx); });
         if let Some(m) = self.store.touch(id)
             && let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
                 e.meta.opened = m.opened;
@@ -1148,7 +1155,16 @@ impl Workspace {
         }
     }
 
-    fn refresh_markdown(&mut self, cx: &mut Context<Self>) {
+    /// The current window can already be in a GPUI input callback. update
+    /// skips windows on the stack, whereas reading their root would panic.
+    fn other_workspaces(cx: &mut Context<Self>) -> Vec<Entity<Self>> {
+        let me = cx.entity_id();
+        cx.windows().into_iter().filter_map(|h| h.update(cx, |root, _, _| root.downcast::<Self>().ok()).ok().flatten())
+            .filter(|peer| peer.entity_id() != me).collect()
+    }
+
+    /// `on_stack`: the window being updated, if any (it can't be read now; it is this one).
+    fn refresh_markdown(&mut self, on_stack: Option<gpui::WindowId>, cx: &mut Context<Self>) {
         if self.preview.is_some() || self.store.file_task_busy() || matches!(self.confirm, Some(Confirm::SaveFailed)) { return }
         let Some(id) = self.current.clone() else { return };
         if !self.store.is_markdown(&id) { return }
@@ -1157,9 +1173,8 @@ impl Workspace {
             return
         }
         // A newly opened sibling can be clean while its source view still has a pending edit.
-        // Activation callbacks already borrow this window; exclude it before reading its entity.
-        if cx.windows().into_iter().filter(|h| h.window_id() != self.window_id)
-            .filter_map(|h| h.downcast::<Workspace>()?.entity(cx).ok())
+        if cx.windows().into_iter().filter(|h| Some(h.window_id()) != on_stack).filter_map(|h| h.downcast::<Workspace>()?.entity(cx).ok())
+            .filter(|p| p.entity_id() != cx.entity_id())
             .any(|p| { let w = p.read(cx); w.current.as_ref() == Some(&id) && w.unsaved }) { return }
         if let Ok(Some(doc)) = self.store.with(|s| s.refresh_markdown(&id)) {
             self.adopt_markdown(&id, doc, cx);
@@ -1186,8 +1201,7 @@ impl Workspace {
             cx.notify();
         };
         install(self, cx);
-        for handle in cx.windows().into_iter().filter(|h| h.window_id() != self.window_id).filter_map(|h| h.downcast::<Workspace>()) {
-            let Ok(peer) = handle.entity(cx) else { continue };
+        for peer in Self::other_workspaces(cx) {
             if peer.read(cx).current.as_deref() == Some(id) {
                 peer.update(cx, install);
             }
@@ -1199,6 +1213,8 @@ impl Workspace {
     /// the top bar shows the error.
     pub fn flush(&mut self, cx: &mut Context<Self>) -> bool {
         self.save_task = None;
+        // 数据表 write their own files
+        crate::table::flush_all(cx);
         // 版本历史 preview: the editor holds an older snapshot, so writing it
         // would overwrite the live document with history.
         if self.preview.is_some() { return true }
@@ -1224,8 +1240,7 @@ impl Workspace {
                 // A mirrored edit was saved by this window. A sibling must not
                 // later write it a second time over a newer external edit.
                 if meta.markdown {
-                    for handle in cx.windows().into_iter().filter(|h| h.window_id() != self.window_id).filter_map(|h| h.downcast::<Workspace>()) {
-                        let Ok(peer) = handle.entity(cx) else { continue };
+                    for peer in Self::other_workspaces(cx) {
                         let w = peer.read(cx);
                         if w.unsaved && w.current.as_ref() == Some(&id) && w.preview.is_none()
                             && w.editor.as_ref().is_some_and(|e| e.read(cx).core.doc == ed.read(cx).core.doc) {
@@ -1240,8 +1255,11 @@ impl Workspace {
                     }
                 }
                 self.sync_links(cx);
+                // a renamed 数据表's file moved with its title
+                let moved = (meta.kind == crate::store::DocKind::Table).then(|| self.store.file_path(&id)).flatten();
                 ed.update(cx, |e, cx| {
                     e.modified = meta.modified;
+                    if let Some(p) = &moved { e.table_file_at(p, cx); }
                     cx.notify();
                 });
                 self.status = SaveStatus::Saved;
@@ -1459,6 +1477,7 @@ impl Workspace {
         // a 画板 block open in the document's place: the document becomes a
         // crumb back to it, and the board is the page
         let board_block = self.editor.as_ref().is_some_and(|e| e.read(cx).board_block_open());
+        let table_block = self.editor.as_ref().is_some_and(|e| e.read(cx).table_block_open());
         let save_error = match &self.status {
             SaveStatus::Failed(error) => Some(error.clone()),
             _ => None,
@@ -1475,12 +1494,15 @@ impl Workspace {
             .unwrap_or_default();
         let mut crumbs: Vec<AnyElement> = vec![];
         let sep = || div().mx(px(3.)).flex_none().child(icon("chevron-right", 12., Theme::icon())).into_any_element();
-        // Every path starts at the library, as a folder page's does.
+        // Every path starts at the library, as a folder page's does; a file
+        // under 本机文件 starts there, which has no page of its own.
+        let local = self.current.as_ref().and_then(|id| self.entries.iter().find(|e| &e.id == id)).is_some_and(|e| e.meta.local());
+        let start = if local { crate::settings::tr("本机文件", "Files on this computer") } else { crate::settings::tr("我的文档", "My documents") };
         if self.current.is_some() {
-            crumbs.push(div().id("crumb-library").no_drag().flex_none().px(px(4.)).rounded(px(4.)).cursor_pointer()
-                .whitespace_nowrap().text_color(Theme::text_caption()).hover(|s| s.text_color(Theme::primary_500()))
-                .child(ui_text(crate::settings::tr("我的文档", "My documents").to_string()))
-                .on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx)))
+            crumbs.push(div().id("crumb-library").no_drag().flex_none().px(px(4.)).rounded(px(4.))
+                .whitespace_nowrap().text_color(Theme::text_caption())
+                .when(!local, |d| d.cursor_pointer().hover(|s| s.text_color(Theme::primary_500())).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx))))
+                .child(ui_text(start.to_string()))
                 .into_any_element());
             crumbs.push(sep());
         }
@@ -1541,13 +1563,24 @@ impl Workspace {
             crumbs.push(sep());
             title = crate::settings::tr("画板", "Board").to_string();
         }
+        if table_block {
+            crumbs.push(
+                div().id("crumb-table-doc").no_drag().min_w(px(28.)).max_w(px(200.)).px(px(4.)).flex().items_center().rounded(px(4.)).cursor_pointer()
+                    .text_color(Theme::text_caption()).hover(|s| s.text_color(Theme::primary_500()))
+                    .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(title.clone())))
+                    .on_click(cx.listener(|w, _, window, cx| if let Some(e) = w.editor.clone() { e.update(cx, |e, cx| e.close_open_table(window, cx)) }))
+                    .into_any_element(),
+            );
+            crumbs.push(sep());
+            title = crate::settings::tr("数据表", "Data table").to_string();
+        }
         // Too narrow for the path: it folds into one "…" (the path on hover),
         // and the title keeps the room. Left: the sidebar's buttons when it is
         // closed; right: the three actions.
         let left = if self.sidebar_open { 18. } else { theme::TRAFFIC_LIGHTS_W + 4. + 28. + 4. + 28. + 25. };
         let room = pane_w - left - crate::ui::header_right_inset() - self.agent_header_space(cx) - 3. * HEADER_ACTIONS_H - 8. - 16.;
         if room < 360. && !crumbs.is_empty() {
-            let path: Vec<&str> = std::iter::once(crate::settings::tr("我的文档", "My documents")).chain(chain.iter().map(|c| c.1.as_str())).collect();
+            let path: Vec<&str> = std::iter::once(start).chain(chain.iter().map(|c| c.1.as_str())).collect();
             crumbs = vec![
                 div().id("crumb-more").no_drag().flex_none().size(px(20.)).flex().items_center().justify_center().rounded(px(4.))
                     .text_color(Theme::text_caption()).tip(&path.join(" / "), None).child("…").into_any_element(),
@@ -1684,6 +1717,8 @@ impl Render for Workspace {
         // down), so leaving the document hands it back to the window's keys.
         if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus, cx); }
         crate::editor::image::frame_drawn(window, cx);
+        // a 数据表 file renamed or moved (the sidebar, 移动到): its view writes where the file now is
+        if let (Some(id), Some(ed)) = (&self.current, &self.editor) && ed.read(cx).table_file && let Some(p) = self.store.file_path(id) { ed.update(cx, |e, cx| e.table_file_at(&p, cx)); }
         // Full screen: the sidebar is solid (`Theme::window`) and the native glass stays hidden.
         crate::theme::set_fullscreen(window.is_fullscreen());
         self.native_sidebar.sync(if self.sidebar_open && !crate::theme::fullscreen() { self.sidebar_w(window) } else { 0. }, window);
@@ -1758,11 +1793,11 @@ impl Render for Workspace {
         let export_md = self.render_export_md(cx);
         // Only the note stands out: a white plane flush with the window's top,
         // right and bottom edges. The sidebar sits sunken on the window
-        // surface beside it; the change of value is the only line between
-        // them (no gutter, radius, border or shadow).
+        // surface beside it; a faint shade along the plane's left edge parts
+        // the two (no gutter, radius or border).
         // A document sits on its theme's page colour.
         let page = if self.view == View::Doc { crate::editor_theme::Theme::bg_body() } else { Theme::bg_body() };
-        let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().bg(page).child(main)
+        let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().bg(page).shadow(theme::shadow_note()).child(main)
             // Files from the Finder dropped on 主页 or a folder's page are imported there.
             .when(matches!(self.view, View::Home | View::Folder), |d| d
                 .on_drag_move(cx.listener(|w, ev: &DragMoveEvent<ExternalPaths>, _, cx| w.file_drag_move(ev, cx)))
@@ -1811,6 +1846,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &NewDoc, window, cx| w.new_doc(window, cx)))
             .on_action(cx.listener(|w, _: &ImportDoc, window, cx| w.open_import(window, cx)))
             .on_action(cx.listener(|w, _: &OpenFile, window, cx| w.open_file_dialog(window, cx)))
+            .on_action(cx.listener(|w, _: &OpenFolder, window, cx| w.open_folder_dialog(window, cx)))
             .on_action(cx.listener(|w, _: &ImportFolder, window, cx| w.open_import_folder(window, cx)))
             .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
                 w.sidebar_open = !w.sidebar_open;

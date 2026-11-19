@@ -28,6 +28,10 @@ markup5ever_rcdom = "0.3"
 miniz_oxide = "0.9"
 sha1_smol = "1.0"
 
+# The 数据表 file (`table::sqlite`); bundled, so the three platforms carry the same SQLite.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+rusqlite = { version = "0.43", features = ["bundled"] }
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 uuid = { version = "1.28.0", features = ["v4", "js"] }
 js-sys = "0.3"
