@@ -112,6 +112,9 @@ pub struct Preferences {
     pub last_new: String,
     /// 网页搜索 engine: "baidu", "bing", "duckduckgo"; empty is Google.
     pub search_engine: String,
+    /// 启动时打开: true shows the home page; false returns to the
+    /// document read last (#234).
+    pub start_home: bool,
     /// 打开链接: the browser a link opens in ("Safari", "Microsoft Edge"…),
     /// empty for the system default.
     pub browser: String,
@@ -149,7 +152,7 @@ fn system_lang() -> Lang {
 impl Default for Preferences {
     fn default() -> Self {
         let lang = system_lang();
-        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), browser: String::new(), opaque_window: false, ui_font: String::new(), migrate_later: 0 }
+        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), migrate_later: 0 }
     }
 }
 
@@ -862,6 +865,9 @@ impl Workspace {
                         .relative()
                         .on_click(cx.listener(move |w, _, _, cx| { w.pref_menu = None; w.lang_menu = if w.lang_menu.is_some() { None } else { Some(current) }; cx.notify(); }))
                 }).into_any_element(),
+                row(tr("启动时打开", "On launch"), desc(tr("上次阅读的文档，或主页。", "The document read last, or the home page.")),
+                    segmented("pref-start", &[tr("上次文档", "Last document"), tr("主页", "Home page")], p.start_home as usize,
+                        |w, i, cx| w.set_pref(|p| p.start_home = i == 1, cx), cx)).into_any_element(),
                 row(tr("自动下载网络图片", "Download web images"), desc(tr("关闭后不联网，网络图片显示为占位，点击单独加载。", "When off the app stays offline; web images show a placeholder you can click to load.")),
                     switch("pref-remote", p.remote_images).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.remote_images = !p.remote_images, cx)))).into_any_element(),
                 row(tr("自动检查更新", "Check for updates automatically"), desc(tr("只读取一份版本信息，不发送任何数据；新版本由你决定何时下载安装。", "Reads a version file and sends nothing about you; you decide when to download and install.")),
