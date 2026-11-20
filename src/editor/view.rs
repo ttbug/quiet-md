@@ -2916,7 +2916,7 @@ impl Editor { pub(crate) fn refresh_theme(&mut self) { self.items_key = None; se
 fn new_table_file() -> Option<String> {
     let name = format!("{}.sqlite", uuid::Uuid::new_v4());
     let path = crate::store::Store::assets_dir().join(&name);
-    crate::table::sqlite::create(&path, &crate::table::Base::blank(crate::table::field::now())).ok()?;
+    crate::table::sqlite::create(&path, &crate::table::blank_base()).ok()?;
     path.strip_prefix(crate::store::Store::root_dir()).ok().map(|r| r.to_string_lossy().replace('\\', "/"))
 }
 #[cfg(target_family = "wasm")]

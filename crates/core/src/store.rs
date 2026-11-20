@@ -1684,9 +1684,9 @@ impl Store {
     }
 
     /// A new 数据表 in folder `parent`: a `.sqlite` file named `title`, holding
-    /// one blank table. Only in the folder layout.
+    /// `base` (`Base::blank_named`, or an imported CSV). Only in the folder layout.
     #[cfg(not(target_family = "wasm"))]
-    pub fn create_table_in(&mut self, title: &str, parent: Option<&str>) -> Result<String> {
+    pub fn create_table_in(&mut self, title: &str, base: &crate::table::Base, parent: Option<&str>) -> Result<String> {
         anyhow::ensure!(!self.flat, "旧格式的文档库不能新建数据表");
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
@@ -1696,7 +1696,7 @@ impl Store {
         let rel = join_rel(&dir, &self.free_name(&dir, &file_name_for(title), Some(DocKind::Table.ext(false)), None));
         self.index.insert(id.clone(), Meta { created: t, modified: t, opened: t, rel, ..Default::default() });
         derive_tree(&mut self.index);
-        if let Err(e) = crate::table::sqlite::create(&self.path(&id), &crate::table::Base::blank(crate::table::field::now())).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
+        if let Err(e) = crate::table::sqlite::create(&self.path(&id), base).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
         drop(lock);
         self.place_new(&id, parent)?;
         Ok(id)
@@ -1715,6 +1715,25 @@ impl Store {
         derive_tree(&mut self.index);
         if let Err(e) = crate::vfs::copy(&from, self.path(&id)).map_err(anyhow::Error::from).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
         drop(lock);
+        Ok(id)
+    }
+
+    /// 另存副本 of a 数据表's version: the snapshot's file as a new 数据表 named `title`, beside the original.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn copy_table_version(&mut self, src: &str, name: &str, title: &str) -> Result<String> {
+        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据表");
+        let bytes = crate::versions::read_bytes(&self.history_base(), src, name, false)?;
+        let parent = self.index.get(src).and_then(|m| m.parent.clone());
+        let id = uuid::Uuid::new_v4().to_string();
+        let lock = self.begin_write()?;
+        let t = now();
+        let dir = self.folder_rel(parent.as_deref());
+        let rel = join_rel(&dir, &self.free_name(&dir, &file_name_for(title), Some(DocKind::Table.ext(false)), None));
+        self.index.insert(id.clone(), Meta { created: t, modified: t, opened: t, rel, ..Default::default() });
+        derive_tree(&mut self.index);
+        if let Err(e) = write_atomic(&self.path(&id), &bytes).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
+        drop(lock);
+        self.place_new(&id, parent.as_deref())?;
         Ok(id)
     }
 
@@ -2132,10 +2151,37 @@ impl Store {
 
     pub fn delete_version(&self, id: &str, name: &str) -> Result<()> { crate::versions::remove(&self.history_base(), id, name, false) }
 
-    /// Parse a snapshot into a document, for 另存副本.
+    /// Parse a snapshot into a document, for 另存副本. A 数据表's is its page
+    /// showing the snapshot file itself (which opens read-only, being history).
     pub fn version_document(&self, id: &str, name: &str) -> Result<Document> {
+        if self.kind(id) == DocKind::Table {
+            let p = crate::versions::path(&self.history_base(), id, name, false)?;
+            anyhow::ensure!(p.fs_exists(), "历史版本已不存在");
+            let rel = p.strip_prefix(&self.root).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+            return Ok(crate::table::file_doc(&self.markdown_title(id), &rel));
+        }
         let text = self.version_text(id, name)?;
         self.parse_doc(id, &text)
+    }
+
+    /// A 数据表's file kept as a version: `force` is 保存当前版本 (no interval;
+    /// the same file as the newest version still adds nothing).
+    #[cfg(not(target_family = "wasm"))]
+    pub fn snapshot_table(&self, id: &str, force: bool) -> Result<bool> {
+        anyhow::ensure!(self.kind(id) == DocKind::Table, "不是数据表");
+        let bytes = crate::vfs::read(self.path(id))?;
+        let before = self.versions(id).first().map(|v| v.name.clone());
+        crate::versions::snapshot_bytes(&self.history_base(), id, "sqlite", &bytes, crate::time::now_ms(), self.settings().history_limit(), force)?;
+        Ok(self.versions(id).first().map(|v| v.name.clone()) != before)
+    }
+
+    /// The text a version's changes are counted on: a 数据表's rows as lines.
+    fn version_body(&self, id: &str, name: Option<&str>) -> Result<String> {
+        if self.kind(id) == DocKind::Table {
+            let p = match name { Some(n) => crate::versions::path(&self.history_base(), id, n, false)?, None => self.path(id) };
+            return Ok(crate::table::diff_text(&p));
+        }
+        match name { Some(n) => self.version_text(id, n), None => Ok(crate::vfs::read_to_string(self.path(id))?) }
     }
 
     /// Diff a snapshot against a baseline. `None` is the document on disk
@@ -2143,11 +2189,11 @@ impl Store {
     /// so `-` is always "only in the earlier version". The unchanged lines
     /// are kept, so the same list doubles as a read-only preview.
     pub fn version_diff(&self, id: &str, name: &str, baseline: Option<&str>) -> Result<Vec<crate::diff::Line>> {
-        let a = self.version_text(id, name)?;
+        let a = self.version_body(id, Some(name))?;
         let a_ms = crate::versions::stamp(name).unwrap_or(0);
         let (b, b_ms) = match baseline {
-            Some(other) => (self.version_text(id, other)?, crate::versions::stamp(other).unwrap_or(0)),
-            None => (crate::vfs::read_to_string(self.path(id))?, u64::MAX),
+            Some(other) => (self.version_body(id, Some(other))?, crate::versions::stamp(other).unwrap_or(0)),
+            None => (self.version_body(id, None)?, u64::MAX),
         };
         let (old, new) = if a_ms <= b_ms { (a.as_str(), b.as_str()) } else { (b.as_str(), a.as_str()) };
         Ok(crate::diff::diff(old, new, self.is_markdown(id)))
@@ -2161,6 +2207,13 @@ impl Store {
     /// Restore never loses the present: the current on-disk text becomes a
     /// snapshot first, then the chosen version is parsed for `save` to write.
     pub fn restore_version(&self, id: &str, name: &str) -> Result<Document> {
+        // a 数据表: its file now kept as a version, then the version's file put in its place
+        if self.kind(id) == DocKind::Table {
+            let bytes = crate::versions::read_bytes(&self.history_base(), id, name, false)?;
+            let _ = self.snapshot_table(id, true);
+            write_atomic(&self.path(id), &bytes)?;
+            return Ok(crate::table::file_doc(&self.markdown_title(id), &self.index[id].rel));
+        }
         let text = self.version_text(id, name)?;
         let current = crate::vfs::read_to_string(self.path(id)).unwrap_or_default();
         let ext = if self.is_markdown(id) { "md" } else { "xml" };
@@ -2172,6 +2225,7 @@ impl Store {
     /// `false` means the text matched the newest snapshot, so nothing was
     /// written — the caller can say so instead of silently doing nothing.
     pub fn save_version_now(&self, id: &str) -> Result<bool> {
+        if self.kind(id) == DocKind::Table { return self.snapshot_table(id, true); }
         let text = crate::vfs::read_to_string(self.path(id))?;
         let ext = if self.is_markdown(id) { "md" } else { "xml" };
         let before = self.versions(id).len();

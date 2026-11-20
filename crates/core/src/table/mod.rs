@@ -41,10 +41,12 @@ pub struct TableRef {
     pub table: Option<String>,
     pub view: Option<String>,
     pub height: f32,
+    /// Dragged wider or narrower than the text column, centred on it (None: the column's width).
+    pub width: Option<f32>,
 }
 
 impl TableRef {
-    pub fn new(src: impl Into<String>) -> Self { TableRef { src: src.into(), table: None, view: None, height: DEFAULT_HEIGHT } }
+    pub fn new(src: impl Into<String>) -> Self { TableRef { src: src.into(), table: None, view: None, height: DEFAULT_HEIGHT, width: None } }
 }
 
 /// A table file as the page the store hands out: its title and one 数据表 block showing it.
@@ -82,6 +84,17 @@ pub fn block_text(root: &std::path::Path, r: &TableRef) -> String {
 }
 #[cfg(target_family = "wasm")]
 pub fn block_text(_root: &std::path::Path, _r: &TableRef) -> String { String::new() }
+
+/// A 数据表 file as lines of text, a line per row (版本历史 counts changes on these).
+#[cfg(not(target_family = "wasm"))]
+pub fn diff_text(path: &std::path::Path) -> String {
+    let Ok(base) = sqlite::load(path) else { return String::new() };
+    let base = Doc::new(base).base;
+    let Some((t, v)) = base.tables.first().and_then(|t| Some((t, t.views.first()?))) else { return String::new() };
+    csv::export(&base, t, v, &query::run(&base, t, v).records).iter().map(|r| r.join("\t")).collect::<Vec<_>>().join("\n")
+}
+#[cfg(target_family = "wasm")]
+pub fn diff_text(_path: &std::path::Path) -> String { String::new() }
 
 /// A 数据表 block as a grid of text, header first (HTML 导出, printing).
 #[cfg(not(target_family = "wasm"))]

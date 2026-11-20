@@ -66,13 +66,21 @@ impl SharedStore {
     pub fn forget_mounted(&mut self, id: &str) { self.0.borrow_mut().forget_mounted(id) }
     pub fn create_board_in(&mut self, title: &str, board: &crate::whiteboard::Board, parent: Option<&str>) -> Result<String> { self.0.borrow_mut().create_board_in(title, board, parent) }
     #[cfg(not(target_family = "wasm"))]
-    pub fn create_table_in(&mut self, title: &str, parent: Option<&str>) -> Result<String> { self.0.borrow_mut().create_table_in(title, parent) }
+    pub fn create_table_in(&mut self, title: &str, base: &crate::table::Base, parent: Option<&str>) -> Result<String> { self.0.borrow_mut().create_table_in(title, base, parent) }
     #[cfg(not(target_family = "wasm"))]
     pub fn copy_table(&mut self, src: &str, title: &str) -> Result<String> { self.0.borrow_mut().copy_table(src, title) }
     #[cfg(target_family = "wasm")]
-    pub fn create_table_in(&mut self, _title: &str, _parent: Option<&str>) -> Result<String> { anyhow::bail!("unsupported") }
+    pub fn create_table_in(&mut self, _title: &str, _base: &crate::table::Base, _parent: Option<&str>) -> Result<String> { anyhow::bail!("unsupported") }
     #[cfg(target_family = "wasm")]
     pub fn copy_table(&mut self, _src: &str, _title: &str) -> Result<String> { anyhow::bail!("unsupported") }
+    #[cfg(not(target_family = "wasm"))]
+    pub fn copy_table_version(&mut self, src: &str, name: &str, title: &str) -> Result<String> { self.0.borrow_mut().copy_table_version(src, name, title) }
+    #[cfg(target_family = "wasm")]
+    pub fn copy_table_version(&mut self, _src: &str, _name: &str, _title: &str) -> Result<String> { anyhow::bail!("unsupported") }
+    #[cfg(not(target_family = "wasm"))]
+    pub fn snapshot_table(&self, id: &str, force: bool) -> Result<bool> { self.0.borrow().snapshot_table(id, force) }
+    #[cfg(target_family = "wasm")]
+    pub fn snapshot_table(&self, _id: &str, _force: bool) -> Result<bool> { Ok(false) }
     pub fn front_matter_of(&self, id: &str) -> String { self.0.borrow().front_matter_of(id) }
     pub fn open_local(&mut self, path: &std::path::Path) -> Result<String> { self.0.borrow_mut().open_local(path) }
     pub fn local_path(&self, id: &str) -> Option<std::path::PathBuf> { self.0.borrow().local_path(id) }

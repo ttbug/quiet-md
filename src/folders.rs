@@ -76,7 +76,7 @@ impl Workspace {
         let p = parent.clone();
         if !self.save_before(cx, move |w, window, cx| w.create_table(p.clone(), window, cx)) { return; }
         let file_before = self.store.track_file_changes();
-        match self.store.create_table_in(crate::settings::text("未命名数据表"), parent.as_deref()) {
+        match self.store.create_table_in(crate::settings::text("未命名数据表"), &crate::table::blank_base(), parent.as_deref()) {
             Ok(id) => {
                 self.search_open = false;
                 self.doc_info = None;

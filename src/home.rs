@@ -56,8 +56,30 @@ const STARRED_COLS: [Col; 4] = [Col::Modified, Col::Created, Col::Visited, Col::
 
 /// Bounded document trees retain formatting without retaining a whole long document.
 type EquationNumbers = HashMap<crate::model::BlockId, u32>;
-struct ThumbContent { blocks: Vec<crate::model::Block>, eqnos: EquationNumbers, has_subpages: bool }
+/// `tables`: the 数据表 files the page shows (their rows drawn in the card), saved apart from the page.
+struct ThumbContent { blocks: Vec<crate::model::Block>, eqnos: EquationNumbers, has_subpages: bool, tables: Vec<String> }
 type Thumb = Rc<ThumbContent>;
+
+/// The files of the 数据表 blocks in `blocks`, at any depth.
+fn table_srcs(blocks: &[crate::model::Block], out: &mut Vec<String>) {
+    for b in blocks {
+        match &b.kind {
+            BlockKind::DataTable(t) => out.push(t.src.clone()),
+            BlockKind::Table(t) => for cell in t.rows.iter().flatten() { table_srcs(&cell.blocks, out) },
+            _ => {}
+        }
+        table_srcs(&b.children, out);
+    }
+}
+
+/// When the files in `srcs` (relative to the library) last changed, as one number.
+fn tables_time(srcs: &[String]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = rustc_hash::FxHasher::default();
+    let root = crate::store::Store::root_dir();
+    for s in srcs { std::fs::metadata(root.join(s)).and_then(|m| m.modified()).ok().hash(&mut h); }
+    h.finish()
+}
 
 fn has_subpage_list(blocks: &[crate::model::Block]) -> bool {
     blocks.iter().any(|b| match &b.kind {
@@ -502,6 +524,10 @@ impl Workspace {
         // a 数据表's rows live in its file, saved apart from the index: its time is the card's too
         let file_time = (e.meta.kind == crate::store::DocKind::Table).then(|| self.store.file_path(&e.id).and_then(|p| std::fs::metadata(p).ok()?.modified().ok())).flatten();
         file_time.hash(&mut stamp);
+        // and a page's embedded tables: a row changed there redraws the card
+        let cached_tables = self.home.thumbs.borrow().get(&e.id).map(|(_, t, _)| tables_time(&t.tables)).unwrap_or(0);
+        let mut page_stamp = stamp.clone();
+        cached_tables.hash(&mut stamp);
         let base_stamp = stamp.finish();
         // If the preview contains no sibling subpages, modified + settings uniquely
         // identifies it without rebuilding the whole tree on every frame.
@@ -516,6 +542,8 @@ impl Workspace {
         file_time.hash(&mut full_stamp);
         crate::settings::feishu().hash(&mut full_stamp);
         for child in &children { (&child.id, &child.title, &child.icon).hash(&mut full_stamp); }
+        let mut children_stamp = full_stamp.clone();
+        cached_tables.hash(&mut full_stamp);
         let full_stamp = full_stamp.finish();
         if let Some((m, t, used)) = self.home.thumbs.borrow_mut().get_mut(&e.id)
             && *m == full_stamp { *used = web_time::Instant::now(); return t.clone(); }
@@ -533,16 +561,21 @@ impl Workspace {
         }
         let mut budget = 32;
         let mut eqnos = HashMap::new();
-        let loaded = self.store.load(&e.id).map(|doc| {
-            let numbers = crate::editor::equation_numbers(&doc);
+        let doc = self.store.load(&e.id);
+        let loaded = doc.as_ref().map(|doc| {
+            let numbers = crate::editor::equation_numbers(doc);
             thumb_blocks(&doc.blocks, &mut budget, 0, &numbers, &mut eqnos)
         });
         let read = loaded.is_ok();
         let mut blocks = loaded.unwrap_or_default();
         let has_subpages = has_subpage_list(&blocks);
         if has_subpages { subpages(&mut blocks, &children, &mut budget); }
-        let stamp = if has_subpages { full_stamp } else { base_stamp };
-        let t: Thumb = Rc::new(ThumbContent { blocks, eqnos, has_subpages });
+        let mut tables = vec![];
+        if let Ok(doc) = &doc { table_srcs(&doc.blocks, &mut tables); }
+        // stamped with the tables just found, so the next frame finds it
+        let tt = tables_time(&tables);
+        let stamp = if has_subpages { tt.hash(&mut children_stamp); children_stamp.finish() } else { tt.hash(&mut page_stamp); page_stamp.finish() };
+        let t: Thumb = Rc::new(ThumbContent { blocks, eqnos, has_subpages, tables });
         // A failed read (mid-write by another process, still in iCloud) is not
         // remembered: the card would stay blank until the document changes.
         if !read { return t; }

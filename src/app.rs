@@ -699,6 +699,11 @@ impl Workspace {
         }) {
             return false;
         }
+        // 版本历史 of a 数据表 (written as it is edited): the file as it is left and as it is
+        // opened is kept as a version; a file unchanged since the newest version adds nothing
+        let table = |w: &Self, i: &str| w.entries.iter().any(|e| e.id == i && e.meta.kind == crate::store::DocKind::Table);
+        if let Some(cur) = self.current.clone() && table(self, &cur) { let _ = self.store.snapshot_table(&cur, true); }
+        if table(self, id) { let _ = self.store.snapshot_table(id, true); }
         let shared = !self.document_peers(id, window, cx).is_empty();
         let doc = match self.store.load_for_edit(id, shared) {
             Ok(d) => d,
@@ -1213,7 +1218,8 @@ impl Workspace {
     /// the top bar shows the error.
     pub fn flush(&mut self, cx: &mut Context<Self>) -> bool {
         self.save_task = None;
-        // 数据表 write their own files
+        // 数据表 write their own files; a cell still being edited goes in first (leaving the page drops its view)
+        if let Some(ed) = self.editor.clone() { ed.update(cx, |e, cx| e.commit_tables(cx)); }
         crate::table::flush_all(cx);
         // 版本历史 preview: the editor holds an older snapshot, so writing it
         // would overwrite the live document with history.
@@ -1478,6 +1484,7 @@ impl Workspace {
         // crumb back to it, and the board is the page
         let board_block = self.editor.as_ref().is_some_and(|e| e.read(cx).board_block_open());
         let table_block = self.editor.as_ref().is_some_and(|e| e.read(cx).table_block_open());
+        let table_file = self.editor.as_ref().is_some_and(|e| e.read(cx).table_file);
         let save_error = match &self.status {
             SaveStatus::Failed(error) => Some(error.clone()),
             _ => None,
@@ -1649,6 +1656,7 @@ impl Workspace {
                             .children(crumbs)
                             .child(
                                 div()
+                                    .id("top-title")
                                     .min_w_0()
                                     .text_size(px(14.))
                                     .line_height(px(20.))
@@ -1657,7 +1665,9 @@ impl Workspace {
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_ellipsis()
-                                    .child(ui_text(title)),
+                                    .child(ui_text(title))
+                                    // a 数据表 file has no title in its page: double-click its name here to rename it
+                                    .when(table_file, |d| d.no_drag().on_click(cx.listener(|w, ev: &ClickEvent, window, cx| if ev.click_count() >= 2 && let Some(id) = w.current.clone() { w.start_rename(&id, window, cx); }))),
                             ),
 
                     )
