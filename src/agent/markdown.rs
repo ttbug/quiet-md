@@ -21,7 +21,7 @@ fn rich(text: &RichText, id: &str, bold: bool) -> AnyElement {
         let value = marks.inline.as_ref().and_then(|i| i.equation()).unwrap_or(&text.text[range]);
         let start = display.len();
         display.push_str(value);
-        let style = TextStyle { font_family: if marks.code { theme::MONO_FONT } else { theme::UI_FONT }.into(),
+        let style = TextStyle { font_family: if marks.code { theme::MONO_FONT } else { theme::ui_family() }.into(),
             font_weight: if bold || marks.bold { FontWeight::BOLD } else { FontWeight::NORMAL },
             font_style: if marks.italic { FontStyle::Italic } else { FontStyle::Normal },
             color: if marks.link.is_some() { Theme::link() } else { Theme::text() },

@@ -130,6 +130,7 @@ impl Workspace {
         self.current = None;
         if self.folder_current.as_deref() != Some(id) { self.reset_folder_scroll(); }
         if let Some(meta) = self.store.touch(id) && let Some(entry) = self.entries.iter_mut().find(|e| e.id == id) { entry.meta = meta; }
+        self.schedule_view_state(cx);
         if self.manual_home_sort() { self.prepare_manual_order(cx); }
         self.folder_current = Some(id.to_string());
         self.view = View::Folder;
@@ -175,7 +176,7 @@ impl Workspace {
                 .child(row("create-document", "doc", tr("文档", "Document")).on_click(cx.listener(move |w, _, window, cx| w.create_doc(false, doc_parent.clone(), window, cx))))
                 .child(row("create-markdown", "markdown", "Markdown").on_click(cx.listener(move |w, _, window, cx| w.create_doc(true, md_parent.clone(), window, cx))))
                 .child(row("create-board", "board", crate::settings::text("画板")).on_click(cx.listener(move |w, _, window, cx| w.create_board(board_parent.clone(), window, cx))))
-                .child(row("create-table", "datatable", crate::settings::text("数据表")).on_click(cx.listener(move |w, _, window, cx| w.create_table(table_parent.clone(), window, cx))))
+                .when(crate::DATATABLE, |d| d.child(row("create-table", "datatable", crate::settings::text("数据表")).on_click(cx.listener(move |w, _, window, cx| w.create_table(table_parent.clone(), window, cx)))))
                 .child(row("create-folder", "folder", tr("文件夹", "Folder")).on_click(cx.listener(move |w, _, window, cx| w.new_folder(folder_parent.clone(), window, cx))))
         )).with_priority(3).into_any_element())
     }

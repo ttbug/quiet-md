@@ -2,10 +2,11 @@
 
 ## 当前阶段
 
-右侧 Agent 面板第一版已实现；当前合并 main 的 0.1.13 更新，保留本机 Codex 面板并适配新的 GPUI 平台组件。
+右侧 Agent 面板第一版已实现；当前合并 main 的 0.1.14 更新，保留本机 Codex 面板并适配主页顶栏布局。
 
 ## 已完成
 
+- 2026-11-22 解决 main（`0f408c4`，0.1.14）合并冲突：保留 main 的新版 README 结构并迁入 Local Codex 说明；主页搜索同时为三个操作按钮及 AI 入口留位。AI 回复改用可配置界面字体接口，Markdown 刷新回归按新签名传入当前窗口 ID，移除被 main 的窗口枚举实现替代的冗余字段。Release 测试、三种配置 Clippy、指南及界面回归通过，尚未创建合并提交。
 - 2026-11-19 修复恢复 Markdown 文档后窗口激活闪退：`Workspace` 保存所属窗口 ID，刷新、接收外部版本及保存后的兄弟窗口同步均在读取实体前排除当前窗口，避免 GPUI 的窗口重入 panic。新增 `tools/harness/markdown_refresh.py`，不激活窗口，仅操作临时文档库。
 - 2026-11-19 按当前源码 `11fcd6e` 重新构建 0.1.13 本地 Apple Silicon DMG：`dist-release.local-wrf3kk5d/quiet-md-0.1.13-release-macos-arm64.dmg`。使用 dist 优化及 `gpui_platform/runtime_shaders`，关闭 `devtools`；临时签名、未公证，未公开发布，保留旧包、已安装应用和真实文档库。
 - 2026-11-18 合并 main（`159e3d4`）：解决 CONTRIBUTING.md 冲突，保留 AI 面板使用说明及 main 的 `vendor/zed` 维护流程；适配新版 GPUI 的焦点、滚动边界、菜单锚点和异步测试回调 API。构建说明改用 `gpui_platform/runtime_shaders`，未修改 vendor 源码。
@@ -27,7 +28,7 @@
 
 ## 进行中
 
-- main（`159e3d4`）合并到 `feat/own`：冲突及 GPUI 兼容问题已解决并通过验证，等待创建合并提交；保留合并状态，尚未提交。
+- main（`0f408c4`）合并到 `feat/own`：冲突及自动合并后的接口兼容问题已解决并验证，保留合并状态，等待创建合并提交。
 
 ## 待办
 
@@ -43,6 +44,7 @@
 
 ## 最近验证
 
+- 2026-11-22 合并验证：Release workspace 测试（`devtools`）972 项通过、8 项忽略；普通、`devtools`、`devtools,datatable` 三种配置 Release Clippy（`--all-targets -- -D warnings`）通过；本机均启用 `gpui_platform/runtime_shaders`，设置 `MACOSX_DEPLOYMENT_TARGET=13.0`。指南 XML 往返及 6 个指南资源一致性通过。完整模拟 Agent 面板回放和 Markdown 刷新防闪退回归通过；主页截图确认搜索、三个操作按钮及 AI 入口无重叠。测试仅使用临时文档库，恢复用例与图形回放在获得沙箱外权限后通过。本次修改文件空白检查通过；完整暂存 diff 的 9 处空白提示来自与 main 完全一致的两个 vendor 补丁，保留原样。
 - 2026-11-19 修复版 DMG：`dist-release.local-prz7w6rp/quiet-md-0.1.13-release-macos-arm64.dmg`，30,586,936 字节，SHA-256 `15487d7b044af9ff8b2334f039f8169506516d13fc0aff51b4df760462ccdb3e`。dist 构建、镜像 CRC、只读挂载、签名、arm64、包内二进制及 dSYM UUID 匹配通过，验证挂载已卸载。成品在临时库启动 15 秒无 panic，核对本机打开记录确认实际打开已有 `Startup.md`，随后仅结束本次测试进程。临时签名、未公证，关闭 `devtools`，未公开发布或替换已安装应用；验证文件与调试符号保留在产物目录。
 - 2026-11-19 Markdown 闪退回归：修复前在窗口回调栈内刷新稳定复现 `attempted to read a window that is already on the stack`；修复后，同一回归覆盖回调内刷新、外部版本同步到两个窗口、未保存内容保护及镜像保存状态，全部通过。Release workspace 测试 852 项通过、6 项忽略，普通／devtools 两种 Release Clippy（`--all-targets -- -D warnings`）、指南 XML 往返、指南资源一致性及 `git diff --check` 通过；本机均使用 `gpui_platform/runtime_shaders`，未修改文档内核或用户数据。
 - 2026-11-19 本地 DMG 重建：dist 构建、Release workspace 测试（852 项通过、6 项忽略）、普通／devtools 两种 Release Clippy（`--all-targets -- -D warnings`）、指南 XML 原样往返及 6 个指南资源一致性通过。恢复文件测试首轮受沙箱权限阻止，沙箱外完整重跑通过。DMG CRC、只读挂载、Applications 入口、版本、签名、thin arm64、包内二进制一致性及 dSYM UUID 检查通过，验证挂载已卸载。新包在临时文档库启动 15 秒仍存活、无 panic，随后仅结束本次测试进程；不代表已定位或修复此前报告的闪退。DMG 为 30,586,334 字节，SHA-256 `147a17ca29cb4cf9b527ac4a6677e6ad29898ca013b0f07b980e0b9e0a6d4865`，验证记录和调试符号位于产物目录。

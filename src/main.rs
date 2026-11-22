@@ -2,6 +2,9 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 pub(crate) const APP_ID: &str = "com.s1dashu.quietmd";
+/// 数据表 can be made and edited (feature `datatable`). Off, nothing offers one and
+/// one already in the library shows as a read-only placeholder, its file untouched.
+pub(crate) const DATATABLE: bool = cfg!(feature = "datatable");
 
 mod app;
 mod agent;
@@ -59,6 +62,7 @@ mod settings;
 mod table;
 mod l10n;
 mod themes;
+mod fonts;
 mod shortcuts;
 #[allow(dead_code, unused_imports)]
 mod feishu_theme;
@@ -198,6 +202,7 @@ pub(crate) fn init_app(cx: &mut App) {
     settings::apply_appearance(&settings::prefs().appearance);
     settings::sync_dark(cx);
     themes::load(&settings::prefs().theme_id(), false, || cx.text_system().all_font_names());
+    settings::check_fonts(cx);
 }
 
 #[cfg(target_family = "wasm")]

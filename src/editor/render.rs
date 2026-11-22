@@ -644,7 +644,7 @@ impl R<'_> {
                         .flex()
                         .items_center()
                         .whitespace_nowrap()
-                        .font_family(theme::UI_FONT)
+                        .font_family(theme::DOC_UI_FONT)
                         .font_weight(weight)
                         .text_size(px(size))
                         .text_color(Theme::text_caption())
@@ -673,6 +673,9 @@ impl R<'_> {
         let spec = self.spec_for(b, env);
         let lh = spec.line_height;
         let id = b.id;
+        // An item that reads right to left (see `text::row_starts`) keeps its
+        // marker on the right, beside the text.
+        let rtl = b.align == crate::model::Align::Left && super::bidi::rtl_line(b.text.text.split('\n').next().unwrap_or(""));
         let marker: AnyElement = match b.kind {
             // Drawn rather than typeset so the dot size (5.5) and its centring
             // on the line don't depend on how the font's bullet glyph renders.
@@ -685,7 +688,7 @@ impl R<'_> {
                     1 => dot.rounded_full().border_1().border_color(c),
                     _ => dot.size(px(4.5)).rounded(px(1.)).bg(c),
                 };
-                div().w(px(18.)).pl(px(5.)).mr(px(6.)).flex().child(dot).into_any_element()
+                div().w(px(18.)).when(!rtl, |d| d.pl(px(5.)).mr(px(6.))).when(rtl, |d| d.pr(px(5.)).ml(px(6.)).justify_end()).flex().child(dot).into_any_element()
             }
             BlockKind::Ordered { .. } => div()
                 .id(("ordered-number", id.0))
@@ -698,9 +701,10 @@ impl R<'_> {
                 }))
                 .min_w(px(18.))
                 .px(px(1.))
-                .mr(px(6.))
+                .when(!rtl, |d| d.mr(px(6.)))
+                .when(rtl, |d| d.ml(px(6.)))
                 .whitespace_nowrap()
-                .font_family(theme::UI_FONT)
+                .font_family(theme::DOC_UI_FONT)
                 .text_size(px(spec.size))
                 .text_color(theme::style().color("number.color").unwrap_or_else(Theme::text))
                 .child(core::ordered_marker(core::ordered_number(siblings, idx), env.depth))
@@ -715,7 +719,8 @@ impl R<'_> {
                 div()
                     .id(("todo", id.0))
                     .size(px(box_size))
-                    .mr(px(8.))
+                    .when(!rtl, |d| d.mr(px(8.)))
+                    .when(rtl, |d| d.ml(px(8.)))
                     .rounded(px(st.num("task.radius")))
                     .border_1()
                     .when(!done, |d| d.border_color(Theme::todo_box()).bg(crate::theme::raised(Theme::bg_body())).hover(|s| s.border_color(Theme::primary())))
@@ -747,6 +752,7 @@ impl R<'_> {
                 div()
                     .id(("row", id.0))
                     .flex()
+                    .when(rtl, |d| d.flex_row_reverse())
                     .when(todo, |d| {
                         d.mx(px(-3.))
                             .px(px(3.))
@@ -813,7 +819,7 @@ impl R<'_> {
         // Header: fold triangle, caption at x 29, then the toolbar (22 tall,
         // right-aligned), revealed on hover / while editing.
         let editing = self.focused && self.ed.core.sel.head.block == id;
-        let folded = self.ed.code_folded.contains(&id);
+        let folded = b.folded;
         // Handle hovered / its menu open (`.hovered`): light blue ring
         // over a clear body so the block tint shows; block-selected: blue
         // border on the gray body.
@@ -914,16 +920,13 @@ impl R<'_> {
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |e, _, _, cx| {
+                cx.listener(move |e, _, window, cx| {
                     cx.stop_propagation();
-                    if !e.code_folded.remove(&id) {
-                        e.code_folded.insert(id);
-                        // Leave the hidden code (it opens again if the caret comes back).
-                        if e.core.sel.head.block == id || e.core.sel.anchor.block == id {
-                            e.core.select_block(id);
-                        }
-                    }
-                    cx.notify();
+                    // Saved with the document; a caret in the hidden code leaves for the
+                    // block (it opens again if the caret comes back).
+                    e.core.set_code_folded(id, !folded);
+                    e.keep_read_only_fold();
+                    e.changed_preserving_viewport(window, cx);
                 }),
             );
         let border = if menu_on {
@@ -972,7 +975,7 @@ impl R<'_> {
                     .pr(px(6.))
                     .flex()
                     .items_center()
-                    .font_family(theme::UI_FONT)
+                    .font_family(theme::DOC_UI_FONT)
                     .children(caption)
                     .child(
                         div()
@@ -1079,8 +1082,6 @@ impl Editor {
         let links = self.links_key();
         // Rows whose look depends on editor state, not the document.
         let mut nonces = self.grid_overrides();
-        // A folded code block is a 40px row.
-        nonces.extend(self.code_folded.iter().map(|&id| (id, id.0.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1)));
         nonces.extend(self.image_nonces(focused).into_iter().chain(self.button_nonce()));
         // Walking a long document costs ~1.5ms (1M chars): skip it when
         // nothing the rows depend on changed, as on every scrolling frame.
@@ -1194,7 +1195,7 @@ impl Editor {
                 spec.line_height = theme::title().line_height;
                 spec.weight = FontWeight(theme::style().num("title.weight"));
                 if let Some(c) = theme::style().color("title.color") { spec.color = c; }
-                let tf = theme::style().font("title.font");
+                let tf = theme::title_font();
                 if tf != theme::body_font() { spec.font = Some(tf); }
                 cover = self.cover_el(window, cx);
                 div()
@@ -1615,7 +1616,7 @@ impl Editor {
             .size_full()
             .relative()
             // No fill of its own: the note panel behind it is white and rounded.
-            .font_family(theme::UI_FONT)
+            .font_family(theme::ui_family())
             .text_color(Theme::text())
             .on_mouse_move(cx.listener(Self::on_hover_move))
             .on_mouse_up(
@@ -1636,6 +1637,9 @@ impl Editor {
                 div()
                     .id("editor-page")
                     .size_full()
+                    // The note's own labels (list numbers, captions) keep the
+                    // platform face; the menus over it follow 界面字体.
+                    .font_family(theme::DOC_UI_FONT)
                     .cursor(CursorStyle::IBeam)
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
                     .on_drag_move(cx.listener(Self::file_drag_move))
@@ -1978,6 +1982,9 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
         let spec = self.spec_for(b, env);
         let lh = spec.line_height;
         let id = b.id;
+        // An item that reads right to left (see `text::row_starts`) keeps its
+        // marker on the right, beside the text.
+        let rtl = b.align == crate::model::Align::Left && super::bidi::rtl_line(b.text.text.split('\n').next().unwrap_or(""));
         let marker: AnyElement = match b.kind {
             // Drawn rather than typeset so the dot size (5.5) and its centring
             // on the line don't depend on how the font's bullet glyph renders.
@@ -1988,7 +1995,7 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                     1 => dot.rounded_full().border_1().border_color(Theme::primary()),
                     _ => dot.size(px(5.)).bg(Theme::primary()),
                 };
-                div().w(px(18.)).pl(px(4.)).mr(px(6.)).flex().child(dot).into_any_element()
+                div().w(px(18.)).when(!rtl, |d| d.pl(px(4.)).mr(px(6.))).when(rtl, |d| d.pr(px(4.)).ml(px(6.)).justify_end()).flex().child(dot).into_any_element()
             }
             BlockKind::Ordered { .. } => div()
                 .id(("ordered-number", id.0))
@@ -2001,7 +2008,8 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                 }))
                 .min_w(px(18.))
                 .px(px(2.))
-                .mr(px(6.))
+                .when(!rtl, |d| d.mr(px(6.)))
+                .when(rtl, |d| d.ml(px(6.)))
                 .whitespace_nowrap()
                 .font_family(crate::theme::NUMERAL_FONT)
                 .text_size(px(spec.size))
@@ -2013,7 +2021,8 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                 div()
                     .id(("todo", id.0))
                     .size(px(16.))
-                    .mr(px(8.))
+                    .when(!rtl, |d| d.mr(px(8.)))
+                    .when(rtl, |d| d.ml(px(8.)))
                     .rounded(px(4.))
                     .border_1()
                     .border_color(Theme::text())
@@ -2046,6 +2055,7 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                 div()
                     .id(("row", id.0))
                     .flex()
+                    .when(rtl, |d| d.flex_row_reverse())
                     .when(todo, |d| {
                         d.mx(px(-2.))
                             .px(px(2.))
@@ -2110,7 +2120,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
         // Header: fold triangle, caption at x 29, then the toolbar (22 tall,
         // right-aligned), revealed on hover / while editing.
         let editing = self.focused && self.ed.core.sel.head.block == id;
-        let folded = self.ed.code_folded.contains(&id);
+        let folded = b.folded;
         // Handle hovered / its menu open (`.hovered`): light blue ring
         // over a clear body so the block tint shows; block-selected: blue
         // border on the gray body.
@@ -2210,16 +2220,13 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |e, _, _, cx| {
+                cx.listener(move |e, _, window, cx| {
                     cx.stop_propagation();
-                    if !e.code_folded.remove(&id) {
-                        e.code_folded.insert(id);
-                        // Leave the hidden code (it opens again if the caret comes back).
-                        if e.core.sel.head.block == id || e.core.sel.anchor.block == id {
-                            e.core.select_block(id);
-                        }
-                    }
-                    cx.notify();
+                    // Saved with the document; a caret in the hidden code leaves for the
+                    // block (it opens again if the caret comes back).
+                    e.core.set_code_folded(id, !folded);
+                    e.keep_read_only_fold();
+                    e.changed_preserving_viewport(window, cx);
                 }),
             );
         let border = if menu_on {
@@ -2253,7 +2260,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
                     .pr(px(8.))
                     .flex()
                     .items_center()
-                    .font_family(theme::UI_FONT)
+                    .font_family(theme::DOC_UI_FONT)
                     .children(caption)
                     .child(
                         div()

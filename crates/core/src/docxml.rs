@@ -816,7 +816,7 @@ fn write_blocks(blocks: &[Block], s: &mut String, depth: usize) {
     }
 }
 
-/// Text, heading, list and todo blocks remember being folded.
+/// Text, heading, list, todo and code blocks remember being folded.
 fn folded_attr(folded: bool) -> &'static str {
     if folded { " folded=\"true\"" } else { "" }
 }
@@ -866,6 +866,7 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
             if *wrap {
                 s.push_str(" wrap=\"true\"");
             }
+            s.push_str(fo);
             s.push_str("><code>");
             s.push_str(&esc(&b.text.text));
             s.push_str("</code></pre>\n");
@@ -1386,6 +1387,7 @@ mod tests {
         assert_eq!(serialize(&doc), x);
         assert!(doc.blocks.iter().any(|b| matches!(&b.kind, BlockKind::Board(bd) if bd.elements.len() == 3 && bd.height == 360.)));
         assert!(doc.blocks.iter().any(|b| matches!(&b.kind, BlockKind::Raw { tag, .. } if tag == "whiteboard")), "a 飞书 board stays as it came");
+        assert!(doc.blocks.iter().any(|b| matches!(&b.kind, BlockKind::Code { .. }) && b.folded && b.text.text == "被折叠的代码"));
         let text = doc.plain_text();
         for s in ["被折叠的段落", "尾随空格 \n", "\n \n", "fn main() {\n    println!(\"<hi> & 'q'\");\n\n}", "a = 1\nb = 2", "\\frac{1}{2}", "空项下的段落", "画板 <&>"] {
             assert!(text.contains(s), "{s:?} missing from {text:?}");

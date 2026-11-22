@@ -529,7 +529,7 @@ impl Render for TableView {
         let state = self.state.clone();
         let st = state.read(cx);
         let root = div().id("table-view").key_context("Table").track_focus(&self.focus).relative().w_full().when(self.full, |d| d.h_full()).flex().flex_col()
-            .bg(Theme::bg_body()).font_family(crate::theme::UI_FONT).text_size(px(TEXT)).text_color(Theme::text())
+            .bg(Theme::bg_body()).font_family(crate::theme::DOC_UI_FONT).text_size(px(TEXT)).text_color(Theme::text())
             .on_key_down(cx.listener(keys::key_down))
             // a selected cell takes typed text (keys.rs, EntityInputHandler)
             .when(self.sel.is_some() && self.editing.is_none() && self.focus.is_focused(window), |d| {
