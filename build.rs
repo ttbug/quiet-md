@@ -12,7 +12,9 @@ fn main() {
     // site's live demo never has it: boards there draw CJK with the fallbacks.
     let web = std::env::var("CARGO_CFG_TARGET_FAMILY").is_ok_and(|f| f.split(',').any(|f| f == "wasm"));
     let xiaolai = std::env::var_os("CARGO_FEATURE_EMBED_XIAOLAI").is_some() && !web;
-    let skip: Vec<&str> = SKIP.iter().copied().chain((!linux).then_some("fonts/emoji/")).chain((!xiaolai).then_some("fonts/excalidraw/Xiaolai-Regular.ttf.zlib")).collect();
+    // Mermaid diagrams (src/mermaid.rs) need a system web view: macOS and Windows only.
+    let webview = matches!(std::env::var("CARGO_CFG_TARGET_OS").as_deref(), Ok("macos" | "windows"));
+    let skip: Vec<&str> = SKIP.iter().copied().chain((!linux).then_some("fonts/emoji/")).chain((!xiaolai).then_some("fonts/excalidraw/Xiaolai-Regular.ttf.zlib")).chain((!webview).then_some("mermaid/")).collect();
     embed("assets", "assets.rs", &skip);
     embed("shared-mock/library", "guides.rs", &[]);
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") { windows_resources(); }
@@ -58,8 +60,8 @@ END
 
 /// Files under assets/ the binary never reads: source art, the preview's dev
 /// icon (scripts/preview.sh), the Windows icon (linked as a resource below and
-/// used by the installer), themes (`include_str!` in src/themes.rs) and notes.
-const SKIP: &[&str] = &["branding/hamster-source.png", "branding/quiet-q/", "branding/app-icon-dev.png", "branding/app-icon.ico", "themes/", "onboarding/README.md"];
+/// used by the installer), themes (`include_str!` in src/themes.rs), notes and licenses.
+const SKIP: &[&str] = &["branding/hamster-source.png", "branding/quiet-q/", "branding/app-icon-dev.png", "branding/app-icon.ico", "themes/", "onboarding/README.md", "mermaid/LICENSE"];
 
 fn embed(source: &str, output: &str, skip: &[&str]) {
     // Read at run time: a compile-time path goes stale when the checkout moves.

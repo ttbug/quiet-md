@@ -12,9 +12,8 @@ impl Workspace {
         let (m, p) = (markdown, parent.clone());
         if !self.save_before(cx, move |w, window, cx| w.create_doc(m, p.clone(), window, cx)) { return; }
         let file_before = self.store.track_file_changes();
-        let mounted = parent.as_deref().is_some_and(|p| self.store.is_mounted(p));
-        let made = if mounted {
-            // In a folder under 本机文件: written there at once.
+        let made = if parent.is_some() {
+            // In a folder: written into that folder's root at once.
             let doc = crate::model::Document::default();
             if markdown { self.store.create_markdown_in(&doc, "", parent.as_deref()) } else { self.store.create_from_in(&doc, parent.as_deref()) }
         } else if markdown {
@@ -119,11 +118,14 @@ impl Workspace {
 
     pub(crate) fn creation_parent(&self) -> Option<String> {
         if self.view == View::Folder { self.folder_current.clone() }
-        else if self.view == View::Doc { self.current.as_ref().and_then(|id| self.entries.iter().find(|e| &e.id == id)).and_then(|e| e.meta.parent.clone()) }
+        // Beside the open page; beside its folder when it is the folder's 正文 (#357).
+        else if self.view == View::Doc { self.current.as_ref().map(|id| self.row_of(id)).and_then(|id| self.entries.iter().find(|e| e.id == id)).and_then(|e| e.meta.parent.clone()) }
         else { None }
     }
 
     pub(crate) fn open_folder(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        // A folder with a 正文 has no page of its own: it is that document (#357).
+        if let Some(note) = self.entries.iter().find(|e| e.id == id).and_then(|e| e.note.clone()) { return self.try_open(&note, window, cx); }
         let target = id.to_string();
         if !self.save_before(cx, move |w, window, cx| { w.open_folder(&target, window, cx); }) { return false; }
         self.editor = None;
@@ -195,12 +197,14 @@ impl Workspace {
                 .child(ui_text(label))
                 .on_click(cx.listener(move |w, _, window, cx| match &target { Some(t) => w.open(t, window, cx), None => w.show_view(View::Home, cx) }))
         };
-        let path = self.ancestors(&id);
-        // A folder under 本机文件 starts from there, which has no page of its own.
-        let first = if self.entries.iter().any(|e| e.id == id && e.meta.mounted()) {
-            div().flex_none().px(px(4.)).whitespace_nowrap().text_color(Theme::text_caption()).child(tr("本机文件", "Files on this computer")).into_any_element()
-        } else { link("home".into(), tr("我的文档", "My documents").into(), None).into_any_element() };
-        let mut crumbs = div().min_w_0().flex().items_center().text_size(px(17.)).line_height(px(24.)).child(first);
+        // A root's own row (two or more roots) is the first crumb, by name.
+        let path: Vec<_> = self.ancestors(&id).into_iter().filter(|e| crate::shared_store::root_of_row(&e.id).is_none()).collect();
+        // The path starts at its root folder, by that folder's name (W5).
+        let root = self.entries.iter().find(|e| e.id == id).map(|e| e.root.clone()).unwrap_or_default();
+        let first = link("home".into(), self.root_name(&root), None).into_any_element();
+        // A root's own page is the root: its name is the page's title, not a crumb before it.
+        let own = crate::shared_store::root_of_row(&id).is_some();
+        let mut crumbs = div().min_w_0().flex().items_center().text_size(px(17.)).line_height(px(24.)).when(!own, |d| d.child(first));
         for (i, e) in path.iter().enumerate() {
             if path.len() > 2 && i > 0 && i < path.len() - 1 {
                 if i == 1 {
@@ -211,7 +215,7 @@ impl Workspace {
             }
             crumbs = crumbs.child(sep()).child(link(e.id.clone(), display_title(&e.title), Some(e.id.clone())));
         }
-        crumbs = crumbs.child(sep()).child(div().min_w_0().px(px(4.)).overflow_hidden().whitespace_nowrap().text_ellipsis()
+        crumbs = crumbs.when(!own, |d| d.child(sep())).child(div().min_w_0().px(px(4.)).overflow_hidden().whitespace_nowrap().text_ellipsis()
             .font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).child(ui_text(title)));
         let doc = id.clone();
         let header = crate::trash::page_header_with(self, crumbs, 26., cx)

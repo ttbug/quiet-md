@@ -1,20 +1,22 @@
 pub use crate::theme::{craft, c, ca, rgbaf, ta, TITLE, MONO_FONT, BlockMetrics};
 pub use crate::theme::{ui_family, DOC_UI_FONT};
+pub use crate::themes::doc_len;
 /// The active theme's resolved style (themes.rs).
 pub fn style() -> &'static crate::themes::Style { crate::themes::active() }
-pub fn body_size() -> f32 { style().num("page.size") }
-pub fn body_line() -> f32 { style().num("page.line") }
+/// Body text at 外观 › 正文字号 (`themes::doc_len`), like every type metric below.
+pub fn body_size() -> f32 { doc_len(style().num("page.size")) }
+pub fn body_line() -> f32 { doc_len(style().num("page.line")) }
 pub fn block_gap() -> f32 { style().num("p.gap") }
 fn h(level: u8) -> u8 { level.clamp(1, 9) }
 pub fn heading_metrics(level: u8) -> BlockMetrics {
     let (s, l) = (style(), h(level));
-    BlockMetrics { size: s.num(&format!("h{l}.size")), line_height: s.num(&format!("h{l}.line")), mt: s.num(&format!("h{l}.mt")), mb: s.num(&format!("h{l}.mb")) }
+    BlockMetrics { size: doc_len(s.num(&format!("h{l}.size"))), line_height: doc_len(s.num(&format!("h{l}.line"))), mt: s.num(&format!("h{l}.mt")), mb: s.num(&format!("h{l}.mb")) }
 }
 pub fn heading_weight(level: u8) -> gpui::FontWeight { gpui::FontWeight(style().num(&format!("h{}.weight", h(level)))) }
 pub fn heading_font(level: u8) -> &'static str { crate::themes::doc_font(&format!("h{}.font", h(level))) }
 pub fn heading_color(level: u8) -> Option<gpui::Hsla> { style().color(&format!("h{}.color", h(level))) }
 /// The page title.
-pub fn title() -> BlockMetrics { BlockMetrics { size: style().num("title.size"), line_height: style().num("title.line"), mt: 0., mb: 0. } }
+pub fn title() -> BlockMetrics { BlockMetrics { size: doc_len(style().num("title.size")), line_height: doc_len(style().num("title.line")), mt: 0., mb: 0. } }
 /// Document text's family: 外观 › 文档字体 when the reader picked one, else the
 /// theme's. UI fonts stay the system's.
 pub fn body_font() -> &'static str { crate::themes::doc_font("page.font") }

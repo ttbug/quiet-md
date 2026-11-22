@@ -1937,6 +1937,16 @@ impl Editor {
         }
     }
 
+    /// 整理本文空格 (#293): the spaces typing would add, over the whole
+    /// document at once; one 撤销 takes them all back.
+    fn on_space_cjk(&mut self, _: &k::SpaceCjk, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.guard(window, cx) || self.read_only { return; }
+        let n = self.core.space_document();
+        if n == 0 { return self.toast(crate::settings::tr("没有需要加空格的地方", "No spaces to add"), cx); }
+        self.toast(&crate::localized_count!(n, "已加 {} 个空格", "Added {} space", "Added {} spaces", n), cx);
+        self.changed_preserving_viewport(window, cx);
+    }
+
     fn on_copy(&mut self, _: &k::Copy, window: &mut Window, cx: &mut Context<Self>) {
         if !self.guard(window, cx) {
             return;
@@ -2325,6 +2335,7 @@ impl Editor {
             .on_action(guard(cx, Self::on_select_all))
             .on_action(guard(cx, Self::on_copy))
             .on_action(guard(cx, Self::on_copy_markdown))
+            .on_action(guard(cx, Self::on_space_cjk))
             .on_action(guard(cx, Self::on_cut))
             .on_action(guard(cx, Self::on_paste))
             .on_action(guard(cx, Self::on_paste_plain))
@@ -2716,6 +2727,7 @@ impl Editor {
             return;
         }
         self.core.insert_text(&s);
+        if crate::settings::prefs().cjk_spacing { self.core.space_typed(s.len()); }
         if s == " " {
             let _ = self.core.markdown_block_shortcut() || self.core.markdown_divider() || self.core.autolink();
         } else if s == "-" {
@@ -2800,6 +2812,12 @@ impl EntityInputHandler for Editor {
         let r = from16(&t, range.start)..from16(&t, range.end);
         actual.replace(to16(&t, r.start)..to16(&t, r.end));
         Some(t[r].to_string())
+    }
+
+    /// The caret block's length: iOS (gpui_ios) brings up the keyboard only
+    /// for a handler that reports one.
+    fn text_length_utf16(&mut self, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+        Some(self.head_text()?.encode_utf16().count())
     }
 
     fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {

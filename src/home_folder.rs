@@ -433,7 +433,7 @@ impl Workspace {
         if !self.home.folders.drag.as_ref().is_some_and(|d| d.started && !d.returning) { return; }
         // Only folders on the page now: bounds linger for cards of pages left behind.
         let shown = if self.view == crate::app::View::Folder { self.level_entries(self.folder_current.as_deref()) } else { self.home_entries() };
-        let over = shown.iter().filter(|e| e.meta.folder.is_some())
+        let over = shown.iter().filter(|e| e.meta.folder.is_some() && e.note.is_none())
             .find(|e| self.home.folders.bounds.borrow().get(&e.id).is_some_and(|b| b.contains(&at)))
             .map(|e| e.id.clone());
         let Some(d) = self.home.folders.drag.as_mut() else { return };
@@ -624,7 +624,7 @@ impl Workspace {
         let fresh = self.home.folders.file_drop.as_ref().is_none_or(|d| d.landed.is_some());
         if fresh { self.home.folders.file_drop = Some(FileDrop::new(paths)); }
         let shown = if self.view == crate::app::View::Folder { self.level_entries(self.folder_current.as_deref()) } else { self.home_entries() };
-        let over = shown.iter().filter(|e| e.meta.folder.is_some())
+        let over = shown.iter().filter(|e| e.meta.folder.is_some() && e.note.is_none())
             .find(|e| self.home.folders.bounds.borrow().get(&e.id).is_some_and(|b| b.contains(&at)))
             .map(|e| e.id.clone());
         let Some(d) = self.home.folders.file_drop.as_mut() else { return };
@@ -678,7 +678,7 @@ impl Workspace {
         if !matches!(self.view, crate::app::View::Home | crate::app::View::Folder) { self.home.folders.file_drop = None; return None; }
         let dragging = cx.has_active_drag() || crate::devtools::file_drag();
         let target_title = |w: &Self, id: Option<&String>| id.and_then(|id| w.entries.iter().find(|e| &e.id == id)).map(|e| display_title(&e.title))
-            .unwrap_or_else(|| crate::settings::tr("我的文档", "My documents").to_string());
+            .unwrap_or_else(|| w.top_name());
         let page = if self.view == crate::app::View::Folder { self.folder_current.clone() } else { None };
         let d = self.home.folders.file_drop.as_ref()?;
         let place = target_title(self, d.landed.clone().flatten().as_ref().or(d.over.as_ref()).or(page.as_ref()));

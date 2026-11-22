@@ -2,7 +2,7 @@
 //! Deleted pages wait in the library's `trash/` for 30 days; each row is a
 //! deleted page together with the child pages that went with it.
 
-use crate::app::{Confirm, Workspace};
+use crate::app::{Confirm, ConfirmCancel, ConfirmOk, Workspace};
 use crate::settings::display_title;
 use crate::search::doc_icon;
 use crate::store::{TRASH_DAYS, TrashEntry};
@@ -13,7 +13,7 @@ use gpui::{prelude::FluentBuilder, *};
 
 pub const TRASH_MENU_W: f32 = 160.;
 
-struct ListedTrash { trash: Vec<TrashEntry>, warnings: Vec<String> }
+struct ListedTrash { lists: Vec<(String, Vec<TrashEntry>)>, warnings: Vec<String> }
 struct PurgedTrash { errors: Vec<String> }
 
 /// 剩余时间: whole days left before the automatic 彻底删除.
@@ -277,14 +277,24 @@ impl Workspace {
     fn purge_trash(&mut self, ids: Vec<String>, success: &'static str, cx: &mut Context<Self>) {
         if self.store.file_task_busy() || self.file_history.busy || self.tree_writes_pending() || ids.is_empty() { return; }
         let Some(task_guard) = self.store.begin_file_task() else { return };
-        let mut writer = self.store.tree_writer();
-        let gone = ids.clone();
+        // Each root's 回收站 is its own: one writer, and one write, per root.
+        let mut writers: Vec<(String, crate::store::Store, Vec<String>)> = vec![];
+        for id in &ids {
+            let Some(key) = self.store.trash_root(id) else { continue };
+            match writers.iter_mut().find(|(k, _, _)| *k == key) {
+                Some((_, _, v)) => v.push(id.clone()),
+                None => if let Some(w) = self.store.root_writer(&key) { writers.push((key, w, vec![id.clone()])); },
+            }
+        }
         let task = cx.background_executor().spawn(async move {
-            // The 回收站's index is written once, not once a page.
-            let errors = writer.purge_many(&gone).err().map(|e| e.to_string()).into_iter().collect();
-            let warnings = writer.take_warnings();
-            let trash = writer.list_trash();
-            (PurgedTrash { errors }, ListedTrash { trash, warnings })
+            let (mut errors, mut lists, mut warnings) = (vec![], vec![], vec![]);
+            for (key, mut writer, gone) in writers {
+                // The 回收站's index is written once, not once a page.
+                errors.extend(writer.purge_many(&gone).err().map(|e| e.to_string()));
+                warnings.extend(writer.take_warnings());
+                lists.push((key, writer.list_trash()));
+            }
+            (PurgedTrash { errors }, ListedTrash { lists, warnings })
         });
         // The rows go now; the 回收站 read back afterwards replaces this.
         let ids: std::collections::HashSet<String> = ids.into_iter().collect();
@@ -295,7 +305,7 @@ impl Workspace {
             let _task_guard = task_guard;
             let (done, listed) = task.await;
             let _ = this.update(cx, |w, cx| {
-                w.trash = listed.trash;
+                for (key, trash) in listed.lists { w.trash = w.store.merge_trash(&key, trash); }
                 let mut errors = done.errors;
                 errors.extend(listed.warnings.iter().map(|s| crate::settings::diagnostic(s)));
                 if errors.is_empty() { w.show_toast(success, cx); }
@@ -361,6 +371,64 @@ impl Workspace {
             let msg = warnings.iter().map(|s| crate::settings::diagnostic(s)).collect::<Vec<_>>().join(crate::settings::tr("；", "; "));
             self.show_toast_kind(crate::ui::ToastKind::Error, &msg, cx);
             self.status = crate::app::SaveStatus::Failed(msg);
+        }
+    }
+
+    /// The action button, and ↩ while the dialog is up.
+    pub(crate) fn confirm_ok(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(c) = self.confirm.take() else { return };
+        match c {
+            Confirm::Delete { ids, batch } => {
+                if batch {
+                    self.batch = None;
+                }
+                self.delete_docs(&ids, window, cx);
+            }
+            Confirm::Restore(id) => self.restore_doc(&id, cx),
+            Confirm::Purge(id) => self.purge_doc(&id, cx),
+            Confirm::EmptyTrash => self.empty_trash(cx),
+            Confirm::RemoveUnused(files) => self.remove_unused_assets(files, window, cx),
+            Confirm::Refs { show, no_ask } => {
+                if no_ask {
+                    let mut s = self.store.settings();
+                    s.refs_hide_no_ask = true;
+                    let _ = self.store.save_settings(&s);
+                }
+                self.set_refs_hidden(!show, cx);
+            }
+            Confirm::SaveFailed => self.resolve_save_failed(true, window, cx),
+            Confirm::Migrate(_) => self.migrate_library(window, cx),
+            Confirm::RemoveRoot(key, _) => self.remove_root(&key, window, cx),
+            Confirm::Import { what, target } => self.import_dropped(what, target, window, cx),
+        }
+        cx.notify();
+    }
+
+    /// 取消 and Esc: close the dialog, and drop what was waiting on a save.
+    pub(crate) fn dismiss_confirm(&mut self, cx: &mut Context<Self>) {
+        self.confirm = None;
+        self.after_save = None;
+        cx.notify();
+    }
+
+    /// A dialog takes focus as it opens, so ↩ can't reach the document
+    /// beneath, and gives it back where it was once it closes (unless what
+    /// the dialog did moved it on).
+    pub(crate) fn sync_confirm_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match (self.confirm.is_some(), self.confirm_return.is_some()) {
+            (true, false) => {
+                self.confirm_return = Some(window.focused(cx).map(|f| f.downgrade()));
+                window.focus(&self.confirm_focus, cx);
+            }
+            (false, true) => {
+                let back = self.confirm_return.take().flatten().and_then(|f| f.upgrade());
+                if !self.confirm_focus.is_focused(window) { return }
+                match back.or_else(|| self.editor.as_ref().map(|e| e.read(cx).focus.clone())) {
+                    Some(f) => window.focus(&f, cx),
+                    None => window.focus(&self.focus, cx),
+                }
+            }
+            _ => {}
         }
     }
 
@@ -430,10 +498,10 @@ impl Workspace {
                     false,
                 )
             }
-            Confirm::SwitchLibrary(root) => (
-                crate::settings::tr("换用这个文档库？", "Switch to this library?").to_string(),
-                crate::localized_format!("Quiet.md 会保存当前文档并重启，然后打开 {}。原来的文档库留在原处，不会移动或删除，之后可以再换回来。", "Quiet.md saves the open document, restarts and opens {}. The current library stays where it is, nothing is moved or deleted, and you can switch back later.", root.display()),
-                crate::settings::tr("切换并重启", "Switch and Restart"),
+            Confirm::RemoveRoot(_, name) => (
+                crate::localized_format!("从侧栏移除「{}」？", "Remove “{}” from the sidebar?", name),
+                crate::settings::tr("只是从侧栏去掉，文件夹里的文件不会删除。以后重新打开这个文件夹，置顶、历史版本和回收站都还在。", "It only leaves the sidebar; nothing in the folder is deleted. Open the folder again later and its pins, history and Trash are still there.").to_string(),
+                crate::settings::tr("移除", "Remove"),
                 false,
             ),
             Confirm::Import { what, target } => {
@@ -463,8 +531,13 @@ impl Workspace {
         };
         let ok = primary_button("confirm-ok", action);
         let ok = if danger { ok.bg(Theme::danger()).hover(|s| s.bg(theme::c(craft::R600))).active(|s| s.bg(theme::c(craft::R700))) } else { ok };
+        // The dialog holds focus while it is up (`sync_confirm_focus`): ↩ and Esc are its own keys.
         let dialog = dialog("confirm-dialog")
-            .w(px(if matches!(c, Confirm::SaveFailed | Confirm::Migrate(_) | Confirm::SwitchLibrary(_)) { 520. } else { 400. }))
+            .key_context("Confirm")
+            .track_focus(&self.confirm_focus)
+            .on_action(cx.listener(|w, _: &ConfirmOk, window, cx| w.confirm_ok(window, cx)))
+            .on_action(cx.listener(|w, _: &ConfirmCancel, _, cx| w.dismiss_confirm(cx)))
+            .w(px(if matches!(c, Confirm::SaveFailed | Confirm::Migrate(_)) { 520. } else { 400. }))
             .px(px(24.))
             .pt(px(20.))
             .pb(px(24.))
@@ -497,9 +570,7 @@ impl Workspace {
                     .child(secondary_button("confirm-cancel", if matches!(c, Confirm::Migrate(_)) { crate::settings::tr("稍后", "Later") } else { crate::settings::text("取消") }).on_click(cx.listener(|w, _, _, cx| {
                         // 稍后 asks again in a week, not at every launch.
                         if matches!(w.confirm, Some(Confirm::Migrate(_))) { crate::settings::migrate_later(); }
-                        w.confirm = None;
-                        w.after_save = None;
-                        cx.notify();
+                        w.dismiss_confirm(cx);
                     })))
                     .when(matches!(c, Confirm::SaveFailed), |d| {
                         d.child(secondary_button("confirm-save-copy", crate::settings::tr("另存副本", "Save a copy")).on_click(cx.listener(|w, _, window, cx| {
@@ -510,34 +581,7 @@ impl Workspace {
                             w.resolve_save_failed(false, window, cx);
                         })))
                     })
-                    .child(ok.on_click(cx.listener(|w, _, window, cx| {
-                        let Some(c) = w.confirm.take() else { return };
-                        match c {
-                            Confirm::Delete { ids, batch } => {
-                                if batch {
-                                    w.batch = None;
-                                }
-                                w.delete_docs(&ids, window, cx);
-                            }
-                            Confirm::Restore(id) => w.restore_doc(&id, cx),
-                            Confirm::Purge(id) => w.purge_doc(&id, cx),
-                            Confirm::EmptyTrash => w.empty_trash(cx),
-                            Confirm::RemoveUnused(files) => w.remove_unused_assets(files, window, cx),
-                            Confirm::Refs { show, no_ask } => {
-                                if no_ask {
-                                    let mut s = w.store.settings();
-                                    s.refs_hide_no_ask = true;
-                                    let _ = w.store.save_settings(&s);
-                                }
-                                w.set_refs_hidden(!show, cx);
-                            }
-                            Confirm::SaveFailed => w.resolve_save_failed(true, window, cx),
-                            Confirm::Migrate(_) => w.migrate_library(window, cx),
-                            Confirm::SwitchLibrary(root) => cx.defer(move |cx| crate::app::switch_library(root, cx)),
-                            Confirm::Import { what, target } => w.import_dropped(what, target, window, cx),
-                        }
-                        cx.notify();
-                    }))),
+                    .child(ok.on_click(cx.listener(|w, _, window, cx| w.confirm_ok(window, cx)))),
             );
         Some(
             deferred(
