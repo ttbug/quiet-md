@@ -15,7 +15,11 @@ categories = ["text-editors"]
 # still being polished. Off: no way to make one; existing ones show a read-only
 # placeholder and are left as they are (`crate::DATATABLE`).
 [features]
-devtools = []
+devtools = ["embed-xiaolai"]
+# `embed-xiaolai`: the board's CJK font (14 MB) compiled in instead of fetched
+# when first needed (src/font_downloads.rs). On with `devtools`, so harness
+# screenshots never depend on the network; off in shipped builds.
+embed-xiaolai = []
 datatable = []
 
 # `fdl_core` is the GPUI-free document engine; plain `cargo test` covers both.
@@ -49,6 +53,8 @@ base64 = "0.22"
 resvg = { version = "0.45", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 # the board's Xiaolai font is stored deflated (src/board/fonts.rs)
 miniz_oxide = "0.9"
+# 设置's font lists read what each installed family is (src/font_classes.rs)
+ttf-parser = "0.25"
 minisign-verify = "0.3.0"
 sha2 = "0.10.9"
 log = "0.4"

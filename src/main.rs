@@ -63,6 +63,8 @@ mod table;
 mod l10n;
 mod themes;
 mod fonts;
+mod font_classes;
+mod font_downloads;
 mod shortcuts;
 #[allow(dead_code, unused_imports)]
 mod feishu_theme;
@@ -191,6 +193,7 @@ pub(crate) fn init_app(cx: &mut App) {
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     editor::emoji::load_font(cx);
     editor::math::load_fonts(cx);
+    font_downloads::init(cx);
     board::fonts::load(cx);
     editor::image::init_pictures(cx);
     input::bind_keys(cx);
@@ -203,6 +206,7 @@ pub(crate) fn init_app(cx: &mut App) {
     settings::sync_dark(cx);
     themes::load(&settings::prefs().theme_id(), false, || cx.text_system().all_font_names());
     settings::check_fonts(cx);
+    cx.observe_global::<font_downloads::Changed>(settings::font_changed).detach();
 }
 
 #[cfg(target_family = "wasm")]

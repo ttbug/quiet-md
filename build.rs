@@ -7,9 +7,12 @@ use std::path::Path;
 fn main() {
     // The bundled emoji font is for Linux only: macOS and Windows have color emoji fonts GPUI draws.
     let linux = matches!(std::env::var("CARGO_CFG_TARGET_OS").as_deref(), Ok("linux" | "freebsd"));
-    // The site's live demo leaves out Xiaolai (14 MB): boards there draw CJK with the browser's font.
+    // Xiaolai (14 MB) is fetched the first time a board needs it (src/font_downloads.rs);
+    // `embed-xiaolai` (with `devtools`) keeps it in for tests and screenshots. The
+    // site's live demo never has it: boards there draw CJK with the fallbacks.
     let web = std::env::var("CARGO_CFG_TARGET_FAMILY").is_ok_and(|f| f.split(',').any(|f| f == "wasm"));
-    let skip: Vec<&str> = SKIP.iter().copied().chain((!linux).then_some("fonts/emoji/")).chain(web.then_some("fonts/excalidraw/Xiaolai-Regular.ttf.zlib")).collect();
+    let xiaolai = std::env::var_os("CARGO_FEATURE_EMBED_XIAOLAI").is_some() && !web;
+    let skip: Vec<&str> = SKIP.iter().copied().chain((!linux).then_some("fonts/emoji/")).chain((!xiaolai).then_some("fonts/excalidraw/Xiaolai-Regular.ttf.zlib")).collect();
     embed("assets", "assets.rs", &skip);
     embed("shared-mock/library", "guides.rs", &[]);
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") { windows_resources(); }

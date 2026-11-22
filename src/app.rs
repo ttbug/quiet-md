@@ -440,6 +440,9 @@ impl Workspace {
     fn build_window(quick: bool, document: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         crate::settings::load();
         crate::settings::check_fonts(cx);
+        // 文档字体's download list shows progress and what arrived.
+        cx.observe_global::<crate::font_downloads::Tick>(|ws, cx| if ws.font_menu.is_some() { cx.notify() }).detach();
+        cx.observe_global::<crate::font_downloads::Changed>(|_, cx| cx.notify()).detach();
         if !cx.has_global::<SharedStore>() { cx.set_global(SharedStore::open().expect("open document library")); }
         let mut store = cx.global::<SharedStore>().clone();
         let entries = store.list();
@@ -1010,7 +1013,7 @@ impl Workspace {
         self.theme_menu = None;
         self.lang_menu = None;
         self.pref_menu = None;
-        self.font_menu = None;
+        self.close_font_menu(cx);
         self.home.sort_menu = false;
         cx.notify();
     }

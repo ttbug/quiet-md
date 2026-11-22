@@ -103,6 +103,12 @@ impl Editor {
                     e.changed_preserving_viewport(window, cx);
                 }
             }
+            // the window's toast (the document's isn't drawn over the board),
+            // once this editor is no longer being updated (the workspace clears its toast)
+            BoardEvent::Toast(msg) => {
+                let (ws, msg) = (window.root::<crate::app::Workspace>().flatten(), msg.clone());
+                cx.defer(move |cx| { if let Some(ws) = ws { ws.update(cx, |ws, cx| ws.show_toast_kind(crate::editor_ui::ToastKind::Info, &msg, cx)); } });
+            }
         });
         self.boards.saved_once = false;
         self.menu = None;
