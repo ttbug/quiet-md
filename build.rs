@@ -17,6 +17,7 @@ fn main() {
     let skip: Vec<&str> = SKIP.iter().copied().chain((!linux).then_some("fonts/emoji/")).chain((!xiaolai).then_some("fonts/excalidraw/Xiaolai-Regular.ttf.zlib")).chain((!webview).then_some("mermaid/")).collect();
     embed("assets", "assets.rs", &skip);
     embed("shared-mock/library", "guides.rs", &[]);
+    embed("shared-mock/library-zh", "guides_zh.rs", &[]);
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") { windows_resources(); }
 }
 
