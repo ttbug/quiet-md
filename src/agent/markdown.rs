@@ -52,7 +52,7 @@ fn render_block(block: &Block, id: &str, number: u32) -> AnyElement {
             return outer.rounded(px(6.)).border_1().border_color(Theme::code_border()).bg(Theme::code_bg())
                 .child(div().px(px(8.)).py(px(4.)).flex().items_center().justify_between().text_size(px(11.)).text_color(Theme::text_caption())
                     .child(lang.clone())
-                    .child(ui::secondary_button("copy", tr("复制", "Copy")).on_click(move |_, _, cx| {
+                    .child(crate::design::Button::outline("copy").sized(crate::design::ButtonSize::Sm).label(tr("复制", "Copy")).on_click(move |_, _, cx| {
                         let mut fake = crate::clipboard::FAKE_CLIPBOARD.lock().unwrap();
                         if let Some(clipboard) = fake.as_mut() {
                             clipboard.text = code.clone(); clipboard.html = None; clipboard.images.clear();

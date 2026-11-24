@@ -4,7 +4,8 @@
 //! user really needs to change lives here.
 
 use fdl_core::vfs::PathExt as _;
-use crate::{app::{View, Workspace}, theme::{self, craft, Theme}, themes, ui};
+use crate::{app::{View, Workspace}, theme::{self, Theme}, themes, ui};
+use crate::design::{Button, ButtonSize, Card, Field, FieldSize, MenuItem, MenuLabel, Popover, Segment, Segmented, Separator, Switch, menu};
 use crate::ui::{TitleBarExt, TipExt};
 use crate::input::{TextField, TextFieldEvent};
 use crate::sidebar as sb;
@@ -153,6 +154,10 @@ pub struct Preferences {
     pub recent_doc_fonts: Vec<String>,
     #[serde(default)]
     pub recent_ui_fonts: Vec<String>,
+    /// 文档库 › 快速笔记保存到: the 工作区 root key quick notes go to; empty,
+    /// or a root that is gone, is the first open root (2.8).
+    #[serde(default)]
+    pub quick_note_root: String,
 }
 
 /// A week between asks to move the library to real folders.
@@ -191,7 +196,7 @@ fn system_lang() -> Lang {
 impl Default for Preferences {
     fn default() -> Self {
         let lang = system_lang();
-        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), doc_size: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![] }
+        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), doc_size: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![], quick_note_root: String::new() }
     }
 }
 
@@ -481,37 +486,32 @@ const NAV: [Option<Page>; 6] = [Some(Page::General), Some(Page::Appearance), Som
 
 const COLUMN_W: f32 = 640.;
 
-/// A titled group: the caption above, then the rows in one rounded card,
-/// split by hairlines.
-pub(crate) fn group(title: Option<&'static str>, rows: Vec<AnyElement>) -> Div {
+/// A titled group: the caption above, then the rows in one card, split by
+/// `Separator`s.
+pub(crate) fn group(id: impl Into<ElementId>, title: Option<&'static str>, rows: Vec<AnyElement>) -> Div {
     let n = rows.len();
-    div().w_full().flex().flex_col().gap(px(8.))
-        .children(title.map(caption))
-        .child(div().w_full().flex().flex_col().rounded(px(12.)).border_1().border_color(Theme::line_border()).bg(crate::theme::raised(Theme::bg_body())).overflow_hidden()
-            .children(rows.into_iter().enumerate().map(move |(i, r)| div().w_full().flex().flex_col().when(i + 1 < n, |d| d.border_b_1().border_color(ui::list_line())).child(r))))
+    let mut card = Card::new(id).w_full().overflow_hidden();
+    for (i, r) in rows.into_iter().enumerate() {
+        card = card.child(div().w_full().flex().flex_col().child(r));
+        if i + 1 < n { card = card.child(Separator::new()); }
+    }
+    div().w_full().flex().flex_col().gap(px(8.)).children(title.map(caption)).child(card)
 }
 
 pub(crate) fn caption(t: &'static str) -> Div {
     div().px(px(4.)).text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 5.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::sidebar_section()).child(t)
 }
 
-/// One setting: title and an optional description on the left, the control on the right.
+/// One setting: `design::Item`, its control on the right.
 fn row(title: impl Into<SharedString>, desc: Option<SharedString>, control: impl IntoElement) -> Div {
-    div().w_full().min_h(px(48.)).px(px(16.)).py(px(10.)).flex().items_center().justify_between().gap(px(24.))
-        .child(div().flex_1().min_w_0().flex().flex_col().gap(px(2.))
-            .child(div().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).text_color(Theme::text()).child(title.into()))
-            .children(desc.map(|d| div().text_size(px(theme::ui_font_small())).line_height(px(theme::ui_font_small() + 5.)).text_color(Theme::text_caption()).child(d))))
-        .child(div().flex_none().flex().items_center().gap(px(8.)).child(control))
+    div().w_full().child(crate::design::Item::new(title).description(desc).child(control))
 }
 
 fn desc(s: &'static str) -> Option<SharedString> { Some(s.into()) }
 
-/// The switch: the accent when on, black 16% when off, a white knob.
+/// A `Switch` that takes the click (the switch itself only draws).
 pub(crate) fn switch(id: impl Into<ElementId>, on: bool) -> Stateful<Div> {
-    div().id(id).flex_none().w(px(32.)).h(px(19.)).p(px(2.)).rounded_full().cursor_pointer().flex().items_center()
-        .when(on, |d| d.bg(Theme::primary()).justify_end())
-        .when(!on, |d| d.bg(theme::ca(craft::N1000, 0.16)).justify_start())
-        .child(div().size(px(15.)).rounded_full().bg(gpui::white()).shadow(theme::shadow_button()))
+    div().id(id).flex_none().flex().items_center().cursor_pointer().child(Switch::new(on))
 }
 
 /// 外观 › 主题 CSS (duplicate, edit, restore a theme's stylesheet): hidden in
@@ -522,7 +522,7 @@ const THEME_CSS: bool = false;
 /// is picked and which is highlighted, and what picking one does.
 pub struct PrefMenu {
     id: &'static str,
-    labels: Vec<&'static str>,
+    labels: Vec<SharedString>,
     selected: usize,
     focused: usize,
     on: std::rc::Rc<dyn Fn(&mut Workspace, usize, &mut Context<Workspace>)>,
@@ -716,8 +716,8 @@ fn font_row(family: &str, dl: Option<&'static str>, flat: bool, g: SharedString,
     let e = dl.and_then(fd::entry);
     let zh = matches!(lang(), Lang::Zh | Lang::ZhTw);
     let info = font_info(family, e);
-    let small = |t: String| div().flex_none().text_size(px(theme::ui_font_small() - 1.)).line_height(px(theme::ui_font_small() + 3.)).text_color(Theme::text_caption()).child(t);
-    let tag = |t: &str| small(t.to_string()).px(px(5.)).rounded(px(4.)).bg(Theme::fill_hover());
+    let small = |t: String| div().flex_none().text_size(px(crate::design::geo().text_xs)).text_color(crate::design::color::muted_foreground()).child(t);
+    let tag = |t: &str| crate::design::Badge::new(t.to_string());
     let here = e.is_none_or(|e| fd::on_disk(&e.id) || crate::fonts::installed(&e.family, cx) && !fd::registered(&e.id));
     let drawable = e.is_none_or(|e| crate::fonts::installed(&e.family, cx) || fd::fonts(&e.id).is_some() && fd::register(&e.id, cx.text_system()));
     let mut tags: Vec<&str> = vec![];
@@ -730,72 +730,57 @@ fn font_row(family: &str, dl: Option<&'static str>, flat: bool, g: SharedString,
         Some(e) if !here => {
             let mb = e.size() as f64 / 1e6;
             div().flex_none().flex().items_center().gap(px(4.)).child(small(if mb < 10. { format!("{mb:.1} MB") } else { format!("{mb:.0} MB") }))
-                .child(svg().path("editor-icons/download.svg").size(px(13.)).text_color(Theme::icon())).into_any_element()
+                .child(crate::design::icon("download", 14., crate::design::color::muted_foreground())).into_any_element()
         }
-        _ => div().flex_none().w(px(14.)).when(picked, |d| d.child(ui::menu_glyph("check", 14., g.clone()))).into_any_element(),
+        _ => div().flex_none().w(px(16.)).flex().justify_center().when(picked, |d| d.child(crate::design::icon("check", 14., crate::design::color::foreground()))).into_any_element(),
     };
     let fav = prefs().font_favorites.iter().any(|f| f.eq_ignore_ascii_case(family));
     let label: SharedString = e.map_or_else(|| family.to_string(), |e| e.name().to_string()).into();
-    let sample = if drawable { div().font_family(SharedString::from(family.to_string())).text_color(Theme::text_caption()).child(font_sample()) }
-        else { div().text_color(Theme::text_disabled()).child(tr("下载后可预览", "Preview after download")) };
+    let sample = if drawable { div().font_family(SharedString::from(family.to_string())).text_color(crate::design::color::muted_foreground()).child(font_sample()) }
+        else { div().text_color(crate::design::color::disabled()).child(tr("下载后可预览", "Preview after download")) };
     let (del, star) = (dl.map(str::to_string), family.to_string());
     let hover_key = key.clone();
-    div().w_full().flex().flex_col().child(ui::menu_row(g.clone(), g.clone())
-        .when(focused, |d| d.bg(Theme::fill_hover()))
+    div().w_full().flex().flex_col().child(MenuItem::new(g.clone()).selected(focused)
         .on_hover(cx.listener(move |w, hovered: &bool, _, cx| if *hovered { w.preview_font(hover_key.clone(), row, cx) }))
         .on_click(cx.listener(move |w, _, window, cx| w.pick_font(key.clone(), target, window, cx)))
-        .child(div().flex_none().w(px(150.)).overflow_hidden().child(ui::menu_label(label, g.clone(), gpui::white())))
+        .child(div().flex_none().w(px(150.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui::ui_text(label)))
         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(theme::ui_font())).child(sample))
         .children(tags.into_iter().map(tag))
         .child(status)
-        .when(e.is_some_and(|e| fd::on_disk(&e.id) && !fd::pending(&e.id)), |d| d.child(div().id(SharedString::from(format!("font-del-{}", del.clone().unwrap_or_default()))).flex_none().size(px(20.)).flex().items_center().justify_center().rounded(px(5.))
-            .hover(|s| s.bg(Theme::fill_hover_strong())).child(ui::icon("bin", 13., Theme::icon()))
+        .when(e.is_some_and(|e| fd::on_disk(&e.id) && !fd::pending(&e.id)), |d| d.child(Button::ghost(SharedString::from(format!("font-del-{}", del.clone().unwrap_or_default()))).sized(ButtonSize::Xs).icon("bin")
             .on_click(cx.listener(move |w, _, _, cx| { cx.stop_propagation(); if let Some(id) = &del { w.delete_download(id, cx) } }))))
-        .child(div().id(SharedString::from(format!("{g}-star"))).flex_none().size(px(20.)).flex().items_center().justify_center().rounded(px(5.))
-            .hover(|s| s.bg(Theme::fill_hover_strong()))
-            .child(ui::icon("star", 13., if fav { Theme::primary() } else { Theme::text_disabled() }))
+        .child(Button::ghost(SharedString::from(format!("{g}-star"))).sized(ButtonSize::Xs)
+            .child(crate::design::icon("star", 14., if fav { crate::design::color::primary() } else { crate::design::color::disabled() }))
             .on_click(cx.listener(move |w, _, _, cx| { cx.stop_propagation(); w.toggle_favorite(&star, cx) }))))
 }
 
-/// A segmented control: a grey groove and a white selected pill.
-fn segmented(id: &'static str, labels: &[&'static str], selected: usize, on: impl Fn(&mut Workspace, usize, &mut Context<Workspace>) + Clone + 'static, cx: &mut Context<Workspace>) -> Div {
-    div().flex_none().h(px(28.)).p(px(2.)).flex().gap(px(2.)).rounded(px(9.)).bg(Theme::fill_hover_strong())
-        .children(labels.iter().enumerate().map(|(i, label)| {
-            let on = on.clone();
-            div().id((id, i)).h_full().px(px(12.)).flex().items_center().justify_center().rounded(px(7.)).cursor_pointer()
-                .text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 5.))
-                // In dark mode the picked segment is lighter than the groove (macOS: #636366).
-                .when(i == selected, |d| d.bg(if theme::dark() { theme::rgbaf(0x63, 0x63, 0x66, 1.) } else { Theme::bg_body() }).shadow(theme::shadow_button()).text_color(Theme::text()))
-                .when(i != selected, |d| d.text_color(Theme::text_caption()).hover(|s| s.text_color(Theme::text())))
-                .child(*label)
-                .on_click(cx.listener(move |w, _, _, cx| on(w, i, cx)))
-        }))
+/// A segmented control, each segment `(id, i)`.
+fn segmented(id: &'static str, labels: &[&'static str], selected: usize, on: impl Fn(&mut Workspace, usize, &mut Context<Workspace>) + Clone + 'static, cx: &mut Context<Workspace>) -> Segmented {
+    Segmented::new().children(labels.iter().enumerate().map(|(i, label)| {
+        let on = on.clone();
+        Segment::new((id, i), *label).selected(i == selected).on_click(cx.listener(move |w, _, _, cx| on(w, i, cx)))
+    }))
 }
 
-/// A keyboard shortcut chip; `recording` shows it waiting for keys.
-pub(crate) fn keycap(id: impl Into<ElementId>, key: &str, recording: bool) -> Stateful<Div> {
-    div().id(id).flex_none().min_w(px(144.)).min_h(px(28.)).px(px(14.)).py(px(4.)).flex().items_center().justify_center().rounded(px(7.)).cursor_pointer()
-        .text_size(px(theme::ui_font_small())).line_height(px(theme::ui_font_small() + 4.))
-        .when(recording, |d| d.bg(crate::theme::raised(Theme::bg_body())).border_1().border_color(Theme::primary()).text_color(Theme::primary()).child(if key.is_empty() { tr("按下新的组合键…", "Press keys…").to_string() } else { crate::shortcuts::pretty(key) }))
-        .when(!recording, |d| d.bg(Theme::fill_hover()).border_1().border_color(transparent_black()).text_color(Theme::text()).hover(|s| s.bg(Theme::fill_hover_strong())).child(crate::shortcuts::pretty(key)))
+/// A keyboard shortcut: its keys as `Kbd`s in a field, which a click puts in
+/// recording (`recording`: focused, waiting for keys).
+pub(crate) fn keycap(id: impl Into<ElementId>, key: &str, recording: bool) -> Field { keys_field(id, key, recording, tr("按下新的组合键…", "Press keys…")) }
+
+/// `keycap` with its own words while waiting for keys.
+pub(crate) fn keys_field(id: impl Into<ElementId>, key: &str, recording: bool, waiting: &'static str) -> Field {
+    let muted = |t: &str| div().text_color(crate::design::color::muted_foreground()).child(t.to_string()).into_any_element();
+    let body = if key.is_empty() { muted(if recording { waiting } else { tr("未设置", "Not set") }) } else { crate::design::KbdGroup::new(crate::shortcuts::strokes(key)).into_any_element() };
+    Field::new(id).sized(FieldSize::Sm).focused(recording).min_w(px(144.)).justify_center().cursor_pointer().child(body)
 }
 
-/// A small text button (恢复默认 …).
-pub(crate) fn link_button(id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> { link_button_hover(id, label, Theme::fill_hover()) }
-
-/// `link_button` with its own hover fill: GPUI takes one `.hover()` per
-/// element (a second one asserts in debug builds).
-pub(crate) fn link_button_hover(id: impl Into<ElementId>, label: &'static str, hover: Hsla) -> Stateful<Div> {
-    div().id(id).flex_none().h(px(26.)).px(px(10.)).flex().items_center().rounded(px(7.)).cursor_pointer()
-        .text_size(px(theme::ui_font_small())).line_height(px(theme::ui_font_small() + 4.)).text_color(Theme::primary()).hover(move |s| s.bg(hover))
-        .child(label)
+/// A small text button (恢复默认 …): a ghost button.
+pub(crate) fn link_button(id: impl Into<ElementId>, label: &'static str) -> Button {
+    Button::ghost(id).label(label)
 }
 
-pub(crate) fn button(id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
-    div().id(id).flex_none().h(px(28.)).px(px(12.)).flex().items_center().justify_center().rounded(px(8.)).cursor_pointer()
-        .bg(crate::theme::raised(Theme::bg_body())).border_1().border_color(Theme::button_border()).shadow(theme::shadow_button())
-        .hover(|s| s.bg(theme::c(craft::N100))).active(|s| s.bg(theme::c(craft::N200)))
-        .text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 5.)).text_color(Theme::text()).child(label)
+/// A row's button: an outline one at the panel size.
+pub(crate) fn button(id: impl Into<ElementId>, label: &'static str) -> Button {
+    Button::outline(id).sized(ButtonSize::Sm).label(label)
 }
 
 // ---- theme preview
@@ -804,8 +789,8 @@ pub(crate) fn button(id: impl Into<ElementId>, label: &'static str) -> Stateful<
 /// masks have no radius), so the page rounds its own bottom corners to the
 /// group's (`SAMPLE_RADIUS`) instead of being clipped.
 const PAGE_S: f32 = 0.9;
-/// The settings group's radius (12) inside its 1px border.
-const SAMPLE_RADIUS: f32 = 11.;
+/// The settings group's radius (the card's).
+const SAMPLE_RADIUS: f32 = crate::design::G.card_r;
 
 /// 外观's sample page: a document with most of what a theme styles (headings,
 /// long paragraphs with bold and italics, mixed Chinese and Latin text, lists,
@@ -940,14 +925,9 @@ fn badge(t: &themes::Theme) -> Option<&'static str> {
     if t.customized() { Some(tr("已修改", "Edited")) } else if t.bundled.is_none() { Some(tr("自定义", "Custom")) } else { None }
 }
 
-/// A pop-up button (macOS): the current choice and a chevron on `button`'s white pill.
-fn popup_button(id: impl Into<ElementId>, label: impl Into<SharedString>, open: bool) -> Stateful<Div> {
-    div().id(id).flex_none().max_w(px(220.)).h(px(28.)).pl(px(12.)).pr(px(8.)).flex().items_center().gap(px(6.)).rounded(px(8.)).cursor_pointer()
-        .bg(if open { theme::c(craft::N100) } else { crate::theme::raised(Theme::bg_body()) }).border_1().border_color(Theme::button_border()).shadow(theme::shadow_button())
-        .hover(|s| s.bg(theme::c(craft::N100))).active(|s| s.bg(theme::c(craft::N200)))
-        .text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 5.)).text_color(Theme::text())
-        .child(div().min_w_0().truncate().child(label.into()))
-        .child(ui::icon("chevron-down", 12., Theme::icon()))
+/// A pop-up button: a select showing the current choice, open while its menu is.
+fn popup_button(id: impl Into<ElementId>, label: impl Into<SharedString>, open: bool) -> Field {
+    Field::select(id).sized(FieldSize::Sm).max_w(px(220.)).open(open).child(div().min_w_0().truncate().child(ui::ui_text(label.into())))
 }
 
 fn apply_theme(w: &mut Workspace, id: String, cx: &mut Context<Workspace>) {
@@ -967,34 +947,33 @@ impl Workspace {
         let rows: Vec<AnyElement> = list.iter().map(|t| {
             let g = SharedString::from(format!("theme-opt-{}", t.id));
             let (id, hover_id) = (t.id.clone(), t.id.clone());
-            ui::menu_row(g.clone(), g.clone())
-                .when(&t.id == focused, |d| d.bg(Theme::fill_hover()))
-                .child(div().flex_1().min_w_0().overflow_hidden().child(ui::menu_label(t.name().to_string(), g.clone(), gpui::white())))
-                .children(badge(t).map(|b| div().flex_none().text_size(px(11.)).text_color(Theme::text_caption()).child(ui::menu_label(b, g.clone(), gpui::white()))))
-                .child(div().flex_none().w(px(14.)).when(t.id == current, |d| d.child(ui::menu_glyph("check", 14., g.clone()))))
+            MenuItem::new(g).label(t.name().to_string()).selected(&t.id == focused)
+                .children(badge(t).map(|b| crate::design::Badge::new(label(b))))
+                .checked(t.id == current)
                 .on_hover(cx.listener(move |w, hovered: &bool, _, cx| if *hovered && w.theme_menu.as_ref() != Some(&hover_id) { w.theme_menu = Some(hover_id.clone()); cx.notify(); }))
                 .on_click(cx.listener(move |w, _, _, cx| apply_theme(w, id.clone(), cx)))
                 .into_any_element()
         }).collect();
         drop(list);
         let anchor = self.theme_anchor.clone();
-        let menu = ui::popover().id("theme-menu").occlude().flex()
+        let menu = Popover::new("theme-menu")
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 // A press on the button itself: its click closes the menu.
                 if anchor.get().is_some_and(|b| b.contains(&ev.position)) { return }
                 w.theme_menu = None;
                 cx.notify();
             }))
-            .child(div().id("theme-menu-list").w(px(200.)).max_h(px(302.)).overflow_y_scroll().py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
+            .child(div().id("theme-menu-list").w(px(220.)).max_h(px(302.)).overflow_y_scroll().py(px(menu::PAD)).flex().flex_col().children(rows));
         Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
     /// A choice as a dropdown button, like 界面语言's: the picked label, a menu of the rest.
-    fn select(&self, id: &'static str, labels: Vec<&'static str>, selected: usize, on: impl Fn(&mut Workspace, usize, &mut Context<Workspace>) + 'static, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn select<L: Into<SharedString>>(&self, id: &'static str, labels: Vec<L>, selected: usize, on: impl Fn(&mut Workspace, usize, &mut Context<Workspace>) + 'static, cx: &mut Context<Self>) -> Field {
+        let labels: Vec<SharedString> = labels.into_iter().map(Into::into).collect();
         let open = self.pref_menu.as_ref().is_some_and(|m| m.id == id);
         let anchors = self.pref_anchors.clone();
         let on: std::rc::Rc<dyn Fn(&mut Workspace, usize, &mut Context<Workspace>)> = std::rc::Rc::new(on);
-        popup_button(id, labels.get(selected).copied().unwrap_or_default(), open)
+        popup_button(id, labels.get(selected).cloned().unwrap_or_default(), open)
             .child(canvas(move |b, _, _| { anchors.borrow_mut().insert(id, b); }, |_, _, _, _| {}).absolute().inset_0())
             .relative()
             .on_click(cx.listener(move |w, _, _, cx| {
@@ -1006,26 +985,23 @@ impl Workspace {
 
     pub(crate) fn render_pref_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let m = self.pref_menu.as_ref()?;
-        if self.view != View::Settings || self.settings_page != Page::General { return None }
+        if self.view != View::Settings || !matches!(self.settings_page, Page::General | Page::Library) { return None }
         let b = *self.pref_anchors.borrow().get(m.id)?;
         let rows = m.labels.iter().enumerate().map(|(i, label)| {
             let g = SharedString::from(format!("{}-opt-{i}", m.id));
-            ui::menu_row(g.clone(), g.clone())
-                .when(i == m.focused, |d| d.bg(Theme::fill_hover()))
-                .child(div().flex_1().min_w_0().overflow_hidden().child(ui::menu_label(*label, g.clone(), gpui::white())))
-                .child(div().flex_none().w(px(14.)).when(i == m.selected, |d| d.child(ui::menu_glyph("check", 14., g.clone()))))
+            MenuItem::new(g).label(self::label(label)).selected(i == m.focused).checked(i == m.selected)
                 .on_hover(cx.listener(move |w, hovered: &bool, _, cx| if *hovered && let Some(m) = &mut w.pref_menu && m.focused != i { m.focused = i; cx.notify(); }))
                 .on_click(cx.listener(move |w, _, _, cx| w.pick_pref(i, cx)))
         }).collect::<Vec<_>>();
         let anchors = self.pref_anchors.clone();
         let id = m.id;
-        let menu = ui::popover().id("pref-menu").occlude().flex()
+        let menu = Popover::new("pref-menu").menu().min_w(px(160.))
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 if anchors.borrow().get(id).is_some_and(|b| b.contains(&ev.position)) { return }
                 w.pref_menu = None;
                 cx.notify();
             }))
-            .child(div().min_w(px(160.)).py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
+            .children(rows);
         Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
@@ -1135,36 +1111,32 @@ impl Workspace {
                 range.map(|i| {
                     let g = SharedString::from(format!("font-{}-{i}", target.key()));
                     match &choices[i] {
-                        Choice::Header(label) => div().h(px(ui::MENU_ROW_H)).px(px(14.)).pb(px(4.)).flex().items_end()
-                            .text_size(px(theme::ui_font_small() - 1.)).line_height(px(theme::ui_font_small() + 3.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text_caption())
-                            .child(label.clone()),
+                        // a virtual list's rows are all one height
+                        Choice::Header(label) => MenuLabel::new(label.clone()).h(px(menu::ROW_H)).into_any_element(),
                         Choice::Others(count, open) => {
                             let open = *open;
-                            div().w_full().flex().flex_col().child(ui::menu_row(g.clone(), g.clone())
-                                .child(ui::icon(if open { "chevron-down" } else { "chevron-right" }, 12., Theme::icon()))
-                                .child(div().flex_1().text_size(px(theme::ui_font_small())).text_color(Theme::text_caption()).child(crate::localized_format!("其他语言和符号（{}）", "Other scripts and symbols ({})", count)))
-                                .on_click(cx.listener(move |w, _, _, cx| { if let Some(m) = &mut w.font_menu { m.others = !open; m.focused = None; } cx.notify(); })))
+                            div().w_full().flex().flex_col().child(MenuItem::new(g.clone()).icon(if open { "chevron-down" } else { "chevron-right" })
+                                .child(div().flex_1().text_color(crate::design::color::muted_foreground()).child(crate::localized_format!("其他语言和符号（{}）", "Other scripts and symbols ({})", count)))
+                                .on_click(cx.listener(move |w, _, _, cx| { if let Some(m) = &mut w.font_menu { m.others = !open; m.focused = None; } cx.notify(); }))).into_any_element()
                         }
                         Choice::Reset => {
                             let picked = current.is_empty();
-                            div().w_full().flex().flex_col().child(ui::menu_row(g.clone(), g.clone())
-                                .when(focused == Some(i), |d| d.bg(Theme::fill_hover()))
-                                .child(div().flex_1().min_w_0().overflow_hidden().child(ui::menu_label(target.reset_label(), g.clone(), gpui::white())))
-                                .child(div().flex_none().w(px(14.)).when(picked, |d| d.child(ui::menu_glyph("check", 14., g.clone()))))
+                            // A virtual list's rows don't stretch on their own.
+                            div().w_full().flex().flex_col().child(MenuItem::new(g.clone()).selected(focused == Some(i)).label(target.reset_label()).checked(picked)
                                 .on_hover(cx.listener(move |w, hovered: &bool, _, cx| if *hovered { w.preview_font(String::new(), i, cx) }))
-                                .on_click(cx.listener(move |w, _, window, cx| w.pick_font(String::new(), target, window, cx))))
+                                .on_click(cx.listener(move |w, _, window, cx| w.pick_font(String::new(), target, window, cx)))).into_any_element()
                         }
-                        c @ Choice::Font { family, dl, flat } => font_row(family, *dl, *flat, g, focused == Some(i), &current, (c.key().unwrap_or_default(), i, target), cx),
+                        c @ Choice::Font { family, dl, flat } => font_row(family, *dl, *flat, g, focused == Some(i), &current, (c.key().unwrap_or_default(), i, target), cx).into_any_element(),
                     }
                 }).collect()
             }))
             .track_scroll(&menu.scroll)
-            .h(px((n as f32 * ui::MENU_ROW_H).min(420.)))
+            .h(px((n as f32 * menu::ROW_H).min(420.)))
             .into_any_element()
         };
         let anchors = self.font_anchors.clone();
         let key = target.key();
-        let popup = ui::popover().id("font-menu").occlude().flex()
+        let popup = Popover::new("font-menu").flex()
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, window, cx| {
                 // A press on the button itself: its click closes the list.
                 if anchors.borrow().get(key).is_some_and(|b| b.contains(&ev.position)) { return }
@@ -1172,11 +1144,11 @@ impl Workspace {
                 window.focus(&w.focus, cx);
             }))
             .child(div().w(px(460.)).flex().flex_col()
-                .child(div().px(px(8.)).pt(px(8.)).pb(px(4.))
-                    .child(div().h(px(28.)).px(px(7.)).flex().items_center().gap(px(6.)).rounded(px(7.)).bg(Theme::fill_hover())
-                        .child(ui::icon("search", 13., Theme::icon()))
+                .child(div().p(px(menu::PAD))
+                    .child(Field::new("font-search").sized(FieldSize::Sm)
+                        .child(crate::design::icon("search", 14., crate::design::color::muted_foreground()))
                         .child(div().flex_1().min_w_0().child(menu.field.clone()))))
-                .child(div().pb(px(ui::MENU_PAD_Y)).child(list)));
+                .child(div().pb(px(menu::PAD)).child(list)));
         Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(popup)).with_priority(2).into_any_element())
     }
 
@@ -1298,21 +1270,18 @@ impl Workspace {
         let current = prefs().lang();
         let rows = Lang::ALL.map(|l| {
             let g = SharedString::from(format!("lang-opt-{}", l.code()));
-            ui::menu_row(g.clone(), g.clone())
-                .when(l == focused, |d| d.bg(Theme::fill_hover()))
-                .child(div().flex_1().min_w_0().overflow_hidden().child(ui::menu_label(l.name(), g.clone(), gpui::white())))
-                .child(div().flex_none().w(px(14.)).when(l == current, |d| d.child(ui::menu_glyph("check", 14., g.clone()))))
+            MenuItem::new(g).label(l.name()).selected(l == focused).checked(l == current)
                 .on_hover(cx.listener(move |w, hovered: &bool, _, cx| if *hovered && w.lang_menu != Some(l) { w.lang_menu = Some(l); cx.notify(); }))
                 .on_click(cx.listener(move |w, _, _, cx| { w.lang_menu = None; w.set_pref(|p| p.set_lang(l), cx) }))
         });
         let anchor = self.lang_anchor.clone();
-        let menu = ui::popover().id("lang-menu").occlude().flex()
+        let menu = Popover::new("lang-menu").menu().w(px(160.))
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 if anchor.get().is_some_and(|b| b.contains(&ev.position)) { return }
                 w.lang_menu = None;
                 cx.notify();
             }))
-            .child(div().w(px(160.)).py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
+            .children(rows);
         Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
@@ -1452,11 +1421,7 @@ impl Workspace {
     /// buttons don't move when switching between the document list and 设置.
     pub(crate) fn header_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
         let open = self.sidebar_open;
-        let bar_button = |id: &'static str, glyph: &'static str| {
-            div().id(id).no_drag().flex_none().size(px(28.)).flex().items_center().justify_center().rounded(px(8.)).cursor_pointer()
-                .hover(move |s| s.bg(if open { Theme::sidebar_hover() } else { Theme::fill_hover_strong() }))
-                .child(ui::icon(glyph, 17., Theme::icon()))
-        };
+        let bar_button = |id: &'static str, glyph: &'static str| Button::ghost(id).icon(glyph).no_drag();
         div().flex().items_center().ml(px(4.)).gap(px(4.))
             .child(bar_button("settings-collapse", if open { "panel-left-close" } else { "panel-left-open" })
                 .tip(if open { tr("收起侧栏", "Hide sidebar") } else { tr("展开侧栏", "Show sidebar") }, Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
@@ -1515,7 +1480,7 @@ impl Workspace {
             }).into_any_element()]
         };
         div().w_full().flex().flex_col().gap(px(28.))
-            .child(group(None, vec![
+            .child(group("group-general", None, vec![
                 row(tr("界面语言", "Interface language"), None, {
                     let anchor = self.lang_anchor.clone();
                     let current = p.lang();
@@ -1612,7 +1577,7 @@ impl Workspace {
         let sample = div().w_full().h(px(640.)).children(shown);
         div().w_full().flex().flex_col().gap(px(28.))
             .child(div().w_full().flex().flex_col().gap(px(8.))
-                .child(group(None, vec![
+                .child(group("group-appearance", None, vec![
                     row(tr("外观", "Appearance"), None, {
                         let at = match prefs().appearance.as_str() { "light" => 1, "dark" => 2, _ => 0 };
                         segmented("appearance", &[tr("跟随系统", "System"), tr("浅色", "Light"), tr("深色", "Dark")], at,
@@ -1693,12 +1658,20 @@ impl Workspace {
                 // A test run's one root (`QUIET_MD_HOME`) is fixed.
                 .when(std::env::var_os("QUIET_MD_HOME").is_none() || std::env::var_os("QUIET_MD_ROOTS").is_some(), |d| d.child(button(SharedString::from(format!("remove-{key}")), tr("移除", "Remove")).on_click(cx.listener(move |w, _, _, cx| { w.confirm = Some(crate::app::Confirm::RemoveRoot(k.clone(), n.clone())); cx.notify(); }))))).into_any_element()
         }).collect();
+        // 快速笔记保存到 (2.8): a choice once there is one to make.
+        let open: Vec<(String, String)> = self.store.roots().into_iter().filter(|r| r.3.is_none()).map(|r| (r.0, r.1)).collect();
+        if open.len() > 1 {
+            let at = self.store.quick_note_root().and_then(|k| open.iter().position(|r| r.0 == k)).unwrap_or(0);
+            let keys: Vec<String> = open.iter().map(|r| r.0.clone()).collect();
+            folders.push(row(tr("快速笔记保存到", "Quick notes go to"), desc(tr("「新建笔记窗口」和全局快捷键记下的笔记放在这个文件夹里。", "Notes from New Note Window and the global shortcut are saved in this folder.")),
+                self.select("quick-note-root", open.into_iter().map(|r| r.1).collect(), at, move |w, i, cx| { let k = keys[i].clone(); w.set_pref(|p| p.quick_note_root = k, cx) }, cx)).into_any_element());
+        }
         folders.push(row(tr("添加文件夹", "Add a folder"), Some(tr("打开电脑上已有的文件夹，或新建一个，都会显示在侧栏里。", "Open a folder already on your computer, or make a new one; either shows in the sidebar.").into()), div().flex_none().flex().gap(px(8.))
             .child(button("open-root", tr("打开…", "Open…")).on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx))))
             .child(button("new-root", tr("新建…", "New…")).on_click(cx.listener(|w, _, window, cx| w.new_root_dialog(window, cx))))).into_any_element());
         div().w_full().flex().flex_col().gap(px(8.))
-            .child(group(Some(tr("文件夹", "Folders")), folders))
-            .child(group(None, vec![
+            .child(group("group-folders", Some(tr("文件夹", "Folders")), folders))
+            .child(group("group-library", None, vec![
                 row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", crate::store::TRASH_DAYS).into()),
                     button("open-trash", tr("打开", "Open")).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Trash, cx)))).into_any_element(),
                 // #237: files no document (the Trash included) mentions.
@@ -1732,12 +1705,17 @@ impl Workspace {
             .child(div().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 5.)).text_color(Theme::text_caption()).child(format!("{} {}", tr("版本", "Version"), env!("CARGO_PKG_VERSION"))))
             .child(div().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).text_color(Theme::text_caption()).child(if cfg!(target_os = "macos") { tr("本地优先的笔记应用：无需账号，文档就是你电脑上的文件。", "Local-first notes: no account, your documents are files on your Mac.") }
                 else { tr("本地优先的笔记应用：无需账号，文档就是你电脑上的文件。", "Local-first notes: no account, your documents are files on your computer.") })))
-            .child(group(None, vec![update_row(cx).into_any_element()]))
-            .child(group(None, vec![row("Onboarding", Some(tr("在这个窗口上再走一遍首次启动的欢迎页（⌘⌥⇧O）；只会应用快捷键，不改动文档库", "Go through the first-launch pages again over this window (⌘⌥⇧O); only the shortcut is applied, the library stays as it is").into()),
+            .child(group("group-update", None, vec![update_row(cx).into_any_element()]))
+            .child(group("group-repo", None, vec![row(tr("项目主页", "Project page"), Some(REPO.trim_start_matches("https://").into()),
+                button("open-repo", tr("打开", "Open")).on_click(|_, _, cx| crate::editor::open_link(cx, REPO))).into_any_element()]))
+            .child(group("group-onboarding", None, vec![row("Onboarding", Some(tr("在这个窗口上再走一遍首次启动的欢迎页（⌘⌥⇧O）；只会应用快捷键，不改动文档库", "Go through the first-launch pages again over this window (⌘⌥⇧O); only the shortcut is applied, the library stays as it is").into()),
                 button("replay-onboarding", tr("打开", "Open")).on_click(cx.listener(|w, _, window, cx| w.replay_onboarding(window, cx)))).into_any_element()]))
             .into_any_element()
     }
 }
+
+/// 关于 › 项目主页: the source repository, opened in the 打开链接 browser.
+const REPO: &str = "https://github.com/s1dashu/quiet-md";
 
 /// The sidebar bar's 更新 pill, only while a new version is on offer:
 /// 更新 downloads it (the pill then fills with its progress), 重启更新
@@ -1970,6 +1948,8 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "~文字~ 空格" => "~text~ Space",
         "~~文字~~ 空格" => "~~text~~ Space",
         "$$文字$$" => "$$text$$",
+        "转为公式" => "Convert to equation",
+        "只有同一段里的文字能转为公式" => "Only text within one paragraph can become an equation",
         "--- 或 ***" => "--- or ***",
         "阅读模式" => "Reading mode",
         "已切换为阅读模式" => "Switched to reading mode",
@@ -1988,6 +1968,12 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "打印" => "Print",
         "显示引用列表" => "Show references",
         "复制为 Markdown" => "Copy as Markdown",
+        "粘贴为纯文本" => "Paste as plain text",
+        "插入链接" => "Insert link",
+        "插入" => "Insert",
+        "对齐" => "Align",
+        "上移块" => "Move block up",
+        "下移块" => "Move block down",
         "复制文件地址" => "Copy file path",
         "已复制文件地址" => "File path copied",
         "已复制为 Markdown" => "Copied as Markdown",
@@ -2237,6 +2223,12 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "单元格背景颜色" => "Cell background",
         "删除列" => "Delete columns",
         "删除行" => "Delete rows",
+        "上方插入行" => "Insert row above",
+        "下方插入行" => "Insert row below",
+        "左侧插入列" => "Insert column left",
+        "右侧插入列" => "Insert column right",
+        "清空内容" => "Clear contents",
+        "删除表格" => "Delete table",
         "顶部对齐" => "Align top",
         "垂直居中" => "Align middle",
         "底部对齐" => "Align bottom",

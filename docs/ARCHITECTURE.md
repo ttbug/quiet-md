@@ -13,7 +13,8 @@ Dependencies flow from the application to core. Within the workspace, core may r
 main.rs — window
   ├─ onboarding.rs — first launch, replaced by Workspace in the same window after library selection
   └─ app.rs — Workspace (window root view)
-       ├─ store.rs — library directories and .quiet/index.json (see FORMAT.md) [core]
+       ├─ store.rs — library directories and .quiet/meta/ (see FORMAT.md) [core]
+       ├─ meta.rs — FORMAT 5: metadata split by device, merged field by field [core]
        ├─ sidebar / home / search / trash / tree / docmenu / docinfo / modes
        ├─ agent::Panel — right-side Codex chat and independent working directory
        └─ editor::Editor — open document
@@ -139,7 +140,7 @@ Whiteboard and history modules in core:
 
 | Module | Contents |
 |---|---|
-| `main.rs` | Entry point, `FDL_SCRIPT` mode (devtools builds only) and core module re-exports |
+| `main.rs` | Entry point, `FDL_SCRIPT` mode (devtools builds only), `--self-test` and core module re-exports |
 | `guides.rs` | Seeds an empty library with the bundled Getting Started guides once |
 | `app.rs` | `Workspace`, the two-pane window, open/create/save/delete actions, save state and reminder scheduling |
 | `html.rs` / `printing.rs` / `transfer.rs` | HTML/PDF export, printing and import/export UI |
@@ -149,12 +150,14 @@ Whiteboard and history modules in core:
 | `search.rs` | Search dialog and advanced search |
 | `docmenu.rs` / `docinfo.rs` / `modes.rs` | More menu, document information, edit/read mode switch and shortcut panel |
 | `theme.rs` | `craft` scale, semantic `Theme::*` colors, named display colors, `shadow_*`, type scale and note panel dimensions |
+| `design/` | Quiet.md's design system (shadcn/ui: Nova's colours, Vega's geometry). `mod.rs` holds the tokens (neutral ramp, semantic colours with light and dark values, option colours, radii, sizes, type, shadows); `button`, `menu`, `field`, `control`, `badge`, `dialog`, `card` the components, all shown live in the 组件库 panel (`gallery/`, `quiet_md --components`). Used across the app's controls, menus and dialogs (`table/style.rs` forwards to it for the 数据表) |
 | `ui.rs` / `input.rs` | Shared menu shells and rows, white pill buttons, hints, toasts and single-line input |
 | `highlight.rs` | Code highlighting |
 | `mermaid.rs` | Mermaid code blocks drawn as diagrams: bundled mermaid.js in an off-screen web view (macOS, Windows), SVG cached by source and theme |
 | `assets.rs` | Embedded icons, fonts and cover gallery |
 | `fonts.rs` / `font_classes.rs` / `font_downloads.rs` | Installed families for the font settings and what each is (黑体, 宋体 …, scripts covered: read from the font files); fonts fetched on demand (the board's Xiaolai, downloadable document fonts). See [Downloadable fonts](FONTS.md). |
 | `devtools.rs` | Script driver compiled with `--features devtools`. See tools/harness/README.md. |
+| `selftest.rs` | Release self-test: fixed end-to-end scenarios that shipped builds run with `--self-test`. See tools/harness/README.md. |
 | `history.rs` | Version drawer grouped by day, in-place read-only preview, change highlighting, naming, restore, save a copy and delete |
 | `board/` view | `BoardView` replaces the document in the note area. `mod.rs` owns the scene, store and commit loop, `canvas.rs` dispatches pointers, `keys.rs` handles shortcuts, `run.rs` / `action.rs` implement actions and clipboard, `text_editor.rs` edits text and `frame_name.rs` renames frames. `fonts.rs` registers Excalidraw's fonts; `font_hint.rs` shows the CJK one downloading (`font_downloads.rs`, docs/FONTS.md). `editor/board.rs` handles thumbnails and entering/leaving the board. |
 | `board/tools/` | Tool state machines: `selection` (drag, handles and marquee), `shape`, `linear`, `freedraw`, `text`, `eraser`, `lasso`, `image`, `crop`, `flowchart` |

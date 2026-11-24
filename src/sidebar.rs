@@ -5,30 +5,30 @@
 use crate::app::{Confirm, RowMenu, View, Workspace};
 use crate::settings::display_title;
 use crate::store::Entry;
-use crate::theme::{self, Theme, craft};
-use crate::ui::{TipExt, TitleBarExt, icon, popover, ui_text};
+use crate::theme::{self, Theme};
+use crate::design::{Button, ButtonSize, MenuItem, MenuLabel, MenuSeparator, Popover};
+use crate::ui::{TipExt, TitleBarExt, icon, ui_text};
 use gpui::{prelude::FluentBuilder, *};
 
-/// Row "…" menu geometry: 32pt rows, 11pt dividers, 6pt padding inside
-/// a 1pt border.
+/// Row "…" menu geometry (`design::menu`): rows, separators, padding.
 const ROW_MENU_W: f32 = 180.;
-const ROW_ITEM: f32 = crate::ui::MENU_ROW_H;
-const ROW_DIVIDER: f32 = 11.;
+const ROW_ITEM: f32 = crate::design::menu::ROW_H;
+const ROW_DIVIDER: f32 = crate::design::menu::SEP_H;
 const ROW_ITEMS: usize = 9;
 const ROW_DIVIDERS: usize = 2;
 const DOWNLOAD_INDEX: usize = 5;
 const DIVIDERS_BEFORE_DOWNLOAD: usize = 1;
 
 const fn row_menu_height(items: usize, dividers: usize) -> f32 {
-    2. + crate::ui::MENU_PAD_Y * 2. + items as f32 * ROW_ITEM + dividers as f32 * ROW_DIVIDER
+    crate::design::menu::PAD * 2. + items as f32 * ROW_ITEM + dividers as f32 * ROW_DIVIDER
 }
 
 const fn row_sub_top(menu_top: f32) -> f32 {
     menu_top + DOWNLOAD_INDEX as f32 * ROW_ITEM + DIVIDERS_BEFORE_DOWNLOAD as f32 * ROW_DIVIDER
 }
 
-const _: () = assert!(row_menu_height(ROW_ITEMS, ROW_DIVIDERS) == 324.);
-const _: () = assert!(row_sub_top(0.) == 171.);
+const _: () = assert!(row_menu_height(ROW_ITEMS, ROW_DIVIDERS) == 314.);
+const _: () = assert!(row_sub_top(0.) == 169.);
 
 /// Sidebar geometry (measured from the window edge), shared by the
 /// document sidebar and 设置's: selection pills start 14pt in, every row is
@@ -80,24 +80,9 @@ pub(crate) enum Check {
     On,
 }
 
-/// 14px checkbox; an unchecked box turns blue when `group` is hovered.
-pub(crate) fn checkbox(state: Check, disabled: bool, group: &'static str) -> Div {
-    let white = Theme::bg_body();
-    div()
-        .size(px(14.))
-        .flex_none()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.))
-        .when(state != Check::Off, |d| d.bg(Theme::primary()))
-        .when(state == Check::Off, |d| {
-            d.border_1()
-                .when(disabled, |d| d.border_color(Theme::line_border()).bg(theme::c(craft::N100)))
-                .when(!disabled, |d| d.border_color(theme::c(craft::N500)).bg(white).group_hover(group, |s| s.border_color(Theme::primary())))
-        })
-        .when(state == Check::On, |d| d.child(icon("todo-check", 12., white)))
-        .when(state == Check::Partial, |d| d.child(div().w(px(8.)).h(px(2.)).rounded(px(1.)).bg(white)))
+/// The batch checkbox: `design::Checkbox`, with 部分选中 as its indeterminate state.
+pub(crate) fn checkbox(state: Check, disabled: bool) -> crate::design::Checkbox {
+    crate::design::Checkbox::new(state == Check::On).partial(state == Check::Partial).disabled(disabled)
 }
 
 impl Workspace {
@@ -123,20 +108,11 @@ impl Workspace {
             .pr(px(12.))
             .title_bar()
             .child(
-                div()
-                    .id("collapse-sidebar")
+                Button::ghost("collapse-sidebar")
                     .no_drag()
-                    .flex_none()
                     .ml(px(4.))
-                    .size(px(28.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(8.))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(Theme::sidebar_hover()))
+                    .icon("panel-left-close")
                     .tip(crate::settings::tr("收起侧栏", "Hide sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
-                    .child(icon("panel-left-close", 17., Theme::icon()))
                     .on_click(cx.listener(|w, _, _, cx| {
                         w.sidebar_open = false;
                         cx.notify();
@@ -220,32 +196,9 @@ impl Workspace {
         }
 
         // The footer holds one row: 设置 (存储管理 and 回收站 live in 设置).
-        // The 批量操作 toolbar keeps the footer glyphs: bare on the sidebar, a rounded fill on hover.
+        // The 批量操作 toolbar: ghost icon buttons.
         let footer_btn = |id: &'static str, name: &'static str, tip: &'static str, enabled: bool, on: bool| {
-            let group = SharedString::from(format!("{id}-slot"));
-            div()
-                .id(id)
-                .flex_none()
-                .w(px(36.))
-                .h(px(32.))
-                .group(group.clone())
-                .when(enabled, |d| d.cursor_pointer())
-                .tip(tip, None)
-                .child(
-                    div()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(8.))
-                        .when(on, |d| d.bg(Theme::sidebar_selected()))
-                        .when(enabled && !on, |d| d.group_hover(group, |s| s.bg(Theme::sidebar_hover())))
-                        .child(match (on, enabled) {
-                            (true, _) => icon(&format!("{name}-filled"), 17., Theme::icon()),
-                            (false, true) => icon(name, 17., Theme::icon()),
-                            (false, false) => icon(name, 17., Theme::text_disabled()),
-                        }),
-                )
+            Button::ghost(id).w(px(36.)).h(px(32.)).icon(if on { format!("{name}-filled") } else { name.to_string() }).selected(on).disabled(!enabled).tip(tip, None)
         };
         let some = self.batch.as_ref().is_some_and(|b| !b.is_empty());
         // 设置; in 设置 the same row reads 返回 (`settings.rs`), so one spot toggles.
@@ -365,17 +318,7 @@ impl Workspace {
     fn section(&self, idx: usize, title: impl AsRef<str>, cx: &mut Context<Self>) -> Div {
         let group = SharedString::from(format!("section-{idx}"));
         let folded = self.folded[idx];
-        let trigger = |id: &'static str, name: &'static str| {
-            div()
-                .id(id)
-                .flex_none()
-                .size(px(22.))
-                .p(px(3.))
-                .rounded(px(6.))
-                .cursor_pointer()
-                .hover(|s| s.bg(Theme::sidebar_hover()))
-                .child(icon(name, 16., Theme::icon()))
-        };
+        let trigger = |id: &'static str, name: &'static str| Button::ghost(id).sized(ButtonSize::Xs).icon(name);
         let create_open = matches!(self.create_menu, Some((None, _)));
         let row = div().h(px(SECTION_H)).pl(px(4.)).pt(px(SECTION_TOP)).flex().items_center().group(group.clone());
         if let (1, Some(sel)) = (idx, self.batch.as_ref()) {
@@ -392,7 +335,7 @@ impl Workspace {
                         .justify_center()
                         .cursor_pointer()
                         .group("batch-all")
-                        .child(checkbox(if all { Check::On } else if n > 0 { Check::Partial } else { Check::Off }, false, "batch-all"))
+                        .child(checkbox(if all { Check::On } else if n > 0 { Check::Partial } else { Check::Off }, false))
                         .on_click(cx.listener(move |w, _, _, cx| {
                             let ids = if all { vec![] } else { w.entries.iter().take(BATCH_LIMIT).map(|e| e.id.clone()).collect() };
                             w.batch = Some(ids);
@@ -409,7 +352,7 @@ impl Workspace {
                             cx.notify();
                         })),
                 )
-                .child(trigger("section-add", "plus").ml(px(2.)).mr(px(4.)).child(self.home.track("create-sidebar")).when(create_open, |d| d.bg(Theme::sidebar_selected())).tip(crate::settings::tr("新建", "New"), None)
+                .child(trigger("section-add", "plus").ml(px(2.)).mr(px(4.)).child(self.home.track("create-sidebar")).selected(create_open).tip(crate::settings::tr("新建", "New"), None)
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(|w, ev: &ClickEvent, _, cx| { let pos = w.home.anchor("create-sidebar").map_or(ev.position(), |b| point(b.left(), b.bottom() + px(4.))); w.create_menu = if w.create_menu.is_some() { None } else { Some((None, pos)) }; cx.notify(); })));
         }
@@ -446,7 +389,7 @@ impl Workspace {
                 w.row_menu = None;
                 cx.notify();
             })))
-            .child(trigger("section-add", "plus").ml(px(2.)).mr(px(4.)).child(self.home.track("create-sidebar")).when(create_open, |d| d.bg(Theme::sidebar_selected())).tip(crate::settings::tr("新建", "New"), None)
+            .child(trigger("section-add", "plus").ml(px(2.)).mr(px(4.)).child(self.home.track("create-sidebar")).selected(create_open).tip(crate::settings::tr("新建", "New"), None)
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(|w, ev: &ClickEvent, _, cx| { let pos = w.home.anchor("create-sidebar").map_or(ev.position(), |b| point(b.left(), b.bottom() + px(4.))); w.create_menu = if w.create_menu.is_some() { None } else { Some((None, pos)) }; cx.notify(); })))
         })
@@ -555,7 +498,7 @@ impl Workspace {
             )
     }
 
-    fn more_button(&self, e: &Entry, key: &str, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn more_button(&self, e: &Entry, key: &str, cx: &mut Context<Self>) -> Button {
         let id = e.id.clone();
         let slot = format!("{key}-{}", e.id);
         let slot2 = slot.clone();
@@ -564,20 +507,13 @@ impl Workspace {
         let open = self.row_menu.as_ref().is_some_and(|m| m.id == e.id && m.pos.x < px(0.));
         // 我的文档 rows fade their buttons in with the hover wash.
         let reveal = (key == "doc").then(|| self.folder_drag.reveal(&e.id));
-        div()
-            .id(SharedString::from(format!("more-{slot}")))
+        Button::ghost(SharedString::from(format!("more-{slot}")))
+            .sized(ButtonSize::Xs)
             .relative()
-            .size(px(22.))
             .mr(px(4.))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(6.))
+            .icon("ellipsis")
             .when(!open, |d| match reveal { Some(a) => d.opacity(a), None => d.opacity(0.).group_hover("doc-row", |s| s.opacity(1.)) })
-            .when(open, |d| d.bg(Theme::sidebar_selected()))
-            .hover(|s| s.bg(Theme::sidebar_selected()))
-            .child(icon("ellipsis", 15., Theme::icon()))
+            .selected(open)
             .child(canvas(move |b, _, _| record.borrow_mut().insert(slot.clone(), b), |_, _, _, _| {}).absolute().inset_0())
             .on_mouse_down(
                 MouseButton::Left,
@@ -597,23 +533,18 @@ impl Workspace {
 
     /// Creation inside a folder: the folder button makes one directly; the plus
     /// opens the same 新建 menu as 我的文档's, hung from the button.
-    fn add_button(&self, e: &Entry, key: &str, folder: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn add_button(&self, e: &Entry, key: &str, folder: bool, cx: &mut Context<Self>) -> Button {
         let id = e.id.clone();
         let slot = format!("add-{key}-{}", e.id);
         let (record, lookup) = (self.more_bounds.clone(), self.more_bounds.clone());
         let anchor = |b: Bounds<Pixels>| point(b.left(), b.bottom() + px(4.));
         let open = !folder && self.create_menu.as_ref().is_some_and(|(p, pos)| p.as_deref() == Some(e.id.as_str()) && self.more_bounds.borrow().get(&slot).is_some_and(|b| anchor(*b) == *pos));
-        div()
-            .id(SharedString::from(format!("add-{key}-{folder}-{}", e.id)))
+        Button::ghost(SharedString::from(format!("add-{key}-{folder}-{}", e.id)))
+            .sized(ButtonSize::Xs)
             .relative()
-            .size(px(22.))
-            .p(px(3.))
-            .flex_none()
-            .rounded(px(6.))
             .opacity(if open { 1. } else { self.folder_drag.reveal(&e.id) })
-            .when(open, |d| d.bg(Theme::sidebar_selected()))
-            .hover(|s| s.bg(Theme::sidebar_selected()))
-            .child(icon(if folder { "folder-plus" } else { "plus" }, 16., Theme::icon()))
+            .selected(open)
+            .icon(if folder { "folder-plus" } else { "plus" })
             .when(!folder, |d| { let slot = slot.clone(); d.child(canvas(move |b, _, _| { record.borrow_mut().insert(slot.clone(), b); }, |_, _, _, _| {}).absolute().inset_0()) })
             .tip(crate::settings::tr(if folder { "新建文件夹" } else { "新建" }, if folder { "New folder" } else { "New" }), None)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -737,7 +668,7 @@ impl Workspace {
                         .items_center()
                         .justify_center()
                         .when(blocked, |d| d.tip(crate::settings::text("无法选中，选择的页面数已到达上限"), None))
-                        .child(checkbox(if checked { Check::On } else { Check::Off }, blocked, "doc-row")),
+                        .child(checkbox(if checked { Check::On } else { Check::Off }, blocked)),
                 )
             })
             .child({
@@ -802,31 +733,19 @@ impl Workspace {
         let doc = self.note_or(&m.id);
         let child = !m.batch && self.takes_children(&m.id);
         let Some((pinned, starred)) = self.entries.iter().find(|e| e.id == doc).map(|e| (e.meta.pinned, e.meta.starred > 0)) else { return vec![] };
-        // The context menu: rows on the quiet hover fill.
-        let item_c = |id: &'static str, ic: &'static str, label: &'static str, color: Hsla, icon_color: Hsla| {
-            let g = SharedString::from(id);
-            crate::ui::menu_row(id, g.clone())
-                .mx(px(0.))
-                .text_color(color)
-                .child(icon(ic, 16., icon_color))
-                .child(div().flex_1().min_w_0().child(crate::ui::menu_label(label, g, gpui::white())))
-        };
-        let item = |id, ic, label| item_c(id, ic, label, Theme::text(), Theme::icon());
-        let divider = || div().mx(px(8.)).my(px(5.)).h(px(1.)).bg(Theme::line_border());
+        let item = |id: &'static str, ic: &'static str, label: &'static str| MenuItem::new(id).icon(ic).label(crate::settings::label(label));
+        let divider = MenuSeparator::new;
         if m.batch {
             // Right-click in 批量操作: the batch menu minus 添加快捷方式到, 转移所有权.
             let n = self.batch.as_ref().map_or(0, |b| b.len());
-            let menu = popover()
-                .id("batch-menu")
-                .occlude()
+            let menu = Popover::new("batch-menu")
+                .menu()
                 .min_w(px(ROW_MENU_W))
-                .px(px(5.))
-                .py(px(crate::ui::MENU_PAD_Y))
                 .on_mouse_down_out(cx.listener(|w, _, _, cx| {
                     w.row_menu = None;
                     cx.notify();
                 }))
-                .child(div().h(px(ROW_ITEM)).px(px(8.)).flex().items_center().text_size(px(theme::ui_font_small())).text_color(Theme::text_placeholder()).child(crate::localized_format!("已选 {n} 项", "Selected: {n}")))
+                .child(MenuLabel::new(crate::localized_format!("已选 {n} 项", "Selected: {n}")))
                 .child(item("bm-copy", "copy", crate::settings::text("创建副本")).on_click(cx.listener(|w, _, _, cx| w.batch_copy(cx))))
                 .child(item("bm-move", "folder-input", crate::settings::text("移动到")).on_click(cx.listener(|w, _, window, cx| w.batch_move(window, cx))))
                 .child(item("bm-delete", "bin", crate::settings::text("删除")).on_click(cx.listener(|w, _, _, cx| w.ask_batch_delete(cx))));
@@ -856,13 +775,10 @@ impl Workspace {
         let menu_w_record = self.row_menu_w.clone();
         // The row menu leaves out the cloud entries 在新标签页打开, 分享,
         // 复制链接, 添加快捷方式到, 转移所有权, 设置密级.
-        let menu = popover()
-            .id("row-menu")
-            .occlude()
+        let menu = Popover::new("row-menu")
+            .menu()
             .min_w(px(ROW_MENU_W))
             .child(canvas(move |b, _, _| menu_w_record.set(Some(f32::from(b.size.width))), |_, _, _, _| {}).absolute().inset_0())
-            .px(px(5.))
-            .py(px(crate::ui::MENU_PAD_Y))
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 if sub_bounds.get().is_none_or(|b| !b.contains(&ev.position)) {
                     w.row_menu = None;
@@ -918,8 +834,8 @@ impl Workspace {
             .child(divider())
             .child(
                 item("rm-download", "export", crate::settings::text("下载"))
-                    .when(m.sub, |d| d.bg(Theme::fill_hover()))
-                    .child(icon("chevron-right", 10., Theme::icon()))
+                    .submenu(true)
+                    .open(m.sub)
                     .on_hover(set_sub(true)),
             )
             .child(
@@ -929,7 +845,7 @@ impl Workspace {
             )
             .child(divider())
             .child(
-                item_c("rm-del", "bin", crate::settings::text("删除"), Theme::danger(), Theme::danger())
+                item("rm-del", "bin", crate::settings::text("删除")).destructive(true)
                     .on_hover(set_sub(false))
                     .on_click(cx.listener(move |w, _, _, cx| w.ask_delete(&del, cx))),
             );
@@ -971,12 +887,9 @@ impl Workspace {
             out.push(
                 deferred(
                     anchored().anchor(Anchor::TopLeft).position(point(x, px(top))).snap_to_window_with_margin(px(8.)).child(
-                        popover()
-                            .id("rm-download-menu")
-                            .occlude()
+                        Popover::new("rm-download-menu")
+                            .menu()
                             .min_w(px(130.))
-                            .px(px(5.))
-                            .py(px(crate::ui::MENU_PAD_Y))
                             .child(canvas(move |b, _, _| record.set(Some(b)), |_, _, _, _| {}).absolute().inset_0())
                             .when(crate::printing::SUPPORTED, |d| d.child(crate::docmenu::sub_item("rm-pdf", "PDF").on_click(cx.listener(move |w, _, window, cx| w.export_pdf(&pdf, window, cx)))))
                             .child(crate::docmenu::sub_item("rm-md", "Markdown").on_click(cx.listener(move |w, _, _, cx| w.open_export_md(&dl, cx)))),

@@ -6,9 +6,10 @@ use crate::app::{Confirm, ConfirmCancel, ConfirmOk, Workspace};
 use crate::settings::display_title;
 use crate::search::doc_icon;
 use crate::store::{TRASH_DAYS, TrashEntry};
-pub(crate) use crate::ui::{ToastKind, close_button, dialog, list_header_text, list_line, menu_label, primary_button, row_hover, scrim, secondary_button};
-use crate::theme::{self, Theme, craft};
-use crate::ui::{ROW_RADIUS, TipExt, TitleBarExt, icon, popover, ui_para, ui_text};
+pub(crate) use crate::ui::{ToastKind, list_header_text, list_line, row_hover};
+use crate::design::{Button, ButtonSize, Checkbox, Dialog};
+use crate::theme::{self, Theme};
+use crate::ui::{ROW_RADIUS, TipExt, TitleBarExt, icon, ui_text};
 use gpui::{prelude::FluentBuilder, *};
 
 pub const TRASH_MENU_W: f32 = 160.;
@@ -45,21 +46,12 @@ pub(crate) fn page_header_with(ws: &Workspace, title: impl IntoElement, left: f3
         .when(!ws.sidebar_open && cfg!(target_os = "windows"), |d| d.child(div().mr(px(12.)).child(ws.header_navigation(cx))))
         .when(!ws.sidebar_open && !cfg!(target_os = "windows"), |d| {
             d.child(
-                div()
-                    .id("open-sidebar")
+                Button::ghost("open-sidebar")
                     .no_drag()
-                    .flex_none()
                     .ml(px(4.))
                     .mr(px(12.))
-                    .size(px(28.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(8.))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(Theme::fill_hover_strong()))
+                    .icon("panel-left-open")
                     .tip(crate::settings::tr("展开侧栏", "Show sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
-                    .child(icon("panel-left-open", 17., Theme::icon()))
                     .on_click(cx.listener(|w, _, _, cx| {
                         w.sidebar_open = true;
                         cx.notify();
@@ -94,10 +86,7 @@ impl Workspace {
 
     pub(crate) fn render_trash(&mut self, cx: &mut Context<Self>) -> AnyElement {
         // 清空回收站: a labelled button, only when there is something to empty.
-        let empty = (!self.trash.is_empty()).then(|| div().id("trash-empty").no_drag().flex_none().mr(px(8.)).h(px(28.)).px(px(10.)).flex().items_center().gap(px(6.))
-            .rounded(px(9.)).cursor_pointer().hover(|s| s.bg(Theme::fill_hover())).active(|s| s.bg(Theme::fill_pressed()))
-            .text_size(px(13.)).line_height(px(20.)).text_color(Theme::text())
-            .child(icon("bin", 14., Theme::icon())).child(crate::settings::text("清空回收站"))
+        let empty = (!self.trash.is_empty()).then(|| Button::ghost("trash-empty").no_drag().mr(px(8.)).icon("bin").label(crate::settings::text("清空回收站"))
             .on_click(cx.listener(|w, _, _, cx| { w.trash_menu = None; w.confirm = Some(Confirm::EmptyTrash); cx.notify(); })));
         let header = page_header(self, "回收站", 26., cx).children(empty).child(
             crate::ui::header_icon("trash-search", "search")
@@ -137,17 +126,10 @@ impl Workspace {
             let (id, id2) = (t.id.clone(), t.id.clone());
             let menu_open = self.trash_menu.as_ref().is_some_and(|(m, _, _)| *m == t.id);
             let title = display_title(&t.title);
-            let more = div()
-                .id(SharedString::from(format!("trash-more-{}", t.id)))
-                .size(px(24.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(6.))
-                .cursor_pointer()
-                .hover(|s| s.bg(Theme::fill_hover_strong()))
-                .when(menu_open, |d| d.bg(Theme::fill_hover_strong()))
-                .child(icon("ellipsis", 16., Theme::icon()))
+            let more = Button::ghost(SharedString::from(format!("trash-more-{}", t.id)))
+                .sized(ButtonSize::Xs)
+                .icon("ellipsis")
+                .selected(menu_open)
                 .on_click(cx.listener(move |w, ev: &ClickEvent, _, cx| {
                     cx.stop_propagation();
                     let p = ev.position();
@@ -204,32 +186,23 @@ impl Workspace {
 
     pub(crate) fn render_trash_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (id, pos, corner) = self.trash_menu.clone()?;
-        // The context menu: 32pt rows on the quiet hover fill.
-        let item = |key: &'static str, ic: &'static str, label: &'static str, color: Hsla| {
-            let g = SharedString::from(key);
-            crate::ui::menu_row(key, g.clone())
-                .text_color(color)
-                .child(icon(ic, 16., if color == Theme::icon() { Theme::icon() } else { color }))
-                .child(menu_label(label, g, gpui::white()))
-        };
+        let item = |key: &'static str, ic: &'static str, label: &'static str, danger: bool| crate::design::MenuItem::new(key).icon(ic).label(crate::settings::label(label)).destructive(danger);
         let (a, b) = (id.clone(), id);
-        let menu = popover()
-            .id("trash-menu")
-            .occlude()
+        let menu = crate::design::Popover::new("trash-menu")
+            .menu()
             // At least TRASH_MENU_W, wider when a label needs it (English
             // "Delete permanently" ran into the edge).
             .min_w(px(TRASH_MENU_W))
-            .py(px(crate::ui::MENU_PAD_Y))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| {
                 w.trash_menu = None;
                 cx.notify();
             }))
-            .child(item("tm-restore", "restore", crate::settings::text("恢复"), Theme::text()).on_click(cx.listener(move |w, _, _, cx| {
+            .child(item("tm-restore", "restore", crate::settings::text("恢复"), false).on_click(cx.listener(move |w, _, _, cx| {
                 w.trash_menu = None;
                 w.confirm = Some(Confirm::Restore(a.clone()));
                 cx.notify();
             })))
-            .child(item("tm-purge", "bin", crate::settings::text("彻底删除"), Theme::danger()).on_click(cx.listener(move |w, _, _, cx| {
+            .child(item("tm-purge", "bin", crate::settings::text("彻底删除"), true).on_click(cx.listener(move |w, _, _, cx| {
                 w.trash_menu = None;
                 w.confirm = Some(Confirm::Purge(b.clone()));
                 cx.notify();
@@ -241,7 +214,7 @@ impl Workspace {
         )
     }
 
-    fn restore_doc(&mut self, id: &str, cx: &mut Context<Self>) {
+    pub(crate) fn restore_doc(&mut self, id: &str, cx: &mut Context<Self>) {
         let file_before = self.store.track_file_changes();
         match self.store.restore(id) {
             Ok(moved) => {
@@ -432,9 +405,8 @@ impl Workspace {
         }
     }
 
-    /// The confirmation dialog: a modal (white, radius 16), a 15pt
-    /// semibold title, one line of 13pt body, 取消 and the action button on
-    /// the right.
+    /// The confirmation dialog: a `Dialog` with its title, one line of body,
+    /// 取消 and the action button on the right.
     pub(crate) fn render_confirm(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let c = self.confirm.as_ref()?;
         let title_of = |id: &str| {
@@ -529,27 +501,22 @@ impl Workspace {
             Confirm::Refs { show: false, no_ask } => Some(*no_ask),
             _ => None,
         };
-        let ok = primary_button("confirm-ok", action);
-        let ok = if danger { ok.bg(Theme::danger()).hover(|s| s.bg(theme::c(craft::R600))).active(|s| s.bg(theme::c(craft::R700))) } else { ok };
+        let ok = if danger { Button::destructive("confirm-ok") } else { Button::primary("confirm-ok") }.label(action);
         // The dialog holds focus while it is up (`sync_confirm_focus`): ↩ and Esc are its own keys.
-        let dialog = dialog("confirm-dialog")
+        let dialog = Dialog::alert("confirm-dialog")
             .key_context("Confirm")
             .track_focus(&self.confirm_focus)
             .on_action(cx.listener(|w, _: &ConfirmOk, window, cx| w.confirm_ok(window, cx)))
             .on_action(cx.listener(|w, _: &ConfirmCancel, _, cx| w.dismiss_confirm(cx)))
             .w(px(if matches!(c, Confirm::SaveFailed | Confirm::Migrate(_)) { 520. } else { 400. }))
-            .px(px(24.))
-            .pt(px(20.))
-            .pb(px(24.))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(div().text_size(px(15.)).line_height(px(22.)).font_weight(FontWeight::SEMIBOLD).child(ui_para(title)))
-            .child(div().mt(px(8.)).text_size(px(13.)).line_height(px(20.)).text_color(Theme::text()).child(ui_para(body)))
-            .child(
+            .title(title)
+            .description(body)
+            .footer(
                 div()
-                    .mt(px(24.))
                     .flex()
                     .items_center()
-                    .gap(px(12.))
+                    .gap(px(8.))
                     .child(div().flex_1().children(no_ask.map(|on| {
                         div()
                             .id("confirm-no-ask")
@@ -557,26 +524,25 @@ impl Workspace {
                             .items_center()
                             .gap(px(8.))
                             .cursor_pointer()
-                            .text_size(px(13.))
                             .on_click(cx.listener(|w, _, _, cx| {
                                 if let Some(Confirm::Refs { no_ask, .. }) = &mut w.confirm {
                                     *no_ask = !*no_ask;
                                 }
                                 cx.notify();
                             }))
-                            .child(crate::ui::checkbox(on))
+                            .child(Checkbox::new(on))
                             .child(ui_text(crate::settings::text("不再提示")))
                     })))
-                    .child(secondary_button("confirm-cancel", if matches!(c, Confirm::Migrate(_)) { crate::settings::tr("稍后", "Later") } else { crate::settings::text("取消") }).on_click(cx.listener(|w, _, _, cx| {
+                    .child(Button::outline("confirm-cancel").label(if matches!(c, Confirm::Migrate(_)) { crate::settings::tr("稍后", "Later") } else { crate::settings::text("取消") }).on_click(cx.listener(|w, _, _, cx| {
                         // 稍后 asks again in a week, not at every launch.
                         if matches!(w.confirm, Some(Confirm::Migrate(_))) { crate::settings::migrate_later(); }
                         w.dismiss_confirm(cx);
                     })))
                     .when(matches!(c, Confirm::SaveFailed), |d| {
-                        d.child(secondary_button("confirm-save-copy", crate::settings::tr("另存副本", "Save a copy")).on_click(cx.listener(|w, _, window, cx| {
+                        d.child(Button::outline("confirm-save-copy").label(crate::settings::tr("另存副本", "Save a copy")).on_click(cx.listener(|w, _, window, cx| {
                             w.save_failed_copy(window, cx);
                         })))
-                        .child(secondary_button("confirm-discard", crate::settings::tr("重新载入", "Reload")).text_color(Theme::danger()).on_click(cx.listener(|w, _, window, cx| {
+                        .child(Button::destructive("confirm-discard").label(crate::settings::tr("重新载入", "Reload")).on_click(cx.listener(|w, _, window, cx| {
                             w.confirm = None;
                             w.resolve_save_failed(false, window, cx);
                         })))
@@ -585,14 +551,8 @@ impl Workspace {
             );
         Some(
             deferred(
-                div()
+                crate::design::scrim()
                     .id("confirm-mask")
-                    .absolute()
-                    .inset_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(scrim())
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(dialog),
             )

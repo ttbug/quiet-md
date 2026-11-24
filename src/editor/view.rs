@@ -73,10 +73,38 @@ pub enum BlockSub {
     Add(usize),
 }
 
+/// Where a right-click landed: which menu it opens. A right-click inside the
+/// selection keeps it, anywhere else moves the caret first (see
+/// `Editor::on_right_click`), so the menu always describes what it will act on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CtxKind {
+    /// Text with a selection (or blocks selected as a whole).
+    Selection,
+    /// A caret in text: paste, insert and turn into.
+    Caret,
+    /// A caret in the title: paste and insert; the title is no block to
+    /// turn, align or move.
+    Title,
+    /// A read-only page: copy what is selected (`sel`), or select all.
+    ReadOnly { sel: bool },
+    /// A table cell, by slot. Right-clicking does not select the cell.
+    Cell { block: BlockId, row: usize, col: usize },
+}
+
+/// An open submenu of the right-click menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CtxSub {
+    Insert,
+    Turn,
+    Align,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Menu {
     /// "+" on an empty line: slash items without a trigger.
     Add { block: BlockId, selected: usize },
+    /// Right-click; `pos` is the page-local point the menu hangs from.
+    Ctx { pos: Point<Pixels>, kind: CtxKind, sub: Option<CtxSub> },
     /// Handle click.
     Block { block: BlockId, sub: Option<BlockSub> },
     /// Toolbar dropdowns.
@@ -135,6 +163,8 @@ pub struct Editor {
     pub(super) code_rows: HashMap<BlockId, Vec<usize>>,
     /// Slash / "+" menu list (keyboard selection is kept in view).
     pub slash_scroll: ScrollHandle,
+    /// The slash menu's scrollbar: when the list last scrolled (or opened) and the offset then.
+    pub slash_bar: Cell<Option<(std::time::Instant, f32)>>,
     /// Sideways scroll of each unwrapped code block, and its scrollbar.
     pub code_hscroll: RefCell<HashMap<BlockId, (ScrollHandle, Rc<super::scrollbar::Scrollbar>)>>,
     pub mention_scroll: ScrollHandle,
@@ -147,6 +177,8 @@ pub struct Editor {
     pub probes: RefCell<Vec<(super::overlays::Probe, Option<Bounds<Pixels>>)>>,
     pub marked: Option<(BlockId, Range<usize>)>,
     pub dragging: bool,
+    /// A touch long press selected a word and its drag extends the selection (iOS).
+    pub(super) long_press: bool,
     /// Text drag: the pointer's last position and when the page last scrolled
     /// under it (`text_autoscroll`).
     drag_at: Option<Point<Pixels>>,
@@ -402,6 +434,7 @@ impl Editor {
             frame: Default::default(),
             code_rows: HashMap::new(),
             slash_scroll: ScrollHandle::new(),
+            slash_bar: Cell::new(None),
             code_hscroll: Default::default(),
             mention_scroll: ScrollHandle::new(),
             links: Default::default(),
@@ -410,6 +443,7 @@ impl Editor {
             probes: RefCell::new(vec![]),
             marked: None,
             dragging: false,
+            long_press: false,
             drag_at: None,
             drag_scrolled: None,
             drag_active: None,
@@ -586,6 +620,8 @@ impl Editor {
 
     fn changed_with_scroll(&mut self, intent: ScrollIntent, window: &mut Window, cx: &mut Context<Self>) {
         let reveal = intent == ScrollIntent::RevealCaret;
+        // `$x$` typed delimiters first turns into an equation once the caret leaves it.
+        self.core.equation_on_leave();
         if reveal { self.core.reveal_caret(); }
         // A folded code block opens once the caret is inside it.
         if reveal && !self.core.in_block_mode() && self.core.set_code_folded(self.core.sel.head.block, false) {
@@ -1073,6 +1109,17 @@ impl Editor {
     }
 
     // ---- links, languages, colors
+
+    /// The toolbar's 转为公式 (#192): the selected text becomes an inline
+    /// equation and its editor opens; other selections get a hint.
+    pub(super) fn selection_to_equation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.core.clear_block_sel();
+        let Some(p) = self.core.selection_to_equation() else {
+            return self.toast_kind(crate::editor_ui::ToastKind::Info, crate::settings::text("只有同一段里的文字能转为公式"), cx);
+        };
+        self.changed(window, cx);
+        self.open_equation_editor(p, window, cx);
+    }
 
     /// Open the LaTeX editor of the equation at `p` (its source selected).
     pub fn open_equation_editor(&mut self, p: Pos, window: &mut Window, cx: &mut Context<Self>) {
@@ -2474,9 +2521,92 @@ impl Editor {
             self.set_caret(pos, false);
             self.caret_row_end = at_row_end.then_some((pos.block, pos.offset));
         }
+        // A click out of a `$x$` typed delimiters first makes it an equation.
+        if self.core.equation_on_leave() { self.changed_preserving_viewport(window, cx); }
         self.dragging = ev.click_count == 1;
         self.restart_blink(window, cx);
         cx.notify();
+    }
+
+    /// Right-click on the page: the menu for what was hit.
+    ///
+    /// The selection rule is the one browsers keep getting wrong: a click
+    /// *inside* the selection keeps it, anywhere else moves the caret and
+    /// clears it. The menu then matches what its items will act on, and
+    /// copy / cut never act on something the user can't see selected.
+    pub fn on_right_click(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // The page's own click handling must not also run.
+        cx.stop_propagation();
+        window.focus(&self.focus, cx);
+        // A context menu replaces whatever was open, like any other click.
+        self.menu = None;
+        self.menu_hovered = false;
+        self.slash = None;
+        self.marked = None;
+        self.hide_link_card(cx);
+        if self.read_only {
+            // Nothing to change, but what is selected can still be copied.
+            let Some((pos, _)) = self.pos_at(ev.position) else { return cx.notify() };
+            let sel = self.core.selection_holds(pos);
+            self.menu = Some(Menu::Ctx { pos: self.rel(ev.position), kind: CtxKind::ReadOnly { sel }, sub: None });
+            return cx.notify();
+        }
+        self.dragging = false;
+        self.gap_press = None;
+        self.tables.danger = false;
+        let Some((pos, at_row_end)) = self.pos_at(ev.position) else { return cx.notify() };
+        // A table cell: 行 / 列 operations act on the slot under the pointer,
+        // so the cell selection is left as it is (a multi-cell selection the
+        // click sits inside stays, for 合并单元格).
+        if let Some((block, row, col)) = self.core.cell_of(pos.block) {
+            self.menu = Some(Menu::Ctx { pos: self.rel(ev.position), kind: CtxKind::Cell { block, row, col }, sub: None });
+            return cx.notify();
+        }
+        // Nothing to put a caret in (image, file, divider, ...): the block menu
+        // already has 剪切 / 复制 / 删除 and 在下方添加 for those.
+        // The title is text too, though no block.
+        if pos.block != TITLE && !self.core.block(pos.block).is_some_and(|b| b.kind.has_text()) {
+            return self.open_block_menu(pos.block, false, window, cx);
+        }
+        let in_sel = self.core.selection_holds(pos);
+        if !in_sel {
+            self.core.clear_block_sel();
+            self.set_caret(pos, false);
+            self.caret_row_end = at_row_end.then_some((pos.block, pos.offset));
+            self.restart_blink(window, cx);
+        }
+        let kind = if in_sel { CtxKind::Selection } else if pos.block == TITLE { CtxKind::Title } else { CtxKind::Caret };
+        self.menu = Some(Menu::Ctx { pos: self.rel(ev.position), kind, sub: None });
+        cx.notify();
+    }
+
+    /// Touch: a long press selects the word under it (as a double click does)
+    /// and moving the finger extends the selection.
+    pub(super) fn on_long_press(&mut self, ev: &LongPressEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match ev.phase {
+            TouchPhase::Started => {
+                let Some((pos, _)) = self.pos_at(ev.position) else { return };
+                let text = self.core.text_of(pos.block).map(|t| t.text.clone()).unwrap_or_default();
+                if text.is_empty() { return; }
+                window.focus(&self.focus, cx);
+                self.core.clear_block_sel();
+                self.goal_x = None;
+                self.slash = None;
+                self.marked = None;
+                let r = core::word_at(&text, pos.offset);
+                self.set_caret(Pos::new(pos.block, r.start), false);
+                self.core.sel.head = Pos::new(pos.block, r.end);
+                self.toolbar_hidden = false;
+                self.long_press = true;
+                window.prevent_default();
+                cx.stop_propagation();
+                self.restart_blink(window, cx);
+                cx.notify();
+            }
+            TouchPhase::Moved if self.long_press => self.drag_to(ev.position, cx),
+            TouchPhase::Ended | TouchPhase::Cancelled => self.long_press = false,
+            _ => {}
+        }
     }
 
     pub fn drag_to(&mut self, p: Point<Pixels>, cx: &mut Context<Self>) {

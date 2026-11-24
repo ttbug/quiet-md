@@ -5,7 +5,8 @@ impl Store {
     /// It takes the parsed documents along, so its `list` reads only files that changed.
     pub fn tree_writer(&self) -> Self {
         Self { file_changes: vec![], root: self.root.clone(), index: self.index.clone(), foreign: self.foreign.clone(), trash: self.trash.clone(), flat: self.flat,
-            loaded: Default::default(), copied: Default::default(), parsed: self.parsed.clone(), warnings: vec![], migrated: None, batch: Default::default(), view: Default::default() }
+            loaded: Default::default(), copied: Default::default(), parsed: self.parsed.clone(), warnings: vec![], migrated: None, batch: Default::default(), view: Default::default(),
+            v5: self.v5, me: self.me.clone(), clock: self.clock.clone(), seen: self.seen.clone(), merged: self.merged.clone(), key: self.key.clone() }
     }
 
     pub fn take_warnings(&mut self) -> Vec<String> { std::mem::take(&mut self.warnings) }
@@ -16,7 +17,9 @@ impl Store {
         let dir = parent.and_then(|p| self.index.get(p)).map(|p| p.rel.clone()).unwrap_or_default();
         let name = base_name(&m.rel);
         let ext = m.folder.is_none().then(|| ext_of(m));
-        let base = if ext.is_some() { layout::unnumbered(stem_of(name)) } else { layout::unnumbered(name) };
+        let stem = if ext.is_some() { stem_of(name) } else { name };
+        // A folder's or Markdown file's name is its title: 「报告 (2).md」 stays that.
+        let base = if m.folder.is_some() || m.named_by_file() { stem } else { layout::unnumbered(stem) };
         join_rel(&dir, &self.free_name(&dir, base, ext, None))
     }
 

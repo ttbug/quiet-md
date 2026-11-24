@@ -2,10 +2,11 @@
 
 ## 当前阶段
 
-右侧 Agent 面板第一版已实现；当前合并 main（`47e203d`）的多文件夹工作区及存储更新，保留本机 Codex 面板。
+右侧 Agent 面板第一版已实现；当前合并 main（`6102152`）的设计系统及存储更新，保留本机 Codex 面板。
 
 ## 已完成
 
+- 2026-11-24 解决 main（`6102152`）合并冲突：主页搜索使用新版 `Field` 并保留 Agent 面板宽度避让；Agent 模型菜单及操作／代码复制按钮适配 main 的设计组件；设置回归适配应用级设置与 FORMAT 5 根目录外观分离。Release workspace 测试、三种配置 Clippy、指南及 Agent／Markdown 界面回归通过，尚未创建合并提交。
 - 2026-11-23 解决 main（`47e203d`）合并冲突：`Settings` 同时保留 Agent 工作目录、面板宽度和每个文件夹的外观设置，新增旧配置兼容及保存不丢字段回归；Markdown 刷新回归适配多文件夹存储的 `with` 接口。Release workspace 测试、三种配置 Clippy、指南及 Agent／Markdown 界面回归通过，尚未创建合并提交。
 - 2026-11-22 解决 main（`0f408c4`，0.1.14）合并冲突：保留 main 的新版 README 结构并迁入 Local Codex 说明；主页搜索同时为三个操作按钮及 AI 入口留位。AI 回复改用可配置界面字体接口，Markdown 刷新回归按新签名传入当前窗口 ID，移除被 main 的窗口枚举实现替代的冗余字段。Release 测试、三种配置 Clippy、指南及界面回归通过，尚未创建合并提交。
 - 2026-11-19 修复恢复 Markdown 文档后窗口激活闪退：`Workspace` 保存所属窗口 ID，刷新、接收外部版本及保存后的兄弟窗口同步均在读取实体前排除当前窗口，避免 GPUI 的窗口重入 panic。新增 `tools/harness/markdown_refresh.py`，不激活窗口，仅操作临时文档库。
@@ -29,7 +30,7 @@
 
 ## 进行中
 
-- main（`47e203d`）合并到 `feat/own`：冲突及自动合并后的接口兼容问题已解决并验证，已暂存，保留合并状态，等待创建合并提交。
+- main（`6102152`）合并到 `feat/own`：冲突及自动合并后的接口兼容问题已解决并验证，已暂存，保留合并状态，等待创建合并提交。
 
 ## 待办
 
@@ -45,6 +46,7 @@
 
 ## 最近验证
 
+- 2026-11-24 合并验证：Release workspace 测试（`devtools`）1046 项通过、8 项忽略；普通、`devtools`、`devtools,datatable` 三种配置 Release Clippy（`--all-targets -- -D warnings`）通过，均使用 `gpui_platform/runtime_shaders` 和 `MACOSX_DEPLOYMENT_TARGET=13.0`。中英文指南 XML 往返、6 个指南资源一致性、完整模拟 Agent 面板回放及 Markdown 刷新防闪退回归通过；截图确认主页搜索与右侧按钮无重叠、模型菜单正常。测试使用临时文档库、独立 `QUIET_MD_ROOTS` 和英文测试配置；恢复及本地 HTTP 用例在沙箱外验证通过。旧设置回归已适配新存储职责；未配置多根目录／英文时分别触发根目录改名限制／字体英文断言。无未解决索引项，本次修复文件空白检查通过；全量暂存空白提示涉及四个文件，内容均与 main 完全一致，保留原样。
 - 2026-11-23 合并验证：Release workspace 测试（`devtools`）1121 项通过、8 项忽略；普通、`devtools`、`devtools,datatable` 三种配置 Release Clippy（`--all-targets -- -D warnings`）通过，均使用 `gpui_platform/runtime_shaders` 和 `MACOSX_DEPLOYMENT_TARGET=13.0`。指南 XML 往返、6 个指南资源一致性、完整 Agent 面板回放及 Markdown 刷新防闪退回归通过。测试仅使用临时文档库；首轮恢复副本用例因沙箱权限失败，沙箱外完整重跑通过。无未解决索引项，本次修改文件空白检查通过；全量暂存 diff 的 10 处空白提示来自与 main 完全一致的两个 vendor 补丁，保留原样。
 - 2026-11-22 合并验证：Release workspace 测试（`devtools`）972 项通过、8 项忽略；普通、`devtools`、`devtools,datatable` 三种配置 Release Clippy（`--all-targets -- -D warnings`）通过；本机均启用 `gpui_platform/runtime_shaders`，设置 `MACOSX_DEPLOYMENT_TARGET=13.0`。指南 XML 往返及 6 个指南资源一致性通过。完整模拟 Agent 面板回放和 Markdown 刷新防闪退回归通过；主页截图确认搜索、三个操作按钮及 AI 入口无重叠。测试仅使用临时文档库，恢复用例与图形回放在获得沙箱外权限后通过。本次修改文件空白检查通过；完整暂存 diff 的 9 处空白提示来自与 main 完全一致的两个 vendor 补丁，保留原样。
 - 2026-11-19 修复版 DMG：`dist-release.local-prz7w6rp/quiet-md-0.1.13-release-macos-arm64.dmg`，30,586,936 字节，SHA-256 `15487d7b044af9ff8b2334f039f8169506516d13fc0aff51b4df760462ccdb3e`。dist 构建、镜像 CRC、只读挂载、签名、arm64、包内二进制及 dSYM UUID 匹配通过，验证挂载已卸载。成品在临时库启动 15 秒无 panic，核对本机打开记录确认实际打开已有 `Startup.md`，随后仅结束本次测试进程。临时签名、未公证，关闭 `devtools`，未公开发布或替换已安装应用；验证文件与调试符号保留在产物目录。

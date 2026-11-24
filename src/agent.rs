@@ -350,9 +350,7 @@ impl Panel {
             .chain(self.models.iter().map(|m| (Some(m.id.clone()), m.name.clone())));
         let rows = options.enumerate().map(|(i, (id, name))| {
             let group = SharedString::from(format!("agent-model-option-{i}"));
-            ui::menu_row(group.clone(), group).when(id == self.selected_model, |d| d.bg(Theme::fill_hover()))
-                .child(div().flex_1().min_w_0().truncate().child(ui::ui_text(name)))
-                .when(id == self.selected_model, |d| d.child(ui::icon("check", 14., Theme::icon())))
+            crate::design::MenuItem::new(group).label(name).checked(id == self.selected_model)
                 .on_click(cx.listener(move |w, _, _, cx| {
                     if w.busy { return }
                     w.selected_model = id.clone();
@@ -361,13 +359,13 @@ impl Panel {
                 }))
         });
         let anchor = self.model_anchor.clone();
-        let menu = ui::popover().id("agent-model-menu").occlude().flex().flex_col()
+        let menu = crate::design::Popover::new("agent-model-menu").flex().flex_col()
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 if anchor.get().is_some_and(|b| b.contains(&ev.position)) { return }
                 w.model_menu = false; cx.notify();
             }))
             .child(div().id("agent-model-options").w(px((f32::from(window.viewport_size().width) - 24.).min(320.))).max_h(px(260.))
-                .overflow_y_scroll().py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows)
+                .overflow_y_scroll().py(px(crate::design::menu::PAD)).flex().flex_col().children(rows)
                 .when(self.models_loading, |d| d.child(div().p(px(8.)).child(tr("正在读取模型…", "Loading models…"))))
                 .when_some(self.model_error.as_ref(), |d, e| d.child(div().p(px(8.)).text_color(Theme::danger()).child(ui::ui_para(e.clone())))));
         Some(deferred(anchored().anchor(Anchor::BottomLeft).position(point(b.left(), b.top() - px(4.)))
@@ -390,7 +388,7 @@ impl Render for Panel {
             .text_size(px(13.)).line_height(px(20.))
             .child(div().h(px(48.)).flex_none().px(px(12.)).flex().items_center().gap(px(8.))
                 .child(div().flex_1().child("Codex"))
-                .child(ui::secondary_button("agent-new", tr("新会话", "New chat"))
+                .child(crate::design::Button::outline("agent-new").sized(crate::design::ButtonSize::Sm).label(tr("新会话", "New chat"))
                     .on_click(cx.listener(|w, _, _, cx| w.reset(cx))))
                 .child(toggle_button("agent-close", true).on_click(cx.listener(|w, _, window, cx| w.toggle(window, cx)))))
             .child(div().id("agent-messages").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.scroll).px(px(12.))
@@ -404,8 +402,8 @@ impl Render for Panel {
             .when_some(self.approvals.first(), |d, (_, text)| d.child(div().p(px(12.)).flex_none().flex().flex_col().gap(px(8.))
                 .child(div().id("agent-approval-details").max_h(px(180.)).overflow_y_scroll().child(ui::ui_para(text.clone())))
                 .child(div().flex().gap(px(8.))
-                    .child(ui::secondary_button("agent-deny", tr("拒绝", "Decline")).on_click(cx.listener(|w, _, _, cx| w.decide(false, cx))))
-                    .child(ui::primary_button("agent-approve", tr("允许本次", "Allow once")).on_click(cx.listener(|w, _, _, cx| w.decide(true, cx)))))))
+                    .child(crate::design::Button::outline("agent-deny").sized(crate::design::ButtonSize::Sm).label(tr("拒绝", "Decline")).on_click(cx.listener(|w, _, _, cx| w.decide(false, cx))))
+                    .child(crate::design::Button::primary("agent-approve").sized(crate::design::ButtonSize::Sm).label(tr("允许本次", "Allow once")).on_click(cx.listener(|w, _, _, cx| w.decide(true, cx)))))))
             .when_some(self.error.as_ref(), |d, e| d.child(div().px(px(12.)).text_color(Theme::danger()).child(ui::ui_para(e.clone()))))
             .child(div().p(px(12.)).flex_none().flex().flex_col().gap(px(8.))
                 .when(self.busy, |d| d.child(div().text_color(Theme::text_caption()).child(ui::ui_para(self.status.clone()))))
@@ -425,9 +423,9 @@ impl Render for Panel {
                         .child(div().min_w_0().truncate().child(ui::ui_text(directory_name)))
                         .on_click(cx.listener(|w, _, _, cx| w.pick_directory(cx))))
                     .child(if self.busy {
-                        ui::secondary_button("agent-stop", tr("停止", "Stop")).on_click(cx.listener(|w, _, _, cx| w.stop(cx))).into_any_element()
+                        crate::design::Button::outline("agent-stop").sized(crate::design::ButtonSize::Sm).label(tr("停止", "Stop")).on_click(cx.listener(|w, _, _, cx| w.stop(cx))).into_any_element()
                     } else {
-                        ui::primary_button("agent-send", tr("发送", "Send")).on_click(cx.listener(|w, _, _, cx| w.send(cx))).into_any_element()
+                        crate::design::Button::primary("agent-send").sized(crate::design::ButtonSize::Sm).label(tr("发送", "Send")).on_click(cx.listener(|w, _, _, cx| w.send(cx))).into_any_element()
                     })))
             .children(model_menu).into_any_element()
     }

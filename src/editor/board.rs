@@ -42,22 +42,13 @@ impl R<'_> {
         // under the open board the thumbnail isn't seen: don't paint it every frame
         let covered = self.ed.boards.open.as_ref().is_some_and(|o| o.0 == id);
         let thumb = canvas(|_, _, _| {}, move |bounds, _, window, cx| if !covered { paint_fit(&mut painter.borrow_mut(), &board, bounds, PAD, window, cx) }).absolute().size_full();
-        let open_btn = div()
-            .id(("board-open", id.0))
+        let open_btn = crate::design::Button::outline(("board-open", id.0))
+            .sized(crate::design::ButtonSize::Tool)
             .absolute().top(px(10.)).right(px(10.))
-            .h(px(28.)).px(px(10.))
-            .flex().items_center().gap(px(4.))
-            .rounded(px(6.))
-            .bg(crate::theme::raised(Theme::bg_body()))
-            .border_1().border_color(Theme::line_border())
-            .shadow(crate::theme::shadow_button())
-            .text_size(px(13.)).text_color(Theme::text())
-            .cursor_pointer()
             .invisible()
             .group_hover(group.clone(), |s| s.visible())
-            .hover(|s| s.bg(Theme::fill_hover()))
-            .child(crate::ui::icon("whiteboard", 14., Theme::icon()))
-            .child(crate::settings::label("编辑"))
+            .icon("whiteboard")
+            .label(crate::settings::label("编辑"))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |e, _, window, cx| e.open_board(id, window, cx)));
         div()

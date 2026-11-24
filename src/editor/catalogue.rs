@@ -5,7 +5,7 @@ use super::core::TITLE;
 use super::render::{TOP, flattens, visible_with_gaps};
 use super::view::{Editor, EditorEvent};
 use crate::model::*;
-use crate::feishu_theme::{self as theme, Theme, craft};
+use crate::feishu_theme::{self as theme, Theme};
 use crate::editor_ui::{TipExt, TipSide, icon, ui_text};
 use gpui::{prelude::FluentBuilder, *};
 use std::cell::Cell;
@@ -292,24 +292,12 @@ impl Editor {
         }
         let floating = mode == CatMode::Forced;
         let pinned = self.cat_pinned;
-        let pin = div()
-            .id(SharedString::from(format!("cat-pin-{pinned}")))
+        let pin = crate::design::Button::ghost(SharedString::from(format!("cat-pin-{pinned}")))
+            .sized(crate::design::ButtonSize::Xs)
             .absolute()
             .left(px(14.))
             .top(px(10.))
-            .size(px(24.))
-            .rounded(px(4.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .group("cat-pin")
-            .hover(|s| s.bg(Theme::fill_hover_strong()))
-            .active(|s| s.bg(theme::ta(31, 35, 41, 0.2)))
-            .child(
-                icon(if pinned { "catalogue-collapse" } else { "catalogue-list" }, 18., Theme::icon())
-                    .group_hover("cat-pin", |s| s.text_color(theme::c(craft::old::B500))),
-            )
+            .child(icon(if pinned { "catalogue-collapse" } else { "catalogue-list" }, 16., crate::design::color::muted_foreground()))
             .tip_label(if pinned { crate::settings::text("收起目录") } else { crate::settings::text("展开目录") }.into(), TipSide::Above)
             .on_click(cx.listener(move |ed, _, _, cx| ed.set_cat_pinned(!pinned, cx)));
 

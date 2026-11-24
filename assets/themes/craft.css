@@ -247,6 +247,10 @@ strong {
   color: inherit;
 }
 
+em {
+  color: inherit;
+}
+
 a {
   color: #105592;
   text-decoration: none;

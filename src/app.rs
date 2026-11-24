@@ -24,14 +24,28 @@ const SAVE_DELAY: Duration = Duration::from_millis(500);
 const SAVE_MAX_DELAY: Duration = Duration::from_secs(2);
 
 actions!(workspace, [NewDoc, OpenFile, OpenFolder, ImportDoc, ImportFolder, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, CheckForUpdates, GoHome, CloseWindow, Quit,
-    ReplayOnboarding, HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen]);
+    ReplayOnboarding, HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen, ToggleDarkMode]);
 // A confirmation dialog's keys, in its own key context: ↩ is the action button, Esc 取消.
 actions!(confirm, [ConfirmOk, ConfirmCancel]);
 
+thread_local! {
+    /// The menu bar is for a Markdown file: 插入 / 格式 leave out what it can't hold.
+    static MENU_MARKDOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The menu bar follows the document in the window in front; rebuilt only
+/// when that changes between a Markdown file and anything else.
+pub fn menus_follow(markdown: bool, cx: &mut App) {
+    if MENU_MARKDOWN.replace(markdown) != markdown { set_menus(cx); }
+}
+
 /// The menu bar, in the interface language.
-pub fn set_menus(cx: &mut App) {
+pub fn set_menus(cx: &mut App) { cx.set_menus(menu_bar(MENU_MARKDOWN.get())); }
+
+/// The menus; for a Markdown file without 提醒, 下划线 and 对齐, which it can't keep.
+fn menu_bar(markdown: bool) -> Vec<Menu> {
     use crate::settings::tr;
-    cx.set_menus(vec![
+    vec![
         Menu {
             name: "Quiet.md".into(),
             items: vec![
@@ -85,6 +99,73 @@ pub fn set_menus(cx: &mut App) {
             },
             disabled: false,
         },
+        // 插入 and 格式: the menu-bar home of everything the page's
+        // right-click menu offers, so no action is reachable only by shortcut.
+        Menu {
+            name: tr("插入", "Insert").into(),
+            items: {
+                use crate::editor::keymap as k;
+                let mut items = vec![
+                    MenuItem::action(tr("链接", "Link"), k::Link),
+                    MenuItem::action(tr("表格", "Table"), k::InsertTable),
+                    MenuItem::action(tr("分隔线", "Divider"), k::InsertDivider),
+                ];
+                if !markdown { items.push(MenuItem::action(tr("提醒", "Reminder"), k::InsertReminder)); }
+                items
+            },
+            disabled: false,
+        },
+        Menu {
+            name: tr("格式", "Format").into(),
+            items: {
+                use crate::editor::keymap as k;
+                let mut items = vec![MenuItem::action(tr("粗体", "Bold"), k::Bold), MenuItem::action(tr("斜体", "Italic"), k::Italic)];
+                if !markdown { items.push(MenuItem::action(tr("下划线", "Underline"), k::Underline)); }
+                items.extend([
+                    MenuItem::action(tr("删除线", "Strikethrough"), k::Strike),
+                    MenuItem::action(tr("行内代码", "Inline code"), k::InlineCode),
+                    MenuItem::separator(),
+                    MenuItem::submenu(Menu {
+                        name: tr("转换为", "Turn into").into(),
+                        items: vec![
+                            MenuItem::action(tr("正文", "Text"), k::TurnText),
+                            MenuItem::action(tr("一级标题", "Heading 1"), k::TurnH1),
+                            MenuItem::action(tr("二级标题", "Heading 2"), k::TurnH2),
+                            MenuItem::action(tr("三级标题", "Heading 3"), k::TurnH3),
+                            MenuItem::action(tr("无序列表", "Bulleted list"), k::TurnBullet),
+                            MenuItem::action(tr("有序列表", "Numbered list"), k::TurnOrdered),
+                            MenuItem::action(tr("任务", "Task"), k::TurnTodo),
+                            MenuItem::action(tr("引用", "Quote"), k::TurnQuote),
+                            MenuItem::action(tr("代码块", "Code block"), k::TurnCode),
+                        ],
+                        disabled: false,
+                    }),
+                ]);
+                if !markdown {
+                    items.push(MenuItem::submenu(Menu {
+                        name: tr("对齐", "Align").into(),
+                        items: vec![
+                            MenuItem::action(tr("左对齐", "Align left"), k::AlignLeft),
+                            MenuItem::action(tr("居中对齐", "Align center"), k::AlignCenter),
+                            MenuItem::action(tr("右对齐", "Align right"), k::AlignRight),
+                        ],
+                        disabled: false,
+                    }));
+                }
+                items
+            },
+            disabled: false,
+        },
+        // 显示 (View). Its name per language, not through `tr`: the key 显示 is the verb
+        // "show" in the tables (Mostrar, Afficher…); these are the system's View menus.
+        Menu {
+            name: {
+                use crate::settings::Lang as L;
+                match crate::settings::lang() { L::Zh => "显示", L::ZhTw => "顯示", L::En => "View", L::Ja => "表示", L::Ko => "보기", L::Fr => "Présentation", L::Es => "Visualización", L::Ar => "عرض", L::Tr => "Görüntü" }.into()
+            },
+            items: vec![MenuItem::action(tr("切换深色 / 浅色", "Toggle Dark Mode"), ToggleDarkMode)],
+            disabled: false,
+        },
         Menu {
             name: tr("窗口", "Window").into(),
             items: vec![
@@ -95,7 +176,7 @@ pub fn set_menus(cx: &mut App) {
             ],
             disabled: false,
         },
-    ]);
+    ]
 }
 
 pub fn bind_keys(cx: &mut App) {
@@ -131,12 +212,17 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-h", HideApp, None),
         KeyBinding::new("cmd-m", Minimize, None),
         KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
+        // ⌥⌘D is the system's Dock hiding; ⌃⌘D is free in the app (Cocoa's 查询 doesn't reach GPUI)
+        KeyBinding::new("ctrl-cmd-d", ToggleDarkMode, None),
     ]);
     // Windows: F11 for full screen, and Ctrl+H for 查找和替换 as in Office
     // and Notepad (written cmd-h: `shortcuts::pc_binding` maps cmd to
     // ctrl and drops a literal ctrl-h, Cocoa's backspace).
     #[cfg(not(target_os = "macos"))]
     cx.bind_keys([KeyBinding::new("f11", ToggleFullScreen, None), KeyBinding::new("cmd-h", ReplaceInDoc, None)]);
+    // Ctrl+Shift+D there (written cmd-shift-d, mapped by `pc_binding`): Ctrl+Alt reads as AltGr on Windows (#290).
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([KeyBinding::new("cmd-shift-d", ToggleDarkMode, None)]);
     cx.on_action(|_: &HideApp, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
@@ -152,6 +238,14 @@ pub fn bind_keys(cx: &mut App) {
         }
     });
     cx.on_action(|_: &Quit, cx| cx.defer(quit));
+    // 切换深色 / 浅色: the other of the two, kept as the 外观 preference; under 跟随系统
+    // the look is the system's, so this is the opposite of the system's. After the
+    // key's dispatch, which borrows the window.
+    cx.on_action(|_: &ToggleDarkMode, cx| cx.defer(|cx| {
+        let Some(h) = cx.windows().into_iter().find_map(|w| w.downcast::<Workspace>()) else { return };
+        let to = if crate::theme::dark() { "light" } else { "dark" };
+        let _ = h.update(cx, |ws, _, cx| ws.set_pref(|p| p.appearance = to.into(), cx));
+    }));
     crate::modes::bind_keys(cx);
 }
 
@@ -294,6 +388,8 @@ pub struct Workspace {
     sidebar_was_open: bool,
     /// The window width before that widening, until the window takes the new size.
     widen_from: Option<f32>,
+    /// The keyboard's height last frame (iOS): when it grows, the caret is scrolled back into view.
+    keyboard_inset: f32,
     /// Narrowing the window hid the sidebar (not the user): widening it until
     /// the sidebar fits shows it again.
     sidebar_auto_hidden: bool,
@@ -343,6 +439,8 @@ pub struct Workspace {
     /// opened (given back when it closes); `None` while no dialog has it.
     pub confirm_focus: FocusHandle,
     pub confirm_return: Option<Option<WeakFocusHandle>>,
+    /// The keyboard while 导出 Markdown or 文档信息 dialog (the confirmation has its own, `confirm_focus`) is open.
+    pub dialog_focus: crate::design::DialogFocus,
     /// The first-launch pages laid over the window again (⌘⌥⇧O, Settings › About).
     pub onboarding: Option<Entity<crate::onboarding::Onboarding>>,
     pub view: View,
@@ -466,6 +564,9 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     if let Some(id) = &this.current { crate::quick_note::used(id, cx); }
+                    // Several windows share one root in front: the one coming forward
+                    // puts its own back (its pasted images, its look).
+                    if let Some(id) = this.current.clone().or_else(|| this.folder_current.clone()) && this.store.set_active(&id) { cx.defer(crate::settings::root_switched); }
                     if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); this.refresh_markdown(Some(window.window_handle().window_id()), cx); }
                     crate::update::check_if_stale(cx); cx.notify();
                 }
@@ -589,6 +690,7 @@ impl Workspace {
             sidebar_width,
             sidebar_was_open: false,
             widen_from: None,
+            keyboard_inset: 0.,
             sidebar_auto_hidden: false,
             sidebar_drag: false,
             folder_current: None,
@@ -619,6 +721,7 @@ impl Workspace {
             confirm: None,
             confirm_focus: cx.focus_handle(),
             confirm_return: None,
+            dialog_focus: crate::design::DialogFocus::new(cx),
             onboarding: None,
             view: View::Doc,
             home: Default::default(),
@@ -656,7 +759,7 @@ impl Workspace {
         // notebook first.
         match document {
             Some(id) => ws.open(&id, window, cx),
-            None if quick => ws.new_doc(window, cx),
+            None if quick => ws.new_quick_note(window, cx),
             None if !crate::settings::prefs().start_home && !cfg!(target_family = "wasm") => {
                 // Nothing read yet (a fresh library, whose guides all start at
                 // `opened == 0`): the first document, as before — `max_by_key`
@@ -815,7 +918,8 @@ impl Workspace {
             }
         }));
         // Opening a document puts the caret in it, unless the user is typing a search.
-        if !self.search_open {
+        // Not on iOS, where a focused editor brings up the keyboard: a tap in the text does.
+        if !self.search_open && !cfg!(target_os = "ios") {
             { let f = editor.read(cx).focus.clone(); window.focus(&f, cx); }
         }
         // A 画板 opens straight into its board, over the whole window.
@@ -849,6 +953,13 @@ impl Workspace {
     /// one made from the 新建 menu) in the current place.
     pub fn new_doc(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let parent = self.creation_parent();
+        self.create_doc(crate::settings::quick_new_markdown(), parent, window, cx);
+    }
+
+    /// A 快速笔记 window's own note: at the top of the root Settings › 文档库
+    /// picks (2.8), else the first open root.
+    fn new_quick_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let parent = self.store.quick_note_root().map(|k| crate::shared_store::root_row(&k));
         self.create_doc(crate::settings::quick_new_markdown(), parent, window, cx);
     }
 
@@ -1063,7 +1174,8 @@ impl Workspace {
 
     /// 重命名: the row's title turns into an input; Enter or clicking away saves, Esc cancels.
     pub fn start_rename(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if crate::shared_store::root_of_row(id).is_some() { return; }
+        // A root's row renames its folder on disk (2.11), where that is allowed.
+        if crate::shared_store::root_of_row(id).is_some_and(|k| !self.store.can_rename_root(k)) { return; }
         let Some(title) = self.entries.iter().find(|e| e.id == id).map(|e| e.title.trim().to_string()) else { return };
         let field = cx.new(|cx| {
             let mut f = TextField::new(crate::model::UNTITLED, cx);
@@ -1094,6 +1206,11 @@ impl Workspace {
         let refocus = r.field.read(cx).is_focused(window);
         let title = r.field.read(cx).text.trim().to_string();
         let old = self.entries.iter().find(|e| e.id == r.id).map(|e| e.title.trim().to_string());
+        if let Some(key) = crate::shared_store::root_of_row(&r.id) {
+            if commit && old.is_some_and(|o| o != title) { self.rename_root(key, &title, window, cx); }
+            cx.notify();
+            return;
+        }
         // A document with children is renamed through its 正文, which renames the folder too.
         let r = Rename { id: self.note_or(&r.id), ..r };
         if commit && old.is_some_and(|o| o != title) {
@@ -1236,6 +1353,7 @@ impl Workspace {
     fn refresh_markdown(&mut self, on_stack: Option<gpui::WindowId>, cx: &mut Context<Self>) {
         if self.preview.is_some() || self.store.file_task_busy() || matches!(self.confirm, Some(Confirm::SaveFailed)) { return }
         let Some(id) = self.current.clone() else { return };
+        if !self.unsaved { self.follow_moved_links(cx); }
         if !self.store.is_markdown(&id) { return }
         if self.unsaved {
             self.flush(cx);
@@ -1248,6 +1366,22 @@ impl Workspace {
         if let Ok(Some(doc)) = self.store.with(Some(&id), |s| s.refresh_markdown(&id)) {
             self.adopt_markdown(&id, doc, cx);
         }
+    }
+
+    /// A move rewrote the open document's links to files on disk
+    /// (`Store::follow_moved_links`): every window showing it follows, so no
+    /// save writes the old paths back. Each link as it was → as it is now.
+    pub(crate) fn follow_moved_links(&mut self, cx: &mut Context<Self>) -> Option<HashMap<String, String>> {
+        let id = self.current.clone().filter(|_| self.preview.is_none())?;
+        let map = self.store.with(Some(&id), |s| Ok(s.follow_moved_links(&id))).ok().flatten()?;
+        let relink = |w: &mut Self, cx: &mut Context<Self>| if let Some(ed) = &w.editor {
+            ed.update(cx, |e, cx| if e.core.relink_files(&|l| map.get(l).cloned()) { cx.notify(); });
+        };
+        relink(self, cx);
+        for peer in Self::other_workspaces(cx) {
+            if peer.read(cx).current.as_deref() == Some(id.as_str()) { peer.update(cx, |w, cx| relink(w, cx)); }
+        }
+        Some(map)
     }
 
     /// All live views share the store's save baseline, so install the accepted
@@ -1295,6 +1429,7 @@ impl Workspace {
             self.unsaved = false;
             return true;
         };
+        self.follow_moved_links(cx);
         let doc = &ed.read(cx).core.doc;
         let (title, icon, body, reminders, links) = (doc.title.text.clone(), doc.icon.clone(), doc.plain_text(), doc.reminders(), doc.doc_links());
         match self.store.with(Some(&id), |s| s.save_editor(&id, doc)) {
@@ -1305,7 +1440,7 @@ impl Workspace {
                     e.body = body.into();
                     e.reminders = reminders;
                     e.links = links;
-                    e.meta = meta.clone();
+                    e.meta = self.store.as_row(&id, meta.clone());
                 }
                 // A mirrored edit was saved by this window. A sibling must not
                 // later write it a second time over a newer external edit.
@@ -1352,7 +1487,9 @@ impl Workspace {
     pub(crate) fn migrate_library(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.save_before(cx, |w, window, cx| w.migrate_library(window, cx)) { return }
         let root = crate::store::Store::root_dir();
-        let moved = crate::store::Store::migrate(&root).and_then(|r| Ok((r, crate::store::Store::open_at(root.clone())?)));
+        // Reopened under the same root key: what this computer keeps about it stays.
+        let key = self.store.with(None, |s| Ok(s.key().to_string())).unwrap_or_else(|_| crate::store::library_key(&root));
+        let moved = crate::store::Store::migrate(&root).and_then(|r| Ok((r, crate::store::Store::open_at_as(root.clone(), &key)?)));
         match moved {
             Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("没能改为真实文件夹，文档库保持原样：{}", "Couldn't move to real folders; the library is unchanged: {}", crate::settings::diagnostic(&e.to_string())), cx),
             Ok((report, store)) => {
@@ -1511,7 +1648,7 @@ impl Workspace {
     /// either side of it: the title (and, with the sidebar hidden, the
     /// traffic lights and 展开侧栏) on the left, … 导入 + on the right. Below a
     /// usable width it is None and the caller shows a search icon instead.
-    pub(crate) fn header_search(&self, window: &Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    pub(crate) fn header_search(&self, window: &Window, cx: &mut Context<Self>) -> Option<crate::design::Field> {
         let agent_w = if !self.quick_note && self.agent.read(cx).open { self.agent.read(cx).panel_width(window) } else { 0. };
         let main = f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. } - agent_w;
         let title = crate::settings::label(crate::settings::text("主页"));
@@ -1524,13 +1661,12 @@ impl Workspace {
         let half = (main / 2. - left).min(main / 2. - right);
         let width = (main - 320.).min(2. * half).min(360.);
         if width < 120. { return None }
-        Some(div().id("header-search").absolute().left(px((main - width) / 2.)).top(px(8.))
-            .w(px(width)).h(px(32.)).no_drag().flex().items_center().gap(px(8.)).px(px(10.))
-            .rounded(px(9.)).bg(Theme::fill_hover())
-            .cursor_pointer().hover(|s| s.bg(Theme::fill_hover_strong()))
-            .child(icon("search", 15., Theme::icon()))
-            .child(div().flex_1().min_w_0().truncate().text_size(px(13.)).text_color(Theme::text_caption()).child(crate::settings::tr("搜索文档…", "Search documents…")))
-            .when(width >= 200., |d| d.child(div().flex_none().text_size(px(11.)).text_color(Theme::text_placeholder()).child(crate::shortcuts::hint("workspace::FocusSearch", "⌘ + J").replace(" + ", " "))))
+        // A field that opens the search panel rather than taking text itself.
+        Some(crate::design::Field::new("header-search").sized(crate::design::FieldSize::Sm).absolute().left(px((main - width) / 2.)).top(px(8.))
+            .w(px(width)).no_drag().gap(px(8.)).cursor_pointer()
+            .child(crate::design::icon("search", 16., crate::design::color::muted_foreground()))
+            .child(div().flex_1().min_w_0().truncate().text_color(crate::design::color::placeholder()).child(crate::settings::tr("搜索文档…", "Search documents…")))
+            .when(width >= 200., |d| d.child(crate::design::Kbd::new(crate::shortcuts::hint("workspace::FocusSearch", "⌘ + J").replace(" + ", " "))))
             .tip(crate::settings::tr("搜索文档", "Search documents"), Some(crate::shortcuts::hint("workspace::FocusSearch", "⌘ + J")))
             .on_click(cx.listener(|w, _, window, cx| w.open_search(window, cx))))
     }
@@ -1557,7 +1693,7 @@ impl Workspace {
         };
         // Independent icon controls, with equal top and right insets.
         let seg = crate::ui::header_icon;
-        let divider = || div().flex_none().w(px(1.)).h(px(18.)).bg(Theme::line_divider());
+        let divider = || crate::design::Separator::new().vertical().h(px(18.));
         // Breadcrumbs: the parent pages, each linking to itself, with the
         // middle ones folded into "…" when the chain is long.
         let chain: Vec<(String, String, Option<String>)> = self
@@ -1677,32 +1813,19 @@ impl Workspace {
             .title_bar()
             .when(!self.sidebar_open, |d| {
                 d.child(
-                    div()
-                        .id("open-sidebar")
+                    crate::design::Button::ghost("open-sidebar")
                         .no_drag()
-                        .flex_none()
                         .ml(px(4.))
-                        .size(px(28.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(8.))
-                        .cursor_pointer()
-                        .hover(|s| s.bg(Theme::fill_hover_strong()))
+                        .icon("panel-left-open")
                         .tip(crate::settings::tr("展开侧栏", "Show sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
-                        .child(icon("panel-left-open", 17., Theme::icon()))
                         .on_click(cx.listener(|w, _, _, cx| {
                             w.sidebar_open = true;
                             cx.notify();
                         })),
                 )
                 .child(
-                    div().id("header-home").no_drag().flex_none().ml(px(4.)).size(px(28.))
-                        .flex().items_center().justify_center().rounded(px(8.)).cursor_pointer()
-                        .hover(|s| s.bg(Theme::fill_hover_strong()))
-                        .active(|s| s.bg(Theme::fill_pressed()))
+                    crate::design::Button::ghost("header-home").no_drag().ml(px(4.)).icon("home")
                         .tip(crate::settings::text("返回主页"), None)
-                        .child(icon("home", 18., Theme::icon()))
                         .on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx))),
                 )
                 .child(div().mx(px(12.)).child(divider()))
@@ -1757,7 +1880,7 @@ impl Workspace {
                             // from this button's right edge.
                             seg("doc-more", "ellipsis")
                                 .relative()
-                                .when(self.doc_menu, |d| d.bg(Theme::fill_hover()))
+                                .selected(self.doc_menu)
                                 .when(!self.doc_menu, |d| d.tip(crate::settings::tr("更多", "More"), None))
                                 .child(canvas(move |b, _, _| record_more.set(Some(b)), |_, _, _, _| {}).absolute().inset_0())
                                 // Toggle on mouse-down from the render-time state: the menu's outside-press
@@ -1793,6 +1916,11 @@ pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_note_rows();
+        // The menu bar is the front window's: a Markdown file's 插入 / 格式 leave out what it can't hold.
+        if window.is_window_active() {
+            let markdown = self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).markdown);
+            cx.defer(move |cx| menus_follow(markdown, cx));
+        }
         // Clicks no longer take focus from the editor (see the root's mouse
         // down), so leaving the document hands it back to the window's keys.
         if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus, cx); }
@@ -1809,6 +1937,15 @@ impl Render for Workspace {
         // sidebar instead of being refused. The window's own minimum is DOC_MIN_W.
         let vs = window.viewport_size();
         let vw = f32::from(vs.width);
+        // iOS: the status bar, the home indicator and the keyboard cover the window's
+        // edges (zero elsewhere). The window shrinks above the keyboard; the sidebar
+        // and the note's contents keep clear of the bars while the note's page runs
+        // under them. A taller keyboard scrolls the caret back above it.
+        let insets = window.insets();
+        let (inset_top, inset_bottom) = (f32::from(insets.safe_area.top), f32::from(insets.safe_area.bottom));
+        let keyboard = f32::from(insets.ime.bottom);
+        if keyboard > self.keyboard_inset + 0.5 && let Some(ed) = &self.editor { ed.update(cx, |e, cx| { e.autoscroll = true; cx.notify(); }); }
+        self.keyboard_inset = keyboard;
         if self.widen_from.is_some_and(|w| (w - vw).abs() > 0.5) { self.widen_from = None; }
         // The web build's window is the page: never resized from here.
         // Opened by hand: no longer waiting to come back by itself.
@@ -1842,6 +1979,8 @@ impl Render for Workspace {
         let doc_menu = self.render_doc_menu(window, cx);
         let doc_info = self.render_doc_info(cx);
         let history = self.render_history(cx);
+        // a dialog holds the keyboard while open (Esc and ↩ go to it, not to the editor behind)
+        self.dialog_focus.sync(self.export_md.is_some() || self.doc_info.is_some(), window, cx);
         let confirm = self.render_confirm(cx);
         let trash_menu = self.render_trash_menu(cx);
         let home_menus = self.render_home_menus(cx);
@@ -1891,7 +2030,7 @@ impl Render for Workspace {
         // the two (no gutter, radius or border).
         // A document sits on its theme's page colour.
         let page = if self.view == View::Doc { crate::editor_theme::Theme::bg_body() } else { Theme::bg_body() };
-        let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().bg(page).shadow(theme::shadow_note()).child(main)
+        let note = div().id("note").relative().flex_1().min_w_0().h_full().pt(px(inset_top)).flex().bg(page).shadow(theme::shadow_note()).child(main)
             // Files from the Finder dropped on 主页 or a folder's page are imported there.
             .when(matches!(self.view, View::Home | View::Folder), |d| d
                 .on_drag_move(cx.listener(|w, ev: &DragMoveEvent<ExternalPaths>, _, cx| w.file_drag_move(ev, cx)))
@@ -1917,6 +2056,7 @@ impl Render for Workspace {
             }))
             .relative()
             .size_full()
+            .pb(px(keyboard))
             .flex()
             .bg(Theme::window())
             .font_family(theme::ui_family())
@@ -2029,7 +2169,7 @@ impl Render for Workspace {
                 if w.search_open { w.close_search(window, cx); } else { w.open_search(window, cx); }
                 cx.stop_propagation();
             }))
-            .children(sidebar)
+            .children(sidebar.map(|s| if inset_top + inset_bottom > 0. { div().flex_none().h_full().pt(px(inset_top)).pb(px(if keyboard > 0. { 0. } else { inset_bottom })).child(s).into_any_element() } else { s }))
             .child(note)
             .when(!self.quick_note && self.agent.read(cx).open, |d| d.child(self.agent.clone()))
             .children(resize)
@@ -2185,5 +2325,35 @@ pub(crate) fn check_save_safety(phase: &str, cx: &mut App) {
         }).unwrap();
         eprintln!("save-safety: PASS; remaining conflict blocked quit; copy preserved; edit after reload saved cleanly");
         for (handle, _) in windows { handle.update(cx, |_, window, _| window.remove_window()).unwrap(); }
+    }
+}
+
+#[cfg(test)]
+mod menu_tests {
+    use super::{Menu, MenuItem, menu_bar};
+    use crate::settings::tr;
+
+    fn names(menus: &[Menu]) -> Vec<String> {
+        fn walk(items: &[MenuItem], out: &mut Vec<String>) {
+            for i in items {
+                match i {
+                    MenuItem::Action { name, .. } => out.push(name.to_string()),
+                    MenuItem::Submenu(m) => { out.push(m.name.to_string()); walk(&m.items, out); }
+                    _ => {}
+                }
+            }
+        }
+        let mut out = vec![];
+        for m in menus { out.push(m.name.to_string()); walk(&m.items, &mut out); }
+        out
+    }
+
+    #[test]
+    fn markdown_menus_leave_out_what_markdown_cannot_keep() {
+        let (doc, md) = (names(&menu_bar(false)), names(&menu_bar(true)));
+        let gone = [tr("提醒", "Reminder"), tr("下划线", "Underline"), tr("对齐", "Align"), tr("左对齐", "Align left"), tr("居中对齐", "Align center"), tr("右对齐", "Align right")];
+        for n in gone { assert!(doc.iter().any(|d| d == n) && !md.iter().any(|d| d == n), "{n}"); }
+        // Everything else stays, in the same order.
+        assert_eq!(doc.into_iter().filter(|d| !gone.contains(&d.as_str())).collect::<Vec<_>>(), md);
     }
 }
