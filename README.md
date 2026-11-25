@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://download.quiet.md/latest/quiet-md-macos-arm64.zip"><img src="docs/images/download-macos.svg" height="56" alt="Download for macOS"></a>
+  <a href="https://download.quiet.md/latest/quiet-md-macos-arm64.dmg"><img src="docs/images/download-macos.svg" height="56" alt="Download for macOS"></a>
   &nbsp;
   <a href="https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe"><img src="docs/images/download-windows.svg" height="56" alt="Download for Windows"></a>
   &nbsp;
@@ -43,7 +43,7 @@
 
 ## Why Quiet.md
 
-**📁 Your notes are just files.** No account, no cloud, and nothing goes over the network by default, apart from the optional update check and font downloads you cause: the handwriting font for Chinese, Japanese and Korean the first time a whiteboard needs it, and a downloadable document font when you pick one. Every folder in the sidebar is a real folder on your disk, and every note is a file named after its title: `.md` for Markdown, `.xml` for rich documents. Sync them with iCloud, Git or anything you like. If you ever stop using Quiet.md, your files stay right where they are.
+**📁 Your notes are just files.** No account, no cloud, and nothing goes over the network by default, apart from the optional update check, the `quiet` command line tool's anonymous daily usage counts (`quiet telemetry off`), and font downloads you cause: the handwriting font for Chinese, Japanese and Korean the first time a whiteboard needs it, and a downloadable document font when you pick one. Every folder in the sidebar is a real folder on your disk, and every note is a file named after its title: `.md` for Markdown, `.xml` for rich documents. Sync them with iCloud, Git or anything you like. If you ever stop using Quiet.md, your files stay right where they are.
 
 **⚡ Native, and fast.** The whole interface is drawn on the GPU by Rust and [GPUI](https://www.gpui.rs/). No Electron, no WebView. In a one-million-character note, typing takes about 5 ms a frame, and a 120 Hz display allows 8.3.
 
@@ -79,6 +79,12 @@ Home shows each folder as a stack of its pages. Hold a note over a folder and it
 
 On first launch, Quiet.md looks for your Obsidian, Logseq, iA Writer and Typora libraries and copies them in, leaving the originals alone. Obsidian `[[wikilinks]]` keep working: click one to open the note it points to. Later, drag Markdown files and folders onto Home or straight into a sidebar folder. Notes go out again as Markdown or PDF, or straight to the printer.
 
+### Work with agents
+
+The `quiet` command line tool lets an AI agent (Claude Code, Codex, or any MCP client) read, search and edit the same library you write in. It finds blocks by outline, edits through the same engine as the app, rewrites links when notes move, adds rows to data tables and draws on boards, and refuses to overwrite what you changed since it read. A note you have open takes in the agent's edit as it lands, every save keeps the previous text as a version, and `quiet run` takes a whole JavaScript script as one change that is written in full or not at all. `quiet skill install` gives Claude Code and Codex a skill, so they reach for `quiet` whenever you ask about your notes; clients without a shell use `quiet mcp`. `quiet` counts which of its commands run each day, under a random id and never with your notes, and sends the counts once a day; `quiet telemetry off`, `DO_NOT_TRACK=1` or turning off the app's automatic update check stops it.
+
+`quiet` ships inside the app. On macOS, put it on your PATH with `ln -s /Applications/quiet.md.app/Contents/MacOS/quiet /usr/local/bin/quiet`; on Windows it sits beside `quiet_md.exe` in the install folder. See [docs/design/CLI.md](docs/design/CLI.md).
+
 ### And more
 
 - **Local Codex**: use the sidebar button in the upper-right corner, choose a working directory, and chat using your installed, signed-in Codex CLI. Drag its left edge to resize; the width is remembered. Opening the sidebar from a document adds a removable reference; its latest text, including unsaved edits, is included when you send a message. Pick a model above the input or follow your local Codex configuration. Stream replies, approve or decline tool requests, stop a turn, or start a new chat. Folding keeps the conversation; restarting restores the directory and panel width, without restoring chat history.
@@ -93,7 +99,7 @@ On first launch, Quiet.md looks for your Obsidian, Logseq, iA Writer and Typora 
 ## Download
 
 <p align="center">
-  <a href="https://download.quiet.md/latest/quiet-md-macos-arm64.zip"><img src="docs/images/download-macos.svg" height="56" alt="Download for macOS"></a>
+  <a href="https://download.quiet.md/latest/quiet-md-macos-arm64.dmg"><img src="docs/images/download-macos.svg" height="56" alt="Download for macOS"></a>
   &nbsp;
   <a href="https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe"><img src="docs/images/download-windows.svg" height="56" alt="Download for Windows"></a>
   &nbsp;
@@ -102,12 +108,12 @@ On first launch, Quiet.md looks for your Obsidian, Logseq, iA Writer and Typora 
 
 | Platform | Package | Requirements |
 |---|---|---|
-| **macOS** (Apple Silicon) | [quiet-md-macos-arm64.zip](https://download.quiet.md/latest/quiet-md-macos-arm64.zip) | macOS 13 or later |
+| **macOS** (Apple Silicon) | [quiet-md-macos-arm64.dmg](https://download.quiet.md/latest/quiet-md-macos-arm64.dmg) | macOS 13 or later |
 | **Windows** (x64) | [quiet-md-windows-x64-setup.exe](https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe) | Windows 10 version 1809 or later |
 | **Linux** (x86_64, experimental) | [quiet-md-x86_64.AppImage](https://download.quiet.md/latest/quiet-md-x86_64.AppImage) | glibc 2.35 or later (Ubuntu 22.04 and newer) |
-| **macOS** (Intel) | [quiet-md-macos-x86_64.zip](https://download.quiet.md/latest/quiet-md-macos-x86_64.zip) | macOS 13 or later |
+| **macOS** (Intel) | [quiet-md-macos-x86_64.dmg](https://download.quiet.md/latest/quiet-md-macos-x86_64.dmg) | macOS 13 or later |
 
-- **macOS**: unzip and drag `quiet.md.app` into Applications. The app is signed and notarized by Apple.
+- **macOS**: open the `.dmg` and drag `quiet.md.app` onto the Applications shortcut beside it, then open it from Applications. The app and the disk image are signed and notarized by Apple. The `.zip` on the Releases page holds the same app; it is what in-app updates download.
 - **Windows**: run the installer. By default it installs for the current user only, and uninstalling never deletes your notes. If SmartScreen appears on first launch, click **More info → Run anyway**.
 - **Linux** (experimental): `chmod +x quiet-md-*.AppImage` and run it; without FUSE, add `--appimage-extract-and-run`. AppImage 0.1.10 and later support in-app updates; older Linux versions need a one-time manual install. Interactive testing so far covers Omarchy on Wayland; see the [Linux notes](CONTRIBUTING.md#linux-experimental).
 
@@ -172,5 +178,5 @@ The code is licensed under [MIT](LICENSE). Third-party code, fonts and assets ar
 
 The following are not covered by the MIT license and should be replaced in forks:
 
-- The 67 Nucleo icons in `assets/icons/` are under a commercial Nucleo license. Do not extract or redistribute them on their own.
+- The 70 Nucleo icons in `assets/icons/` are under a commercial Nucleo license. Do not extract or redistribute them on their own.
 - The name "Quiet.md" and the app icon.

@@ -31,6 +31,9 @@ mod devtools {
     pub fn start(_: &mut gpui::Window, _: &mut gpui::App) {}
     pub fn take_pick() -> Option<Vec<std::path::PathBuf>> { None }
     pub fn file_drag() -> bool { false }
+    pub fn rows_begin(_: &gpui::Window) {}
+    pub fn row_probe(_: impl Into<gpui::SharedString>) -> Option<gpui::AnyElement> { None }
+    pub fn anchor_probe(_: impl Into<gpui::SharedString>) -> Option<gpui::AnyElement> { None }
 }
 mod design;
 mod docinfo;
@@ -52,6 +55,7 @@ mod native_header;
 mod mermaid;
 mod printing;
 mod search;
+mod siyuan;
 #[cfg(not(target_family = "wasm"))]
 mod selftest;
 #[cfg(target_family = "wasm")]
@@ -61,6 +65,7 @@ mod selftest {
 }
 mod sidebar;
 mod local_files;
+mod loading;
 mod local_folders;
 mod sidebar_drag;
 mod sidebar_drop;
@@ -172,13 +177,13 @@ pub(crate) fn open_main_window(scripted: bool, at: Option<Bounds<Pixels>>, cx: &
 pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, incoming: local_files::Incoming, cx: &mut App) -> Option<Entity<app::Workspace>> {
     changelog::startup(existed);
     shortcuts::init(cx);
-    // No root is fatal: one that can't be opened shows as such in the sidebar.
+    // No top-level folder is fatal: one that can't be opened shows as such in the sidebar.
     if !cx.has_global::<shared_store::SharedStore>() { cx.set_global(shared_store::SharedStore::open()); }
     let mut moved = vec![];
     cx.global::<shared_store::SharedStore>().each(|s| moved.extend(s.migrated.take()));
     for r in moved { changelog::migrated(&r); }
-    // The root in front brings its own look (W21).
-    settings::root_switched(cx);
+    // The top-level folder in front brings its own look (W21).
+    settings::top_switched(cx);
     // The web build has no global shortcut to register.
     if !scripted && !cfg!(target_family = "wasm") { quick_note::install(cx); }
     app::set_menus(cx);
@@ -186,7 +191,7 @@ pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, in
     let took = into.map(|window| window.replace_root(cx, app::Workspace::new));
     if took.is_none() { open_main_window(scripted, None, cx); }
     // A synced library (or one used elsewhere) moves to real folders only once the user agrees.
-    if let store::MigrationState::NeedsConsent(r) = store::Store::migration_state(&store::Store::root_dir()) && settings::migrate_ask_due() {
+    if let store::MigrationState::NeedsConsent(r) = store::Store::migration_state(&store::Store::active_dir()) && settings::migrate_ask_due() {
         match &took {
             Some(ws) => ws.update(cx, |w, cx| { w.confirm = Some(app::Confirm::Migrate(r)); cx.notify(); }),
             None => if let Some(ws) = cx.windows().into_iter().find_map(|w| w.downcast::<app::Workspace>()) {
@@ -239,13 +244,13 @@ fn main() {
     // The store asks the system whether a library is in iCloud through this.
     #[cfg(target_os = "macos")]
     store::set_ubiquity_probe(onboarding::ubiquitous);
-    let root = store::Store::legacy_root();
+    let root = store::Store::legacy_dir();
     let fixed = std::env::var_os("QUIET_MD_HOME").is_some();
     logging::write(&format!("library {}", root.display()));
-    // 工作区: a roots.json (even an empty one: every folder removed) or the
+    // 主页: a folders.json (even an empty one: every folder removed) or the
     // library builds before it used means this computer has been here
     // before, and can show 更新日志.
-    let existed = (!fixed && fdl_core::vfs::PathExt::fs_exists(fdl_core::workspace::Workspace::roots_file().as_path())) || guides::seeded(&root).unwrap_or(false);
+    let existed = (!fixed && fdl_core::vfs::PathExt::fs_exists(fdl_core::home::Home::list_file().as_path())) || guides::seeded(&root).unwrap_or(false);
     // A first launch picks its folders on the first launch's pages.
     let onboard = onboarding::wanted(existed, scripted);
     // A test run's folder (`QUIET_MD_HOME`) is set up as before; the

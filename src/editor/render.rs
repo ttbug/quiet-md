@@ -2,6 +2,7 @@
 //! (design-spec §2–§3). Floating panels are in `overlays.rs`.
 
 use super::core::{self, Pos, TITLE, Unit};
+use super::drag::{Flow, Shift};
 use super::text::{LayoutCache, RichTextElement, TextSpec};
 use super::view::{BoundsMap, Editor, Menu};
 use crate::model::*;
@@ -40,6 +41,8 @@ pub(super) struct Frame {
     units: Rc<Vec<Unit>>,
     pub eqnos: Rc<HashMap<BlockId, u32>>,
     selected: Rc<HashSet<BlockId>>,
+    /// The block selection `selected` was computed for.
+    sel: Option<core::BlockSel>,
     focused: bool,
 }
 
@@ -203,7 +206,7 @@ pub(super) fn visible_with_gaps(list: &[Block], env: Env) -> Vec<(usize, f32)> {
 pub(super) fn record_bounds(id: BlockId, map: BoundsMap) -> impl IntoElement {
     canvas(
         move |b, _, _| {
-            map.borrow_mut().insert(id, b);
+            map.borrow_mut().insert(id, super::drag::undrawn(b));
         },
         |_, _, _, _| {},
     )
@@ -328,15 +331,24 @@ impl R<'_> {
     /// A column of sibling blocks with collapsed margins and heading folding.
     pub fn blocks(&self, list: &[Block], env: Env, cx: &mut Context<Editor>) -> Div {
         let mut col = div().flex().flex_col().w_full();
+        // While blocks move: the container these are in, to make room in.
+        let flow = list.first().filter(|_| !self.ghost && self.ed.drag_fx_live()).and_then(|b| self.ed.core.parent_of(b.id)).map(|p| Flow::In(p.id));
+        let mut slot = flow.and_then(|f| self.ed.drag_slot_at(f));
         for (i, gap) in visible_with_gaps(list, env) {
+            if slot.is_some_and(|at| at <= i) {
+                slot = None;
+                col = col.child(self.ed.slot_el());
+            }
             // Nested rows are drawn here rather than by `render_item`, so the
             // 版本历史 tint has to be applied on this wrapper.
-            col = col.child(
-                div()
-                    .mt(px(gap))
-                    .when_some(self.ed.mark_fill(list[i].id), |d, fill| d.rounded(px(3.)).bg(fill))
-                    .child(self.block(&list[i], list, i, Env { root: false, ..env }, cx)),
-            );
+            let el = div()
+                .mt(px(gap))
+                .when_some(self.ed.mark_fill(list[i].id), |d, fill| d.rounded(px(3.)).bg(fill))
+                .child(self.block(&list[i], list, i, Env { root: false, ..env }, cx));
+            col = col.child(Shift::wrap(el, flow.and_then(|f| self.ed.drawn_shift(f, i, list[i].id))));
+        }
+        if slot.is_some() {
+            col = col.child(self.ed.slot_el());
         }
         col
     }
@@ -519,7 +531,7 @@ impl R<'_> {
             .child(record_bounds(b.id, self.bounds.clone()))
             .children(handle)
             .children(self.fold_button(b, env, cx))
-            .when(!self.ghost && self.ed.is_dragged(b.id), |d| d.opacity(0.5))
+            .when(!self.ghost && self.ed.is_dragged(b.id), |d| d.opacity(0.))
             .children(self.ed.drop_flash_el(b.id).filter(|_| !self.ghost))
             .when(atomic_caret && self.focused, |d| {
                 d.child(
@@ -661,6 +673,10 @@ impl R<'_> {
         if crate::settings::feishu() { return self.children_of_feishu(b, env, cx); }
 
         if b.children.is_empty() || b.folded || self.flat == Some(b.id) {
+            // The first child about to be dropped in.
+            if b.children.is_empty() && !self.ghost && self.ed.drag_slot_at(Flow::In(b.id)) == Some(0) {
+                return div().pl(px(theme::style().num("list.indent"))).child(self.ed.slot_el());
+            }
             return div();
         }
         let indent = theme::style().num("list.indent");
@@ -1265,6 +1281,10 @@ impl Editor {
                 b = list.get(i);
                 list = b.map_or(&[][..], |b| b.children.as_slice());
             }
+            if let Some(&top) = path.first() {
+                let r = self.rendered_top.get().map_or((top, top), |(a, z)| (a.min(top), z.max(top)));
+                self.rendered_top.set(Some(r));
+            }
             let found = b.map(super::caption::captions_in).unwrap_or_default();
             if !found.is_empty() {
                 self.ensure_captions(found, window, cx);
@@ -1315,8 +1335,10 @@ impl Editor {
                 // Depth of the outermost selected ancestor, whose highlight
                 // spans its children's rows too.
                 let mut sel_depth = None;
-                // Rows of a dragged block's subtree fade with it.
+                // Rows of a dragged block's subtree go with it.
                 let mut dimmed = false;
+                // A dropped block gliding in takes the rows under it along.
+                let mut glide = None;
                 // Ancestors whose background spans this row.
                 let mut bgs = vec![];
                 for (d, &i) in outer.iter().enumerate() {
@@ -1328,6 +1350,9 @@ impl Editor {
                         bgs.push((d, fill));
                     }
                     dimmed |= self.is_dragged(b.id);
+                    if glide.is_none() && self.gliding(b.id) {
+                        glide = Some(b.id);
+                    }
                     list = &b.children;
                 }
                 let Some(b) = list.get(bi) else { return div().into_any_element() };
@@ -1337,11 +1362,12 @@ impl Editor {
                 r.flat = flattens(b).then_some(b.id);
                 let ends = |d: usize| !matches!(self.items.get(ix + 1), Some(Item::Block { path: next, .. }) if next.starts_with(&path[..=d]));
                 let last = sel_depth.is_some_and(ends);
-                div()
+                let shift = self.drawn_shift(Flow::Rows, ix, glide.unwrap_or(b.id));
+                let row = div()
                     .relative()
                     .pt(px(gap))
                     .pl(px(25. * depth as f32))
-                    .when(dimmed, |d| d.opacity(0.5))
+                    .when(dimmed, |d| d.opacity(0.))
                     .children(bgs.into_iter().map(|(d, fill)| {
                         div()
                             .absolute()
@@ -1364,8 +1390,11 @@ impl Editor {
                                 .when(last, |d| d.rounded_b(px(self.block_tint().1)))
                                 .bg(self.block_tint().0),
                         )
-                    })
-                    .into_any_element()
+                    });
+                if self.drag_fx_moving() {
+                    window.request_animation_frame();
+                }
+                Shift::wrap(row, shift)
             }
             Item::Below => div()
                 .id("below")
@@ -1486,6 +1515,7 @@ impl Editor {
         // Reads last frame's bar segments.
         self.table_autoscroll(window);
         self.block_autoscroll(window);
+        self.tick_drag_fx(window);
         self.text_autoscroll(window, cx);
         self.tick_drop_flash(window);
         if let Some((_, t0)) = self.fold_anim {
@@ -1496,6 +1526,7 @@ impl Editor {
         }
         self.cache.borrow_mut().clear();
         self.block_bounds.borrow_mut().clear();
+        self.rendered_top.set(None);
         self.tables.geo.borrow_mut().clear();
         self.tables.stuck.borrow_mut().clear();
         self.img.boxes.borrow_mut().clear();
@@ -1510,13 +1541,13 @@ impl Editor {
             true => (self.frame.units.clone(), self.frame.eqnos.clone()),
             false => (Rc::new(self.core.units()), Rc::new(equation_numbers(&self.core.doc))),
         };
-        self.frame = Frame {
-            generation: Some(generation),
-            units,
-            eqnos,
-            selected: Rc::new(self.core.block_sel_ids().into_iter().collect()),
-            focused,
+        // Walking a long document for the selected blocks costs ~10ms
+        // (1M chars): only when the selection or the document changed.
+        let selected = match self.frame.generation == Some(generation) && self.frame.sel == self.core.block_sel {
+            true => self.frame.selected.clone(),
+            false => Rc::new(self.core.block_sel_ids().into_iter().collect()),
         };
+        self.frame = Frame { generation: Some(generation), units, eqnos, selected, sel: self.core.block_sel, focused };
         // Filled in as the list renders its visible items.
         self.handle_targets.clear();
 
@@ -1801,14 +1832,18 @@ impl Editor {
 
     /// "N 字" chip at the bottom right while text is selected (§2).
     fn word_counter(&self) -> Option<AnyElement> {
-        let n = if self.core.in_block_mode() {
-            let index = core::block_index(&self.core.doc);
-            self.core
-                .block_sel_ids()
-                .iter()
-                .filter_map(|id| index.get(id))
-                .map(|b| crate::docinfo::blocks_word_count(std::slice::from_ref(*b)))
-                .sum()
+        let n = if let Some(sel) = self.core.block_sel {
+            // Walking a long document for the selected blocks costs ~10ms
+            // (1M chars): once per selection and edit, not every frame.
+            let key = (self.core.generation, sel);
+            match self.sel_words.get() {
+                Some((k, n)) if k == key => n,
+                _ => {
+                    let n = self.core.block_sel_ids().iter().filter_map(|id| self.core.block(*id)).map(|b| crate::docinfo::blocks_word_count(std::slice::from_ref(b))).sum();
+                    self.sel_words.set(Some((key, n)));
+                    n
+                }
+            }
         } else if self.core.sel.is_collapsed() {
             return None;
         } else {
@@ -2008,7 +2043,7 @@ pub(super) fn block_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env
             .child(record_bounds(b.id, self.bounds.clone()))
             .children(handle)
             .children(self.fold_button(b, env, cx))
-            .when(!self.ghost && self.ed.is_dragged(b.id), |d| d.opacity(0.5))
+            .when(!self.ghost && self.ed.is_dragged(b.id), |d| d.opacity(0.))
             .children(self.ed.drop_flash_el(b.id).filter(|_| !self.ghost))
             .when(atomic_caret && self.focused, |d| {
                 d.child(
@@ -2475,6 +2510,9 @@ impl R<'_> {
 fn children_of_feishu(&self, b: &Block, env: Env, cx: &mut Context<Editor>) -> Div {
 
         if b.children.is_empty() || b.folded || self.flat == Some(b.id) {
+            if b.children.is_empty() && !self.ghost && self.ed.drag_slot_at(Flow::In(b.id)) == Some(0) {
+                return div().pl(px(25.)).child(self.ed.slot_el());
+            }
             return div();
         }
         div().pl(px(25.)).mt(px(8.)).child(self.blocks(&b.children, Env { depth: env.depth + 1, width: env.width - 25., ..env }, cx))

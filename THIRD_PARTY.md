@@ -4,7 +4,7 @@ Quiet.md is distributed under the [MIT license](LICENSE). The following third-pa
 
 ## Rust dependencies
 
-This table lists 767 packages from `cargo metadata` and their declared licenses, including MPL-2.0. Consult each component's license text for its terms.
+This table lists 770 packages from `cargo metadata` and their declared licenses, including MPL-2.0. Consult each component's license text for its terms.
 
 Run `scripts/licences.sh` to regenerate the table from the full dependency list.
 
@@ -460,6 +460,9 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | rgb | 0.8.53 | MIT |
 | roxmltree | 0.20.0 | MIT OR Apache-2.0 |
 | roxmltree | 0.21.2 | MIT OR Apache-2.0 |
+| rquickjs | 0.14.0 | MIT |
+| rquickjs-core | 0.14.0 | MIT |
+| rquickjs-sys | 0.14.0 | MIT |
 | rsqlite-vfs | 0.2.0 | MIT |
 | rusqlite | 0.43.0 | MIT |
 | rustc-demangle | 0.1.28 | MIT/Apache-2.0 |
@@ -747,7 +750,7 @@ The whiteboard (`crates/core/src/board/` and `src/board/`) ports code from the p
 | [points-on-path](https://github.com/pshihn/points-on-path) | 0.2.1 | MIT (Preet Shihn) | Path sampling in `rough/path_data.rs` |
 | [path-data-parser](https://github.com/pshihn/path-data-parser) | 0.1.0 | MIT (Preet Shihn) | SVG path parsing and normalization in `rough/path_data.rs` |
 | [perfect-freehand](https://github.com/steveruizok/perfect-freehand) | 1.2.0 | MIT (Steve Ruiz) | Stroke outlines in `freehand.rs` |
-| [fractional-indexing](https://github.com/rocicorp/fractional-indexing) (via Excalidraw's bundled copy) | — | CC0 | `fractional_index.rs` |
+| [fractional-indexing](https://github.com/rocicorp/fractional-indexing) (via Excalidraw's bundled copy) | — | CC0 | `fractional_index.rs` (also the 数据表's row order, `table/order.rs`) |
 | [nanoid](https://github.com/ai/nanoid) | — | MIT (Andrey Sitnik) | ID alphabet only, in `random.rs` |
 
 Excalidraw license notice:
@@ -805,9 +808,9 @@ Upstream distributes the Excalidraw board fonts as WOFF2 subsets by Unicode rang
 
 | Asset | License |
 |---|---|
-| `assets/editor-icons/` (197 editor and document icons) | 51 are from Lucide (ISC, see the adjacent `LICENSE-lucide`). The others were drawn to the same 24 px grid and 2 px stroke specification. |
-| `assets/icons/` (68 interface icons, including `doc-md.svg`, which adds MD lettering to a Nucleo icon, and the insert menu’s `whiteboard.svg` from Nucleo UI Essential Outline 18 under the same license) | Nucleo UI Outline / Fill 18. The project holds a commercial license permitting up to 100 icons in an open-source project. **These icons are excluded from the MIT license.** If you fork the project, verify your own license coverage or replace the icons. You may not extract them to create an icon library or pack. See the [Nucleo license](https://nucleoapp.com/license). |
-| `assets/icons/folder.svg`, `assets/icons/disclosure.svg`, `assets/icons/import.svg`, `assets/icons/globe.svg` | Drawn by the project and distributed under MIT. These are counted separately from the 68 Nucleo icons. |
+| `assets/editor-icons/` (174 editor and document icons) | 73 are from Lucide (ISC, see the adjacent `LICENSE-lucide`): 67 unchanged, 6 adapted or from an earlier Lucide version. The other 101 were drawn by the project to the same 24 px grid and 2 px stroke specification. Each icon’s source is listed in [docs/ICONS.md](docs/ICONS.md). |
+| `assets/icons/` (70 interface icons, including `doc-md.svg`, which adds MD lettering to a Nucleo icon, and the insert menu’s `whiteboard.svg` from Nucleo UI Essential Outline 18 under the same license) | Nucleo UI Outline / Fill 18; 70 files drawing on 62 distinct Nucleo icons, each listed with its Nucleo name in [docs/ICONS.md](docs/ICONS.md). The project holds a commercial license permitting up to 100 icons in an open-source project. **These icons are excluded from the MIT license.** If you fork the project, verify your own license coverage or replace the icons. You may not extract them to create an icon library or pack. See the [Nucleo license](https://nucleoapp.com/license). |
+| `assets/icons/folder.svg`, `assets/icons/folder-open.svg`, `assets/icons/disclosure.svg`, `assets/icons/import.svg`, `assets/icons/globe.svg`, `assets/icons/doc-table.svg`, `assets/icons/board.svg`, `assets/icons/doc-blocks.svg`, and the ten data-table field-type icons `assets/icons/ft-*.svg` (`ft-attach`, `ft-check`, `ft-date`, `ft-link`, `ft-lock`, `ft-multi`, `ft-number`, `ft-person`, `ft-select`, `ft-text`) | Drawn by the project and distributed under MIT; each SVG opens with a comment saying so. These 18 are counted separately from the 70 Nucleo icons. |
 | `assets/icons/excalidraw/` (96 board toolbar, property panel, menu and footer icons, including six active-tool `*-filled.svg` variants) | From Excalidraw `packages/excalidraw/components/icons.tsx` at 3a317b5 (MIT, © Excalidraw), mostly adapted from tabler-icons (MIT, © Paweł Kuna). SVG headers identify upstream icons. Rendering preserves the upstream SVG except for replacing `var(--icon-fill-color)` with `currentColor`, converting root CSS rotation to an SVG transform, and masking the white group/ungroup handles for monochrome drawing. These are separate from the Nucleo set. |
 | `assets/branding/app-icon.png`, `assets/branding/app-icon-dev.png` | Owned by the project. The preview icon has a dev ribbon generated by `tools/branding/dev_icon.py`. |
 

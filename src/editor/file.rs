@@ -918,6 +918,8 @@ impl Editor {
     /// Copies `paths` into the library off the main thread, then inserts
     /// them at `target` (or the caret).
     pub(super) fn import_files(&mut self, paths: Vec<PathBuf>, target: Option<(BlockId, DropPlace)>, window: &mut Window, cx: &mut Context<Self>) {
+        // A Markdown file keeps no attachments (dropped images still come in as images).
+        if self.markdown { return; }
         let task = cx.background_executor().spawn(async move { paths.iter().map(|p| file_block_from_path(p)).collect::<Vec<_>>() });
         cx.spawn_in(window, async move |this, cx| {
             let blocks = task.await;

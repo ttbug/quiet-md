@@ -365,7 +365,7 @@ impl Editor {
             .when(tabs, |d| {
                 d.child(
                     div().flex_none().h(px(TABS_H)).pl(px(24.)).flex().child(
-                        div().pt(px(20.)).pb(px(12.)).text_size(px(13.)).line_height(px(22.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::primary()).child(crate::settings::text("表情符号")),
+                        div().pt(px(20.)).pb(px(12.)).text_size(px(13.)).line_height(px(22.)).font_weight(FontWeight::SEMIBOLD).text_color(crate::design::color::foreground()).child(crate::settings::text("表情符号")),
                     ),
                 )
                 .child(

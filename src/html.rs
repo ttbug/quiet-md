@@ -231,7 +231,7 @@ impl Writer<'_> {
             }
             // A 数据表 as a plain table of the view it shows.
             BlockKind::DataTable(t) => {
-                let grid = fdl_core::table::block_grid(&crate::store::Store::root_dir(), t);
+                let grid = fdl_core::table::block_grid(&crate::store::Store::active_dir(), t);
                 if !grid.is_empty() {
                     out.push_str("<table>");
                     for (i, row) in grid.iter().enumerate() {
@@ -245,7 +245,7 @@ impl Writer<'_> {
             // A 画板 as an inline SVG of its scene (images inlined).
             BlockKind::Board(bd) => {
                 if !bd.elements.is_empty() {
-                    let _ = write!(out, "<div class=\"board\">{}</div>", bd.svg_in(&crate::store::Store::root_dir()));
+                    let _ = write!(out, "<div class=\"board\">{}</div>", bd.svg_in(&crate::store::Store::active_dir()));
                 }
             }
             BlockKind::Countdown(c) => {

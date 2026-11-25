@@ -15,8 +15,6 @@ pub enum DocSub {
 }
 
 const MENU_W: f32 = 200.;
-/// Gap between the "…" button and the menu.
-const MENU_GAP: f32 = 6.;
 /// The menu's padding; a row's and a separator's heights (`design::menu`).
 const ROW_H: f32 = menu::ROW_H;
 const DIV_H: f32 = menu::SEP_H;
@@ -126,7 +124,7 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn render_doc_menu(&self, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(crate) fn render_doc_menu(&self, _window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         if !self.doc_menu {
             return vec![];
         }
@@ -292,10 +290,10 @@ impl Workspace {
                         cx.notify();
                     })),
             ));
-        let vw = window.viewport_size().width;
-        let btn = self.more_btn_bounds.get();
-        let right = btn.map_or(vw - px(120.), |b| b.right());
-        let menu_top = btn.map_or(px(60.), |b| b.bottom() + px(MENU_GAP));
+        // hung from the measured button; not yet measured: not drawn yet
+        let Some(b) = self.more_btn_bounds.get() else { return vec![] };
+        let (at, _) = crate::design::hang(b, crate::design::Align::End, None);
+        let (right, menu_top) = (at.x, at.y);
         let mut out = vec![
             deferred(anchored().anchor(Anchor::TopRight).position(point(right, menu_top)).child(menu))
                 .with_priority(2)

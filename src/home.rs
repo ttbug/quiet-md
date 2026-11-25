@@ -49,6 +49,15 @@ impl Col {
             Col::Starred => "收藏时间",
         }
     }
+    /// The order this column sorts by (收藏时间 is not an order).
+    fn sort(self) -> Option<HomeSort> {
+        match self {
+            Col::Modified => Some(HomeSort::Modified),
+            Col::Created => Some(HomeSort::Created),
+            Col::Visited => Some(HomeSort::Visited),
+            Col::Starred => None,
+        }
+    }
 }
 
 /// 最近访问's columns (no 所有者); 显示设置 toggles them.
@@ -77,7 +86,7 @@ fn table_srcs(blocks: &[crate::model::Block], out: &mut Vec<String>) {
 fn tables_time(srcs: &[String]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = rustc_hash::FxHasher::default();
-    let root = crate::store::Store::root_dir();
+    let root = crate::store::Store::active_dir();
     for s in srcs { std::fs::metadata(root.join(s)).and_then(|m| m.modified()).ok().hash(&mut h); }
     h.finish()
 }
@@ -124,7 +133,7 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
             BlockKind::Raw { tag, .. } => BlockKind::Raw { tag: tag.clone(), xml: String::new() },
             // a 数据表 (a table file's card, or one in a page): its first rows and columns as a table, header first
             BlockKind::DataTable(r) => {
-                let grid = fdl_core::table::block_grid(&crate::store::Store::root_dir(), r);
+                let grid = fdl_core::table::block_grid(&crate::store::Store::active_dir(), r);
                 let (nr, nc) = (grid.len().min(9), grid.first().map_or(0, |h| h.len().min(5)));
                 if nr == 0 || nc == 0 { BlockKind::Table(crate::model::Table { col_widths: vec![], header_rows: 0, header_col: false, rows: vec![] }) } else {
                     let cell = |s: &str| crate::model::TableCell { blocks: vec![crate::model::Block::text(s)], ..crate::model::TableCell::empty() };
@@ -334,8 +343,17 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
     node.into_any_element()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum HomeSort { Manual, Visited, Modified, Created, Title }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SortDir { Asc, Desc }
+impl SortDir {
+    fn key(self) -> &'static str { match self { Self::Asc => "asc", Self::Desc => "desc" } }
+    fn of(key: &str) -> Self { if key == "asc" { Self::Asc } else { Self::Desc } }
+    fn flip(self) -> Self { match self { Self::Asc => Self::Desc, Self::Desc => Self::Asc } }
+    fn label(self) -> &'static str { crate::settings::tr(if self == Self::Asc { "升序" } else { "降序" }, if self == Self::Asc { "Ascending" } else { "Descending" }) }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HomeSort { Manual, Visited, Modified, Created, Title }
 impl HomeSort {
     fn key(self) -> &'static str { match self { Self::Manual => "manual", Self::Visited => "visited", Self::Modified => "modified", Self::Created => "created", Self::Title => "title" } }
     fn of(key: &str) -> Self { match key { "manual" => Self::Manual, "modified" => Self::Modified, "created" => Self::Created, "title" => Self::Title, _ => Self::Visited } }
@@ -346,10 +364,14 @@ impl HomeSort {
             Self::Manual => crate::settings::tr("手动排序", "Manual order"),
             Self::Visited => "最近访问时间",
             Self::Modified => "最近修改时间",
-            Self::Created => "创建时间（最新优先）",
-            Self::Title => "标题（升序）",
+            Self::Created => "创建时间",
+            Self::Title => "标题",
         }
     }
+    /// The direction a column sorts by the first time it is picked.
+    fn default_dir(self) -> SortDir { if self == Self::Title { SortDir::Asc } else { SortDir::Desc } }
+    /// 手动排序 has no direction; the others do.
+    fn directional(self) -> bool { self != Self::Manual }
 }
 
 pub struct Home {
@@ -365,6 +387,7 @@ pub struct Home {
     /// The 搜索 dialog's results (`search.rs`).
     pub(crate) search_scrollbar: Rc<scrollbar::Scrollbar>,
     sort: HomeSort,
+    sort_dir: SortDir,
     folders_first: bool,
     pub sort_menu: bool,
     thumbs: RefCell<HashMap<String, (u64, Thumb, web_time::Instant)>>,
@@ -372,7 +395,12 @@ pub struct Home {
     anchors: Rc<RefCell<HashMap<&'static str, Bounds<Pixels>>>>,
     /// Folder cards and dragging into them (`home_folder.rs`).
     pub(crate) folders: crate::home_folder::HomeFolders,
+    /// The level last shown, kept while nothing its cards show changed:
+    /// copying and sorting a folder of 3,000 notes took most of a frame.
+    level: RefCell<Option<Level>>,
 }
+
+struct Level { key: u64, parent: Option<String>, order: Order, entries: Rc<Vec<Entry>> }
 
 impl Default for Home {
     fn default() -> Self {
@@ -388,16 +416,24 @@ impl Default for Home {
             search_scrollbar: Default::default(),
             // Manual: the sidebar's order (`Meta::place`), so both lists read the same.
             sort: HomeSort::Manual,
+            sort_dir: SortDir::Desc,
             folders_first: false,
             sort_menu: false,
             thumbs: Default::default(),
             anchors: Default::default(),
             folders: Default::default(),
+            level: Default::default(),
         }
     }
 }
 
 impl Home {
+    /// The page list's current order, for anything else that lists pages
+    /// (the sidebar's tree).
+    pub(crate) fn order(&self) -> Order {
+        Order { field: self.sort, dir: self.sort_dir, folders_first: self.folders_first }
+    }
+
     pub(crate) fn anchor(&self, key: &str) -> Option<Bounds<Pixels>> {
         self.anchors.borrow().get(key).copied()
     }
@@ -412,20 +448,65 @@ impl Home {
         .inset_0()
     }
 
-    fn cols(&self) -> Vec<Col> {
-        match self.tab {
-            HomeTab::Recent => RECENT_COLS.to_vec(),
-            HomeTab::Starred => STARRED_COLS.to_vec(),
-        }
+    /// The list's columns: the library's (`library`: the top level is listed) or 收藏's.
+    fn cols(&self, library: bool) -> Vec<Col> {
+        if library { RECENT_COLS.to_vec() } else { STARRED_COLS.to_vec() }
     }
 
-    fn sort_col(&self) -> Col {
+    /// The column drawn as sorted; 标题 and 手动排序 mark their own header.
+    fn sort_col(&self) -> Option<Col> {
         match self.sort {
-            HomeSort::Visited => Col::Visited,
-            HomeSort::Modified => Col::Modified,
-            HomeSort::Created => Col::Created,
-            HomeSort::Title | HomeSort::Manual => Col::Visited,
+            HomeSort::Visited => Some(Col::Visited),
+            HomeSort::Modified => Some(Col::Modified),
+            HomeSort::Created => Some(Col::Created),
+            HomeSort::Title | HomeSort::Manual => None,
         }
+    }
+}
+
+/// The arrow on a sorted column: down for 降序, up for 升序. A chevron turned
+/// over, rather than a second icon, so both directions share one glyph.
+fn sort_glyph(dir: SortDir, size: f32) -> Svg {
+    let g = icon("chevron-down", size, Theme::icon());
+    if dir == SortDir::Asc { g.with_transformation(Transformation::rotate(radians(std::f32::consts::PI))) } else { g }
+}
+
+/// Sort 主页 and a folder's page. 手动排序 is the sidebar's order; the
+/// automatic ones never write it, and fall back to it (then the id) for equal
+/// values, so equal pages keep the order the user arranged by hand.
+pub(crate) fn sort_entries(v: &mut [Entry], order: Order) {
+    v.sort_by(|a, b| order.cmp(a, b));
+}
+
+/// How pages are ordered, as one value: 主页's setting, used there and by the
+/// sidebar's tree so both lists always agree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Order {
+    pub field: HomeSort,
+    pub dir: SortDir,
+    pub folders_first: bool,
+}
+
+impl Order {
+    pub(crate) fn cmp(&self, a: &Entry, b: &Entry) -> std::cmp::Ordering {
+        // 多个顶层文件夹: their rows keep folders.json's order; only what is in a top-level folder is sorted.
+        let row = |e: &Entry| crate::shared_store::top_of_row(&e.id).is_some();
+        if row(a) || row(b) {
+            return row(b).cmp(&row(a)).then_with(|| (a.meta.place(), &a.id).cmp(&(b.meta.place(), &b.id)));
+        }
+        if self.field == HomeSort::Manual {
+            return (a.meta.place(), &a.id).cmp(&(b.meta.place(), &b.id));
+        }
+        let asc = |o: std::cmp::Ordering| if self.dir == SortDir::Asc { o } else { o.reverse() };
+        let order = match self.field {
+            HomeSort::Title => asc(a.title.cmp(&b.title)),
+            HomeSort::Visited => asc(visited(a).cmp(&visited(b))),
+            HomeSort::Modified => asc(a.meta.modified.cmp(&b.meta.modified)),
+            HomeSort::Created => asc(a.meta.created.cmp(&b.meta.created)),
+            HomeSort::Manual => std::cmp::Ordering::Equal,
+        };
+        let group = if self.folders_first { b.meta.folder.is_some().cmp(&a.meta.folder.is_some()) } else { std::cmp::Ordering::Equal };
+        group.then(order).then_with(|| a.meta.place().cmp(&b.meta.place())).then_with(|| a.id.cmp(&b.id))
     }
 }
 
@@ -476,45 +557,93 @@ impl Workspace {
         Some(checkbox(if on { Check::On } else { Check::Off }, !on && sel.len() >= BATCH_LIMIT))
     }
 
-    pub(crate) fn home_entries(&self) -> Vec<Entry> {
+    pub(crate) fn home_entries(&self) -> Rc<Vec<Entry>> {
         match self.home.tab {
             // 我的文档 is the library's top level.
             HomeTab::Recent => self.level_entries(None),
-            HomeTab::Starred => self.sorted_entries(self.entries.iter().filter(|e| e.meta.folder.is_none() && e.meta.starred > 0).cloned().collect()),
+            HomeTab::Starred => Rc::new(self.sorted_entries(self.entries.iter().filter(|e| e.meta.folder.is_none() && e.meta.starred > 0).cloned().collect())),
         }
     }
 
     /// One level of the tree as 主页 shows it (a folder's page uses it too).
-    pub(crate) fn level_entries(&self, parent: Option<&str>) -> Vec<Entry> {
+    /// Cards show no body, links or reminders: the entries come without them (`tree::face`).
+    pub(crate) fn level_entries(&self, parent: Option<&str>) -> Rc<Vec<Entry>> {
+        let (key, order) = (crate::tree::shape_key(&self.entries), self.home.order());
+        let mut level = self.home.level.borrow_mut();
+        if let Some(l) = level.as_ref().filter(|l| l.key == key && l.order == order && l.parent.as_deref() == parent) { return l.entries.clone(); }
         // A folder's 正文 is the folder's own card, not one inside it.
         let notes: std::collections::HashSet<&str> = self.entries.iter().filter_map(|e| e.note.as_deref()).collect();
-        self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent && !notes.contains(e.id.as_str())).cloned().collect())
+        let entries = Rc::new(self.sorted_entries(self.entries.iter().filter(|e| e.meta.parent.as_deref() == parent && !notes.contains(e.id.as_str())).map(crate::tree::face).collect()));
+        *level = Some(Level { key, parent: parent.map(str::to_string), order, entries: entries.clone() });
+        entries
     }
 
     pub(crate) fn prepare_manual_order(&mut self, cx: &mut Context<Self>) -> bool {
         if self.tree_writes_pending() { return false; }
         let previous = self.store.track_file_changes();
-        if let Err(e) = self.store.initialize_manual_order() { self.show_toast_kind(crate::ui::ToastKind::Error, &e.to_string(), cx); return false; }
-        self.entries = self.store.list();
+        match self.store.initialize_manual_order() {
+            Err(e) => { self.show_toast_kind(crate::ui::ToastKind::Error, &e.to_string(), cx); return false; }
+            // Already in order: nothing written, the rows stand.
+            Ok(false) => return true,
+            Ok(true) => self.entries = self.store.list(),
+        }
         self.remember_files(previous, crate::settings::tr("初始化手动排序", "Initialize manual order"));
         true
     }
 
-    pub(crate) fn manual_home_sort(&self) -> bool { self.home.sort == HomeSort::Manual && self.home.tab == HomeTab::Recent }
+    pub(crate) fn manual_home_sort(&self) -> bool { self.home.sort == HomeSort::Manual && self.lists_library() }
+    /// 主页 shows its 我的文档 tab: the top level under 主页, every top-level folder a card.
+    pub(crate) fn lists_library(&self) -> bool { self.home.tab == HomeTab::Recent }
+
+    /// A list header: clicking it sorts by that column; clicking the sorted
+    /// one flips the direction. Headers without an order are not clickable.
+    fn sort_head(&self, id: SharedString, label: &'static str, sorted: bool, on: Option<HomeSort>, cx: &mut Context<Self>) -> Stateful<Div> {
+        let dir = self.home.sort_dir;
+        let menu_open = self.home.sort_menu;
+        div()
+            .id(id)
+            .relative()
+            .px(px(4.))
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .rounded(px(ROW_RADIUS))
+            .text_size(px(13.))
+            .line_height(px(24.))
+            .text_color(if sorted { Theme::text() } else { list_header_text() })
+            .when(sorted, |d| d.font_weight(FontWeight::SEMIBOLD))
+            .when(on.is_some(), |d| d.cursor_pointer().hover(|s| s.bg(Theme::fill_hover())))
+            .when(sorted && menu_open, |d| d.bg(Theme::fill_hover_strong()))
+            .child(crate::settings::label(label))
+            .when(sorted, |d| d.child(sort_glyph(dir, 12.)))
+            .when_some(on, |d, field| d.on_click(cx.listener(move |w, _, _, cx| w.sort_by(field, cx))))
+    }
+
+    /// Pick a sort field. Picking the current one flips 升序 / 降序; picking
+    /// 手动排序 freezes the order shown right now, so later edits cannot
+    /// reshuffle it.
+    fn sort_by(&mut self, field: HomeSort, cx: &mut Context<Self>) {
+        if field == HomeSort::Manual {
+            if self.home.sort != HomeSort::Manual && !self.prepare_manual_order(cx) { return; }
+            self.home.sort = HomeSort::Manual;
+        } else if self.home.sort == field {
+            self.home.sort_dir = self.home.sort_dir.flip();
+        } else {
+            self.home.sort = field;
+            self.home.sort_dir = field.default_dir();
+        }
+        self.home.sort_menu = false;
+        self.save_home();
+        self.home.grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.home.folder_grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.home.list_scroll.set_offset(point(px(0.), px(0.)));
+        self.home.folder_list_scroll.set_offset(point(px(0.), px(0.)));
+        cx.notify();
+    }
 
     /// Mix folders and documents unless the user explicitly groups folders first.
     fn sorted_entries(&self, mut v: Vec<Entry>) -> Vec<Entry> {
-        v.sort_by(|a, b| {
-            let order = match self.home.sort {
-                // The sidebar's order: new pages at the top in both.
-                HomeSort::Manual => (a.meta.place(), &a.id).cmp(&(b.meta.place(), &b.id)),
-                HomeSort::Visited => visited(b).cmp(&visited(a)),
-                HomeSort::Modified => b.meta.modified.cmp(&a.meta.modified),
-                HomeSort::Created => b.meta.created.cmp(&a.meta.created),
-                HomeSort::Title => a.title.cmp(&b.title),
-            };
-            (if self.home.folders_first && self.home.sort != HomeSort::Manual { b.meta.folder.is_some().cmp(&a.meta.folder.is_some()) } else { std::cmp::Ordering::Equal }).then(order).then_with(|| a.id.cmp(&b.id))
-        });
+        sort_entries(&mut v, self.home.order());
         v
     }
 
@@ -596,14 +725,15 @@ impl Workspace {
     fn open_row_menu(&mut self, id: &str, key: &str, cx: &mut Context<Self>) {
         let b = self.more_bounds.borrow().get(key).copied();
         let Some(b) = b else { return };
-        self.row_menu = Some(RowMenu { id: id.to_string(), pos: point(b.right(), b.bottom() + px(2.)), corner: Anchor::TopRight, sub: false, batch: false });
+        let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None);
+        self.row_menu = Some(RowMenu { id: id.to_string(), pos, corner, sub: false, batch: false, from: Some(key.to_string()) });
         cx.notify();
     }
 
     pub(crate) fn home_more(&self, e: &Entry, key: String, cx: &mut Context<Self>) -> crate::design::Button {
         let id = e.id.clone();
         let (rec, k2) = (self.more_bounds.clone(), key.clone());
-        let open = self.row_menu.as_ref().is_some_and(|m| m.id == e.id && m.pos.x > px(0.) && m.corner == Anchor::TopRight);
+        let open = self.row_menu.as_ref().is_some_and(|m| m.id == e.id && m.from.as_deref() == Some(key.as_str()));
         crate::design::Button::ghost(SharedString::from(key.clone()))
             .sized(crate::design::ButtonSize::Xs)
             .relative()
@@ -643,17 +773,25 @@ impl Workspace {
     }
 
     /// 主页's view and sort order are remembered (`settings.json`).
+    /// Whether 主页 lists by hand (手动排序) under these settings, as `load_home` reads them.
+    pub(crate) fn sorts_by_hand(s: &crate::store::Settings) -> bool { s.home_sort.as_deref().map(HomeSort::of).unwrap_or(HomeSort::Manual) == HomeSort::Manual }
+
     pub(crate) fn load_home(&mut self) {
         let s = self.store.settings();
         self.home.grid = !s.home_list;
         self.home.folders_first = s.home_folders_first;
         self.home.sort = s.home_sort.as_deref().map(HomeSort::of).unwrap_or(HomeSort::Manual);
+        // Settings from before directions existed keep the order they used to show.
+        self.home.sort_dir = s.home_sort_dir.as_deref().map(SortDir::of).unwrap_or_else(|| self.home.sort.default_dir());
+        self.store.set_place_by_hand(self.home.sort == HomeSort::Manual);
     }
 
     fn save_home(&mut self) {
         let mut s = self.store.settings();
         s.home_folders_first = self.home.folders_first;
         (s.home_list, s.home_sort) = (!self.home.grid, Some(self.home.sort.key().to_string()));
+        s.home_sort_dir = Some(self.home.sort_dir.key().to_string());
+        self.store.set_place_by_hand(self.home.sort == HomeSort::Manual);
         if let Err(e) = self.store.save_settings(&s) { eprintln!("无法保存主页视图：{e}"); }
     }
 
@@ -668,12 +806,12 @@ impl Workspace {
             .child(self.place_button("home-more", None, cx))
             .child(self.import_button("home-import", None, cx))
             .child(
-            crate::ui::header_icon("home-new", "plus")
-                .child(self.home.track("create-home"))
-                .selected(self.create_menu.as_ref().is_some_and(|(_, pos)| self.home.anchor("create-home").is_some_and(|b| point(b.left(), b.bottom() + px(4.)) == *pos)))
-                .tip(crate::settings::tr("新建", "New"), Some(crate::shortcuts::hint("workspace::NewDoc", "⌘ + N")))
+            // 主页 makes no documents (which top-level folder they would land in isn't shown here): its one
+            // creation control adds a folder beside the others, as 添加文件夹 under 主页 does.
+            crate::ui::header_icon("home-new", "folder-plus")
+                .tip(crate::settings::tr("添加文件夹", "Add a folder"), Some(crate::shortcuts::hint("workspace::OpenFolder", "⌘ + Shift + O")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(cx.listener(|w, ev: &ClickEvent, _, cx| { let pos = w.home.anchor("create-home").map_or(ev.position(), |b| point(b.left(), b.bottom() + px(4.))); w.create_menu = if w.create_menu.is_some() { None } else { Some((None, pos)) }; cx.notify(); })).into_any_element()
+                .on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx))).into_any_element()
         );
         // Tabs as a segmented control.
         let tab = |id: &'static str, label: &'static str, t: HomeTab| {
@@ -698,7 +836,7 @@ impl Workspace {
             .flex()
             .items_center();
         let toolbar = if let Some(sel) = &self.batch {
-            let ids: Vec<String> = self.home_entries().into_iter().take(crate::sidebar::BATCH_LIMIT).map(|e| e.id).collect();
+            let ids: Vec<String> = self.home_entries().iter().take(crate::sidebar::BATCH_LIMIT).map(|e| e.id.clone()).collect();
             let n = sel.len();
             let all = n > 0 && ids.iter().all(|id| sel.contains(id));
             use crate::sidebar::{Check, checkbox};
@@ -736,12 +874,12 @@ impl Workspace {
             .child(self.view_switch(cx).ml(px(16.))
             ) };
 
-        // No root folder open (2.8): nothing to list or sort, a way to open one.
-        if self.store.roots().is_empty() {
+        // No top-level folder open (2.8): nothing to list or sort, a way to open one.
+        if self.store.top_folders().is_empty() {
             return div().flex_1().min_w_0().h_full().flex().flex_col().child(header).child(self.empty_main(cx)).into_any_element();
         }
         let entries = self.home_entries();
-        let body = if entries.is_empty() && (self.home.grid || self.home.tab == HomeTab::Recent) {
+        let body = if entries.is_empty() && (self.home.grid || self.lists_library()) {
             empty_state("illus/empty-list.svg", crate::settings::text("当前列表暂无内容")).into_any_element()
         } else if self.home.grid {
             self.render_home_grid(&entries, false, window, cx)
@@ -762,7 +900,7 @@ impl Workspace {
 
     pub(crate) fn render_home_list(&self, entries: &[Entry], in_folder: bool, cx: &mut Context<Self>) -> AnyElement {
         let list_scroll = if in_folder { &self.home.folder_list_scroll } else { &self.home.list_scroll };
-        let cols = self.home.cols();
+        let cols = self.home.cols(self.lists_library());
         let sort = self.home.sort_col();
         // The title is sized at about three times a column.
         let title_cell = || div().flex_grow_1().flex_shrink_1().flex_basis(relative(0.)).min_w(px(200.));
@@ -779,38 +917,14 @@ impl Workspace {
             .border_color(list_line())
             .child(
                 weight3(title_cell()).pl(px(20.)).child(
-                    div().id("home-col-title").px(px(4.)).text_size(px(13.)).line_height(px(24.)).text_color(list_header_text()).child(crate::settings::text("标题")),
+                    self.sort_head(SharedString::from("home-col-title"), "标题", self.home.sort == HomeSort::Title, Some(HomeSort::Title), cx),
                 ),
             );
         for c in &cols {
-            let sorted = !matches!(self.home.sort, HomeSort::Title | HomeSort::Manual) && *c == sort;
-            let sort_open = self.home.sort_menu;
+            let sorted = sort == Some(*c);
             header = header.child(
                 col_cell().pl(px(20.)).child(
-                    div()
-                        .id(SharedString::from(format!("home-col-{}", c.label())))
-                        .relative()
-                        .px(px(4.))
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .rounded(px(ROW_RADIUS))
-                        .text_size(px(13.))
-                        .line_height(px(24.))
-                        .text_color(if sorted { Theme::text() } else { list_header_text() })
-                        .when(sorted, |d| d.font_weight(FontWeight::SEMIBOLD))
-                        .hover(|s| s.bg(Theme::fill_hover()))
-                        .when(sorted && self.home.sort_menu, |d| d.bg(Theme::fill_hover_strong()))
-                        .child(crate::settings::label(c.label()))
-                        .when(sorted, |d| {
-                            d.child(icon("sort-down", 12., Theme::icon()))
-                                .cursor_pointer()
-                                .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| {
-                                    cx.stop_propagation();
-                                    w.home.sort_menu = !sort_open;
-                                    cx.notify();
-                                }))
-                        }),
+                    self.sort_head(SharedString::from(format!("home-col-{}", c.label())), c.label(), sorted, c.sort(), cx),
                 ),
             );
         }
@@ -836,7 +950,7 @@ impl Workspace {
                 .when(check.is_none(), |d| d.on_mouse_down(
                     MouseButton::Right,
                     cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
-                        w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch: false });
+                        w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch: false, from: None });
                         cx.notify();
                     }),
                 ))
@@ -861,11 +975,11 @@ impl Workspace {
             .child(div().relative().flex_1().min_h_0().flex().flex_col().child(rows).child(self.home.list_scrollbar.render(list_scroll))).into_any_element()
     }
 
-    pub(crate) fn render_home_grid(&self, entries: &[Entry], in_folder: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_home_grid(&self, entries: &Rc<Vec<Entry>>, in_folder: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let grid_scroll = if in_folder { &self.home.folder_grid_scroll } else { &self.home.grid_scroll };
         let main_w = f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. };
         let avail = (main_w - 48.).max(1.);
-        let entries = entries.to_vec();
+        let entries = entries.clone();
         let mixed = entries.iter().any(|e| e.meta.folder.is_some() && e.note.is_none());
         // Folders spill past their cell (shadow, tab, the front flaring open), so
         // a level holding them gets more air between cells.
@@ -978,7 +1092,7 @@ impl Workspace {
                     .when(check.is_none(), |d| d.on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
-                            w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch: false });
+                            w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch: false, from: None });
                             cx.notify();
                         }),
                     ))
@@ -1013,22 +1127,138 @@ impl Workspace {
                     .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.home.sort_menu = false; cx.notify(); }));
                 for (index, order) in [HomeSort::Manual, HomeSort::Visited, HomeSort::Modified, HomeSort::Created, HomeSort::Title].into_iter().enumerate() {
                     let g = SharedString::from(format!("home-order-{index}"));
-                    menu = menu.child(MenuItem::new(g).label(crate::settings::label(order.label())).checked(self.home.sort == order).when(self.home.sort == HomeSort::Manual, |d| d.opacity(0.4))
-                        .on_click(cx.listener(move |w, _, _, cx| {
-                            if order == HomeSort::Manual && !w.prepare_manual_order(cx) { return; }
-                            w.home.sort = order;
-                            w.save_home();
-                            w.home.sort_menu = false;
-                            w.home.grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
-                            w.home.list_scroll.set_offset(point(px(0.), px(0.)));
-                            cx.notify();
-                        })));
+                    menu = menu.child(MenuItem::new(g).label(crate::settings::label(order.label())).checked(self.home.sort == order)
+                        .on_click(cx.listener(move |w, _, _, cx| w.sort_by(order, cx))));
+                }
+                // 升序 / 降序 belongs to the automatic orders only.
+                if self.home.sort.directional() {
+                    menu = menu.child(MenuSeparator::new());
+                    for (index, dir) in [SortDir::Asc, SortDir::Desc].into_iter().enumerate() {
+                        menu = menu.child(MenuItem::new(SharedString::from(format!("home-dir-{index}"))).label(dir.label()).checked(self.home.sort_dir == dir)
+                            .on_click(cx.listener(move |w, _, _, cx| {
+                                w.home.sort_dir = dir;
+                                w.save_home();
+                                w.home.sort_menu = false;
+                                w.home.grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
+                                w.home.folder_grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
+                                w.home.list_scroll.set_offset(point(px(0.), px(0.)));
+                                w.home.folder_list_scroll.set_offset(point(px(0.), px(0.)));
+                                cx.notify();
+                            })));
+                    }
                 }
                 menu = menu.child(MenuSeparator::new()).child(MenuItem::new("home-folders-first").label(crate::settings::tr("文件夹优先", "Folders first")).checked(self.home.folders_first && self.home.sort != HomeSort::Manual)
                     .when(self.home.sort == HomeSort::Manual, |d| d.opacity(0.4))
                     .on_click(cx.listener(|w, _, _, cx| { if w.home.sort == HomeSort::Manual { return; } w.home.folders_first = !w.home.folders_first; w.save_home(); w.home.sort_menu = false; cx.notify(); })));
-                out.push(place(point(b.right(), b.bottom() + px(4.)), Anchor::TopRight, menu));
+                let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None);
+                out.push(place(pos, corner, menu));
             }
         out
+    }
+}
+
+#[cfg(test)]
+mod sort_tests {
+    // Not `use super::*`: it would bring in gpui's `test` attribute macro.
+    use super::{HomeSort, Order, SortDir, sort_entries};
+    use crate::store::Entry;
+
+    fn page(id: &str, title: &str, modified: u64, created: u64, order: u64, folder: bool) -> Entry {
+        Entry {
+            id: id.into(),
+            meta: crate::store::Meta {
+                modified,
+                created,
+                order,
+                // A page inside a folder: its hand order is `order`, not
+                // `top_order` (which is only for the top level).
+                parent: Some("p".into()),
+                folder: folder.then(|| format!("{id}-dir")),
+                ..Default::default()
+            },
+            title: title.into(),
+            icon: None,
+            body: "".into(),
+            reminders: vec![],
+            links: vec![],
+            note: None,
+            top: String::new(),
+        }
+    }
+
+    fn ids(v: &[Entry]) -> Vec<&str> { v.iter().map(|e| e.id.as_str()).collect() }
+
+    #[test]
+    fn directions_apply_to_every_field() {
+        let mut v = vec![
+            page("a", "Banana", 20, 200, 3, false),
+            page("b", "Apple", 10, 100, 2, false),
+            page("c", "Cherry", 30, 300, 1, false),
+        ];
+        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Desc, folders_first: false });
+        assert_eq!(ids(&v), ["c", "a", "b"]);
+        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Asc, folders_first: false });
+        assert_eq!(ids(&v), ["b", "a", "c"]);
+        sort_entries(&mut v, Order { field: HomeSort::Created, dir: SortDir::Desc, folders_first: false });
+        assert_eq!(ids(&v), ["c", "a", "b"]);
+        sort_entries(&mut v, Order { field: HomeSort::Title, dir: SortDir::Asc, folders_first: false });
+        assert_eq!(ids(&v), ["b", "a", "c"]);
+        sort_entries(&mut v, Order { field: HomeSort::Title, dir: SortDir::Desc, folders_first: false });
+        assert_eq!(ids(&v), ["c", "a", "b"]);
+    }
+
+    #[test]
+    fn manual_order_is_the_sidebar_order() {
+        let mut v = vec![
+            page("a", "A", 10, 10, 2, false),
+            page("b", "B", 99, 99, 1, false),
+            // Never placed by hand: above the placed ones, newest first.
+            page("c", "C", 50, 50, 0, false),
+        ];
+        sort_entries(&mut v, Order { field: HomeSort::Manual, dir: SortDir::Desc, folders_first: false });
+        assert_eq!(ids(&v), ["c", "b", "a"]);
+    }
+
+    #[test]
+    fn equal_values_keep_the_hand_order() {
+        // Same modification time: the hand order decides, in either direction.
+        let mut v = vec![page("a", "A", 10, 10, 2, false), page("b", "B", 10, 10, 1, false)];
+        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Desc, folders_first: false });
+        assert_eq!(ids(&v), ["b", "a"]);
+        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Asc, folders_first: false });
+        assert_eq!(ids(&v), ["b", "a"]);
+        // Title has no eponymous column, but sorts the same way.
+        let mut v = vec![page("a", "Same", 10, 10, 2, false), page("b", "Same", 20, 20, 1, false)];
+        sort_entries(&mut v, Order { field: HomeSort::Title, dir: SortDir::Asc, folders_first: false });
+        assert_eq!(ids(&v), ["b", "a"]);
+    }
+
+    #[test]
+    fn folders_first_groups_only_when_asked() {
+        let mut v = vec![page("d", "Doc", 30, 30, 2, false), page("f", "Folder", 20, 20, 3, true)];
+        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Desc, folders_first: false });
+        assert_eq!(ids(&v), ["d", "f"]);
+        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Desc, folders_first: true });
+        assert_eq!(ids(&v), ["f", "d"]);
+        // 手动排序 never groups: it is the order the sidebar shows.
+        sort_entries(&mut v, Order { field: HomeSort::Manual, dir: SortDir::Desc, folders_first: true });
+        assert_eq!(ids(&v), ["d", "f"]);
+    }
+
+    #[test]
+    fn top_rows_keep_their_order() {
+        // 多个顶层文件夹: the rows stay in folders.json's order (`top_order`) whatever the sort.
+        let row = |key: &str, title: &str, at: u64| {
+            let mut e = page(&crate::shared_store::top_row(key), title, 0, 0, 0, true);
+            (e.meta.parent, e.meta.top_order) = (None, Some(at));
+            e
+        };
+        let mut v = vec![row("b", "Alpha", 2), row("a", "Zulu", 1), page("x", "Middle", 5, 5, 0, false)];
+        for field in [HomeSort::Title, HomeSort::Modified, HomeSort::Manual] {
+            for dir in [SortDir::Asc, SortDir::Desc] {
+                sort_entries(&mut v, Order { field, dir, folders_first: false });
+                assert_eq!(ids(&v), ["top:a", "top:b", "x"]);
+            }
+        }
     }
 }

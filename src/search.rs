@@ -119,7 +119,7 @@ pub(crate) fn summary_text(text: String, mut hits: Vec<Range<usize>>, width: f32
         hits.retain(|r| r.end <= cut);
         format!("{}…", &text[..cut])
     };
-    let runs = ui_runs(&text, &style, &hits, Theme::link());
+    let runs = ui_runs(&text, &style, &hits, crate::design::color::foreground());
     StyledText::new(text).with_runs(runs)
 }
 
@@ -135,7 +135,7 @@ fn summary_style(window: &Window) -> TextStyle {
 fn summary_lines(s: &str, style: &TextStyle, hits: &[Range<usize>], width: f32, window: &Window) -> usize {
     window
         .text_system()
-        .shape_text(s.to_string().into(), px(12.), &ui_runs(s, style, hits, Theme::link()), Some(px(width)), None)
+        .shape_text(s.to_string().into(), px(12.), &ui_runs(s, style, hits, crate::design::color::foreground()), Some(px(width)), None)
         .map(|ls| ls.iter().map(|l| l.wrap_boundaries().len() + 1).sum::<usize>())
         .unwrap_or(1)
 }
@@ -261,8 +261,8 @@ fn body_hit(e: &Entry, q: &str) -> bool { !q.is_empty() && !e.title.to_lowercase
 /// The glyph of a file titled by its name: Markdown, a 画板; else a page.
 pub(crate) fn file_glyph(m: &crate::store::Meta) -> &'static str {
     match m.kind {
-        crate::store::DocKind::Board => "whiteboard",
-        crate::store::DocKind::Table => "storage",
+        crate::store::DocKind::Board => "board",
+        crate::store::DocKind::Table => "doc-table",
         _ if m.markdown => "doc-md",
         _ => "doc",
     }
@@ -348,7 +348,7 @@ pub(crate) fn result_info(e: &Entry, q: &str, summary: Option<(String, Vec<Range
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
-                .child(ui_text(title).hit(title_hit, Theme::link())),
+                .child(ui_text(title).hit(title_hit, crate::design::color::foreground())),
         )
         .children(summary.map(|(text, hits)| div().text_size(px(12.)).line_height(px(20.)).child(summary_text(text, hits, width, window))))
         .child(extra_line(e))
@@ -356,6 +356,7 @@ pub(crate) fn result_info(e: &Entry, q: &str, summary: Option<(String, Vec<Range
 
 impl Workspace {
     pub(crate) fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.still_loading(cx) { return }
         self.search_open = true;
         self.search_sel = Some(0);
         self.row_menu = None;
@@ -654,7 +655,7 @@ mod tests {
     use crate::store::Entry;
 
     fn entry(id: &str, title: &str, body: &str) -> Entry {
-        Entry { id: id.into(), meta: Default::default(), title: title.into(), icon: None, body: body.into(), reminders: vec![], links: vec![], note: None, root: String::new() }
+        Entry { id: id.into(), meta: Default::default(), title: title.into(), icon: None, body: body.into(), reminders: vec![], links: vec![], note: None, top: String::new() }
     }
 
     /// The pre-#332 ranking: lowercase each title, then each body.

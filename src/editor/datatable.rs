@@ -92,7 +92,7 @@ impl Editor {
         if lost { self.datatables.open = None; }
         // a standalone file's page was replaced (a version previewed, or back): its table fills the pane again
         if lost && self.table_file && let Some(&(id, _)) = blocks.first() { cx.defer_in(window, move |e, window, cx| e.open_table(id, window, cx)); }
-        let root = crate::store::Store::root_dir();
+        let root = crate::store::Store::active_dir();
         for (id, t) in blocks {
             if self.datatables.views.contains_key(&id) { continue; }
             let state = BaseState::open(&root.join(&t.src), cx);

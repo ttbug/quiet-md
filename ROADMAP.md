@@ -2,10 +2,11 @@
 
 ## 当前阶段
 
-右侧 Agent 面板第一版已实现；当前合并 main（`6102152`）的设计系统及存储更新，保留本机 Codex 面板。
+右侧 Agent 面板第一版已实现；当前合并 main（`10a6306`）的 CLI、存储及界面更新，保留本机 Codex 面板。
 
 ## 已完成
 
+- 2026-11-25 解决 main（`10a6306`）合并冲突：保留 Agent 工作目录、面板宽度及两侧存储回归测试；外观设置测试适配 `FolderLook`／`look_at`，Markdown 防闪退回归适配 `refresh_external`。Release workspace 测试、三种配置 Clippy、中英文指南往返及 Agent／Markdown 界面回归通过，尚未创建合并提交。
 - 2026-11-24 解决 main（`6102152`）合并冲突：主页搜索使用新版 `Field` 并保留 Agent 面板宽度避让；Agent 模型菜单及操作／代码复制按钮适配 main 的设计组件；设置回归适配应用级设置与 FORMAT 5 根目录外观分离。Release workspace 测试、三种配置 Clippy、指南及 Agent／Markdown 界面回归通过，尚未创建合并提交。
 - 2026-11-23 解决 main（`47e203d`）合并冲突：`Settings` 同时保留 Agent 工作目录、面板宽度和每个文件夹的外观设置，新增旧配置兼容及保存不丢字段回归；Markdown 刷新回归适配多文件夹存储的 `with` 接口。Release workspace 测试、三种配置 Clippy、指南及 Agent／Markdown 界面回归通过，尚未创建合并提交。
 - 2026-11-22 解决 main（`0f408c4`，0.1.14）合并冲突：保留 main 的新版 README 结构并迁入 Local Codex 说明；主页搜索同时为三个操作按钮及 AI 入口留位。AI 回复改用可配置界面字体接口，Markdown 刷新回归按新签名传入当前窗口 ID，移除被 main 的窗口枚举实现替代的冗余字段。Release 测试、三种配置 Clippy、指南及界面回归通过，尚未创建合并提交。
@@ -30,7 +31,7 @@
 
 ## 进行中
 
-- main（`6102152`）合并到 `feat/own`：冲突及自动合并后的接口兼容问题已解决并验证，已暂存，保留合并状态，等待创建合并提交。
+- main（`10a6306`）合并到 `feat/own`：冲突及自动合并后的接口兼容问题已解决并验证，已暂存，保留合并状态，等待创建合并提交。
 
 ## 待办
 
@@ -46,6 +47,7 @@
 
 ## 最近验证
 
+- 2026-11-25 合并验证：Release workspace 测试（`devtools`）1247 项通过、10 项忽略；普通、`devtools`、`devtools,datatable` 三种配置 Release Clippy（`--workspace --all-targets -- -D warnings`）通过，均使用 `gpui_platform/runtime_shaders` 和 `MACOSX_DEPLOYMENT_TARGET=13.0`。中英文指南 XML 往返、6 个指南资源一致性、完整模拟 Agent 面板回放及 Markdown 刷新防闪退回归通过。测试使用临时文档库；沙箱内恢复目录及本地 HTTP 用例因权限失败，沙箱外完整重跑通过。无未解决索引项，本次修复文件空白检查通过；全量暂存的 5 处空白提示来自与 main 完全一致的 4 个 vendor 补丁，保留原样。
 - 2026-11-24 合并验证：Release workspace 测试（`devtools`）1046 项通过、8 项忽略；普通、`devtools`、`devtools,datatable` 三种配置 Release Clippy（`--all-targets -- -D warnings`）通过，均使用 `gpui_platform/runtime_shaders` 和 `MACOSX_DEPLOYMENT_TARGET=13.0`。中英文指南 XML 往返、6 个指南资源一致性、完整模拟 Agent 面板回放及 Markdown 刷新防闪退回归通过；截图确认主页搜索与右侧按钮无重叠、模型菜单正常。测试使用临时文档库、独立 `QUIET_MD_ROOTS` 和英文测试配置；恢复及本地 HTTP 用例在沙箱外验证通过。旧设置回归已适配新存储职责；未配置多根目录／英文时分别触发根目录改名限制／字体英文断言。无未解决索引项，本次修复文件空白检查通过；全量暂存空白提示涉及四个文件，内容均与 main 完全一致，保留原样。
 - 2026-11-23 合并验证：Release workspace 测试（`devtools`）1121 项通过、8 项忽略；普通、`devtools`、`devtools,datatable` 三种配置 Release Clippy（`--all-targets -- -D warnings`）通过，均使用 `gpui_platform/runtime_shaders` 和 `MACOSX_DEPLOYMENT_TARGET=13.0`。指南 XML 往返、6 个指南资源一致性、完整 Agent 面板回放及 Markdown 刷新防闪退回归通过。测试仅使用临时文档库；首轮恢复副本用例因沙箱权限失败，沙箱外完整重跑通过。无未解决索引项，本次修改文件空白检查通过；全量暂存 diff 的 10 处空白提示来自与 main 完全一致的两个 vendor 补丁，保留原样。
 - 2026-11-22 合并验证：Release workspace 测试（`devtools`）972 项通过、8 项忽略；普通、`devtools`、`devtools,datatable` 三种配置 Release Clippy（`--all-targets -- -D warnings`）通过；本机均启用 `gpui_platform/runtime_shaders`，设置 `MACOSX_DEPLOYMENT_TARGET=13.0`。指南 XML 往返及 6 个指南资源一致性通过。完整模拟 Agent 面板回放和 Markdown 刷新防闪退回归通过；主页截图确认搜索、三个操作按钮及 AI 入口无重叠。测试仅使用临时文档库，恢复用例与图形回放在获得沙箱外权限后通过。本次修改文件空白检查通过；完整暂存 diff 的 9 处空白提示来自与 main 完全一致的两个 vendor 补丁，保留原样。

@@ -303,7 +303,7 @@ use crate::font_downloads::XIAOLAI as XL;
 const EXPORT_FONT_WAIT: u64 = 8;
 
 fn write_picture(me: &mut BoardView, bd: &crate::whiteboard::Board, png: bool, cx: &mut Context<BoardView>) {
-    let root = crate::store::Store::root_dir();
+    let root = crate::store::Store::active_dir();
     let href = |f: &super::types::FileData| -> Option<String> {
         use base64::Engine;
         if let Some(u) = &f.data_url { return Some(u.clone()); }
