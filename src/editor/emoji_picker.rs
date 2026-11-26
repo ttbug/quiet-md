@@ -36,7 +36,6 @@ const ROW_H: f32 = 36.;
 const CELL: f32 = 36.;
 /// Rows start 24px in from the popover edge (23 inside its border).
 const INSET: f32 = 23.;
-const THUMB_MIN: f32 = 96.;
 
 const NAV: [(&str, &str); 8] = [
     ("最近", "emoji-frequent"),
@@ -260,11 +259,8 @@ impl Editor {
             let y = (next - off - TITLE_H).min(0.);
             title_el(s.title, TITLE_H).absolute().top(px(y)).left_0().bg(theme::ta(255, 255, 255, 0.8))
         });
-        let thumb = (content_h > SCROLL_H).then(|| {
-            let h = (SCROLL_H * SCROLL_H / content_h).max(THUMB_MIN);
-            let top = (SCROLL_H - h) * off / (content_h - SCROLL_H);
-            div().absolute().right_0().top(px(top)).w(px(7.)).h(px(h)).rounded(px(3.5)).group_hover("emoji-scroll", |s| s.bg(Theme::scrollbar_thumb()))
-        });
+        // the shared scrollbar (shadcn's ScrollArea), square-edged: the area sits inside the picker's padding
+        let thumb = self.emoji_bar.render(&self.emoji_scroll);
         let scroll = div()
             .id("emoji-scroll-area")
             .group("emoji-scroll")
@@ -275,7 +271,7 @@ impl Editor {
             .overflow_hidden()
             .child(div().id("emoji-scroll").size_full().overflow_y_scroll().track_scroll(&self.emoji_scroll).child(content))
             .children(sticky)
-            .children(thumb);
+            .child(thumb);
 
         let field_on = self.emoji_search_active && self.emoji_field.read(cx).is_focused(window);
         let has_text = !self.emoji_field.read(cx).text.is_empty();
@@ -333,7 +329,7 @@ impl Editor {
                 .left_0()
                 .right_0()
                 .h(px(2.))
-                .bg(linear_gradient(180., linear_color_stop(theme::rgbaf(0, 0, 0, 0.05), 0.), linear_color_stop(theme::rgbaf(0, 0, 0, 0.), 1.))),
+                .bg(linear_gradient(180., linear_color_stop(theme::rgbaf(0, 0, 0, if crate::theme::dark() { 0.35 } else { 0.05 }), 0.), linear_color_stop(theme::rgbaf(0, 0, 0, 0.), 1.))),
         );
         for (i, (label, ic)) in NAV.iter().enumerate() {
             let on = !searching && i == current;

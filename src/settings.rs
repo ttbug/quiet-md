@@ -25,13 +25,14 @@ static PREFS: RwLock<Option<Preferences>> = RwLock::new(None);
 /// The active document theme draws blocks the 飞书 way (else Craft's).
 pub fn feishu() -> bool { FEISHU.load(Ordering::Relaxed) }
 pub(crate) fn set_base(feishu: bool) { FEISHU.store(feishu, Ordering::Relaxed); }
-/// 界面语言, in the order Settings lists them. Chinese strings are the keys:
+/// 界面语言, in the order Settings lists them (English first, then the two Chinese).
+/// `ALL` keeps the variants' order: `LANG` holds a variant's index in it. Chinese strings are the keys:
 /// other languages look them up in `l10n` and fall back to English.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Lang { Zh, ZhTw, En, Ja, Ko, Fr, Es, Ar, Tr }
+pub enum Lang { En, Zh, ZhTw, Ja, Ko, Fr, Es, Ar, Tr }
 
 impl Lang {
-    pub const ALL: [Lang; 9] = [Lang::Zh, Lang::ZhTw, Lang::En, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es, Lang::Ar, Lang::Tr];
+    pub const ALL: [Lang; 9] = [Lang::En, Lang::Zh, Lang::ZhTw, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es, Lang::Ar, Lang::Tr];
     /// The `language` preference value.
     pub fn code(self) -> &'static str { match self { Lang::Zh => "zh", Lang::ZhTw => "zh-TW", Lang::En => "en", Lang::Ja => "ja", Lang::Ko => "ko", Lang::Fr => "fr", Lang::Es => "es", Lang::Ar => "ar", Lang::Tr => "tr" } }
     /// The language's own name, as Settings lists it.
@@ -123,6 +124,9 @@ pub struct Preferences {
     /// 外观 › 窗口背景: paint the window opaque instead of letting the desktop
     /// show through the sidebar material.
     pub opaque_window: bool,
+    /// 外观 › 文档大纲 off: no heading outline (nor its button) beside the page.
+    #[serde(default)]
+    pub hide_outline: bool,
     /// 外观 › 界面字号: "small" or "large"; empty is the 13pt standard.
     pub ui_font: String,
     /// 外观 › 界面字体: the family the sidebar, menus and settings are drawn in
@@ -196,7 +200,7 @@ fn system_lang() -> Lang {
 impl Default for Preferences {
     fn default() -> Self {
         let lang = system_lang();
-        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), doc_size: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![], quick_note_folder: String::new() }
+        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, hide_outline: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), doc_size: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![], quick_note_folder: String::new() }
     }
 }
 
@@ -478,7 +482,7 @@ impl Page {
             Page::General => "view-settings",
             Page::Appearance => "palette",
             Page::Shortcuts => "keyboard",
-            Page::Library => "storage",
+            Page::Library => "folder",
             Page::About => "info",
         }
     }
@@ -501,7 +505,8 @@ pub(crate) fn group(id: impl Into<ElementId>, title: Option<&'static str>, rows:
         card = card.child(div().w_full().flex().flex_col().child(r));
         if i + 1 < n { card = card.child(Separator::new()); }
     }
-    div().w_full().flex().flex_col().gap(px(8.)).children(title.map(caption)).child(card)
+    // the caption hangs over its own card (`label_gap`), sections stand `section_gap` apart
+    div().w_full().flex().flex_col().gap(px(crate::design::geo().label_gap)).children(title.map(caption)).child(card)
 }
 
 pub(crate) fn caption(t: &'static str) -> Div {
@@ -517,7 +522,8 @@ fn desc(s: &'static str) -> Option<SharedString> { Some(s.into()) }
 
 /// A `Switch` that takes the click (the switch itself only draws).
 pub(crate) fn switch(id: impl Into<ElementId>, on: bool) -> Stateful<Div> {
-    div().id(id).flex_none().flex().items_center().cursor_pointer().child(Switch::new(on))
+    let id = id.into();
+    div().id(id.clone()).flex_none().flex().items_center().cursor_pointer().child(Switch::new(on).keyed(id))
 }
 
 /// 外观 › 主题 CSS (duplicate, edit, restore a theme's stylesheet): hidden in
@@ -761,6 +767,13 @@ fn font_row(family: &str, dl: Option<&'static str>, flat: bool, g: SharedString,
             .on_click(cx.listener(move |w, _, _, cx| { cx.stop_propagation(); w.toggle_favorite(&star, cx) }))))
 }
 
+thread_local! {
+    /// 正文字号's 自定义 was picked this session: its stepper shows though the size may be a preset's.
+    static DOC_CUSTOM: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Bumped at each step of 正文字号's stepper, so only the last of a burst is written.
+    static DOC_SIZE_GEN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// A segmented control, each segment `(id, i)`.
 fn segmented(id: &'static str, labels: &[&'static str], selected: usize, on: impl Fn(&mut Workspace, usize, &mut Context<Workspace>) + Clone + 'static, cx: &mut Context<Workspace>) -> Segmented {
     Segmented::new().children(labels.iter().enumerate().map(|(i, label)| {
@@ -970,7 +983,7 @@ impl Workspace {
                 w.theme_menu = None;
                 cx.notify();
             }))
-            .child(div().id("theme-menu-list").w(px(220.)).max_h(px(302.)).overflow_y_scroll().py(px(menu::PAD)).flex().flex_col().children(rows));
+            .child({ let h = crate::design::scroll::handle("theme-menu-list"); crate::design::scroll::make_room(div().id("theme-menu-list").w(px(220.)).max_h(px(302.)).overflow_y_scroll().track_scroll(&h).py(px(menu::PAD)).flex().flex_col(), "theme-menu-list", menu::PAD).children(rows).child(crate::design::scroll::bar("theme-menu-list", &h, crate::design::geo().menu_r)) });
         Some(deferred({ let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None); anchored().anchor(corner).position(pos) }.snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
@@ -1009,7 +1022,7 @@ impl Workspace {
                 cx.notify();
             }))
             .children(rows);
-        Some(deferred({ let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None); anchored().anchor(corner).position(pos) }.snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+        { let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None); Some(deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(menu.fit(crate::design::room(pos, corner)))).with_priority(2).into_any_element()) }
     }
 
     fn pick_pref(&mut self, i: usize, cx: &mut Context<Self>) {
@@ -1289,7 +1302,7 @@ impl Workspace {
                 cx.notify();
             }))
             .children(rows);
-        Some(deferred({ let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None); anchored().anchor(corner).position(pos) }.snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+        { let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None); Some(deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(menu.fit(crate::design::room(pos, corner)))).with_priority(2).into_any_element()) }
     }
 
     /// Keys while the language dropdown is open; true when used.
@@ -1324,6 +1337,21 @@ impl Workspace {
 
 impl Workspace {
     /// Change preferences and refresh what depends on them.
+    /// 正文字号's stepper moved to `pref`: the note and the sample redraw at once; the preferences and
+    /// the folder's look are written when the steps stop for half a second, not at every step.
+    pub(crate) fn set_doc_size_soon(&mut self, pref: String, cx: &mut Context<Self>) {
+        let mut p = prefs();
+        p.doc_size = pref.clone();
+        apply(p);
+        refresh_all(self, cx);
+        cx.notify();
+        let turn = DOC_SIZE_GEN.with(|g| { g.set(g.get() + 1); g.get() });
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(500)).await;
+            let _ = this.update(cx, |w, cx| if DOC_SIZE_GEN.with(|g| g.get()) == turn { w.set_pref(|p| p.doc_size = pref, cx) });
+        }).detach();
+    }
+
     pub(crate) fn set_pref(&mut self, f: impl FnOnce(&mut Preferences), cx: &mut Context<Self>) {
         let old = prefs();
         let mut p = old.clone();
@@ -1465,7 +1493,7 @@ impl Workspace {
             // The bar only drags the window; the page title heads the centred column.
             .child(div().h(px(crate::app::HEADER_H)).flex_none().flex().items_center().title_bar()
                 .when(!self.sidebar_open, |d| d.pl(px(theme::TRAFFIC_LIGHTS_W)).child(self.header_navigation(cx))))
-            .child(div().id("settings-content").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.settings_scroll)
+            .child(div().id("settings-content").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.settings_scroll).child(crate::design::scroll::bar_corners("settings-content", &self.settings_scroll, 0., crate::design::scroll::WINDOW_R))
                 .child(div().w_full().flex().flex_col().items_center().px(px(32.)).pb(px(64.))
                     .child(div().w_full().max_w(px(if page == Page::Shortcuts { 760. } else { COLUMN_W })).flex().flex_col().gap(px(28.))
                         .child(div().flex().items_center().gap(px(16.))
@@ -1494,7 +1522,7 @@ impl Workspace {
                 }, cx)
             }).into_any_element()]
         };
-        div().w_full().flex().flex_col().gap(px(28.))
+        div().w_full().flex().flex_col().gap(px(crate::design::geo().section_gap))
             .child(group("group-general", None, vec![
                 row(tr("界面语言", "Interface language"), None, {
                     let anchor = self.lang_anchor.clone();
@@ -1591,8 +1619,8 @@ impl Workspace {
         // The page itself, the group's last row: no frame around it.
         let shown = { let list = themes::themes(); list.iter().find(|t| t.id == current).or_else(|| list.first()).map(|t| sample_page(t, PAGE_S)) };
         let sample = div().w_full().h(px(640.)).children(shown);
-        div().w_full().flex().flex_col().gap(px(28.))
-            .child(div().w_full().flex().flex_col().gap(px(8.))
+        div().w_full().flex().flex_col().gap(px(crate::design::geo().section_gap))
+            .child(div().w_full().flex().flex_col().gap(px(crate::design::geo().section_gap))
                 .child(group("group-appearance", None, vec![
                     row(tr("外观", "Appearance"), None, {
                         let at = match prefs().appearance.as_str() { "light" => 1, "dark" => 2, _ => 0 };
@@ -1609,6 +1637,13 @@ impl Workspace {
                             w.set_pref(|p| p.opaque_window = !p.opaque_window, cx);
                             window.refresh();
                         }))).into_any_element(),
+                ]))
+                // 界面, then 文档: each font before its size, and the document theme last, right above
+                // the sample it shapes (the user's order, 2026-11-25)
+                .child(group("group-interface", Some(tr("界面", "Interface")), vec![
+                    // 界面字体: the chrome — sidebar, menus, this page.
+                    self.font_row(FontTarget::Ui, tr("界面字体", "Interface font"),
+                        tr("侧栏、菜单和设置页用这个字体；文档用下面的「文档字体」。", "The sidebar, menus and settings use it; the note has its own below."), cx).into_any_element(),
                     // 界面字号: the sidebar and this page together, so the pairs
                     // (label, description) stay in proportion.
                     row(tr("界面字号", "Interface size"), None, {
@@ -1616,20 +1651,41 @@ impl Workspace {
                         segmented("ui-font", &[tr("小", "Small"), tr("标准", "Default"), tr("大", "Large")], sel,
                             |w, i, cx| w.set_pref(|p| p.ui_font = ["small", "", "large"][i].into(), cx), cx)
                     }).into_any_element(),
-                    // 界面字体: the chrome — sidebar, menus, this page.
-                    self.font_row(FontTarget::Ui, tr("界面字体", "Interface font"),
-                        tr("侧栏、菜单和设置页用这个字体；文档用下面的「文档字体」。", "The sidebar, menus and settings use it; the note has its own below."), cx).into_any_element(),
-                    row(tr("文档主题", "Document theme"), None, picker).into_any_element(),
+                ]))
+                .child(group("group-document", Some(tr("文档", "Document")), vec![
                     // 文档字体: every family the system has, for the note's
                     // body text and headings (code keeps the theme's).
                     self.font_row(FontTarget::Doc, tr("文档字体", "Document font"),
                         tr("正文和标题用这个字体，代码块仍用主题的等宽字体。", "Body text and headings use it; code keeps the theme's monospace face."), cx).into_any_element(),
                     // 正文字号: the note's text, headings and code together (themes::doc_len).
+                    // Presets and 自定义: a custom size (12–24pt) steps by 1 under the presets; a size that
+                    // is a preset's lights that preset unless 自定义 was picked this time.
                     row(tr("正文字号", "Text size"), None, {
-                        let sel = match prefs().doc_size.as_str() { "small" => 0, "large" => 2, "xlarge" => 3, _ => 1 };
-                        segmented("doc-size", &[tr("小", "Small"), tr("标准", "Default"), tr("大", "Large"), tr("特大", "Extra large")], sel,
-                            |w, i, cx| w.set_pref(|p| p.doc_size = ["small", "", "large", "xlarge"][i].into(), cx), cx)
+                        let body = themes::active().num("page.size");
+                        let pref = prefs().doc_size.clone();
+                        let pt = themes::doc_size_pt(&pref, body);
+                        let preset = themes::DOC_PRESETS.iter().position(|n| themes::doc_size_pt(n, body) == pt);
+                        let custom = DOC_CUSTOM.with(|c| c.get()) || preset.is_none();
+                        let sel = if custom { 4 } else { preset.unwrap_or(1) };
+                        let step = move |d: f32| move |w: &mut Workspace, _: &ClickEvent, _: &mut Window, cx: &mut Context<Workspace>| {
+                            let next = (pt + d).clamp(themes::DOC_MIN, themes::DOC_MAX);
+                            if next != pt { w.set_doc_size_soon(format!("{next}"), cx) }
+                        };
+                        div().flex_none().flex().flex_col().items_end().gap(px(10.))
+                            .child(segmented("doc-size", &[tr("小", "Small"), tr("标准", "Default"), tr("大", "Large"), tr("特大", "Extra large"), tr("自定义", "Custom")], sel,
+                                move |w, i, cx| {
+                                    DOC_CUSTOM.with(|c| c.set(i == 4));
+                                    // 自定义 starts at the size in force; a preset brings its own
+                                    w.set_pref(|p| p.doc_size = if i == 4 { format!("{pt}") } else { themes::DOC_PRESETS[i].into() }, cx)
+                                }, cx))
+                            .when(custom, |d| d.child(div().flex_none().flex().items_center().gap(px(12.))
+                                .child(button("doc-size-minus", "−").on_click(cx.listener(step(-1.))))
+                                .child(div().w(px(56.)).flex().items_center().justify_center().text_size(px(theme::ui_font())).text_color(Theme::text()).child(format!("{pt} pt")))
+                                .child(button("doc-size-plus", "+").on_click(cx.listener(step(1.))))))
                     }).into_any_element(),
+                    row(tr("文档大纲", "Outline"), desc(tr("在正文左侧显示标题目录。", "Shows the headings beside the text.")),
+                        switch("pref-outline", !prefs().hide_outline).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.hide_outline = !p.hide_outline, cx)))).into_any_element(),
+                    row(tr("文档主题", "Document theme"), None, picker).into_any_element(),
                     sample.into_any_element(),
                 ].into_iter().chain(THEME_CSS.then(|| {
                     row(tr("主题 CSS", "Theme CSS"), Some(where_),
@@ -1682,10 +1738,10 @@ impl Workspace {
             folders.push(row(tr("快速笔记保存到", "Quick notes go to"), desc(tr("「新建笔记窗口」和全局快捷键记下的笔记放在这个文件夹里。", "Notes from New Note Window and the global shortcut are saved in this folder.")),
                 self.select("quick-note-folder", open.into_iter().map(|r| r.1).collect(), at, move |w, i, cx| { let k = keys[i].clone(); w.set_pref(|p| p.quick_note_folder = k, cx) }, cx)).into_any_element());
         }
-        folders.push(row(tr("添加文件夹", "Add a folder"), Some(tr("打开电脑上已有的文件夹，或新建一个，都会显示在侧栏里。", "Open a folder already on your computer, or make a new one; either shows in the sidebar.").into()), div().flex_none().flex().gap(px(8.))
-            .child(button("open-folder", tr("打开…", "Open…")).on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx))))
-            .child(button("new-folder", tr("新建…", "New…")).on_click(cx.listener(|w, _, window, cx| w.new_folder_dialog(window, cx))))).into_any_element());
-        div().w_full().flex().flex_col().gap(px(8.))
+        // A new folder is made in the system's own open panel (its 新建文件夹 button), not here.
+        folders.push(row(tr("打开文件夹", "Open a folder"), Some(tr("打开电脑上的文件夹，它会显示在侧栏里；要新的文件夹，在打开窗口里新建。", "Open a folder on your computer and it shows in the sidebar; for a new one, make it in the open window.").into()),
+            button("open-folder", tr("打开…", "Open…")).on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx)))).into_any_element());
+        div().w_full().flex().flex_col().gap(px(crate::design::geo().section_gap))
             .child(group("group-folders", Some(tr("文件夹", "Folders")), folders))
             .child(group("group-library", None, vec![
                 row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", crate::store::TRASH_DAYS).into()),
@@ -1715,7 +1771,7 @@ impl Workspace {
     }
 
     fn about_page(&self, cx: &mut Context<Self>) -> AnyElement {
-        div().w_full().flex().flex_col().gap(px(28.)).child(div().w_full().pt(px(24.)).flex().flex_col().items_center().gap(px(10.))
+        div().w_full().flex().flex_col().gap(px(crate::design::geo().section_gap)).child(div().w_full().pt(px(24.)).flex().flex_col().items_center().gap(px(10.))
             .child(img(about_icon()).size(px(88.)))
             .child(div().text_size(px(20.)).line_height(px(26.)).font_weight(FontWeight::SEMIBOLD).child("Quiet.md"))
             .child(div().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 5.)).text_color(Theme::text_caption()).child(format!("{} {}", tr("版本", "Version"), env!("CARGO_PKG_VERSION"))))
@@ -2295,17 +2351,14 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "不展示" => "None",
         "不等于" => "Is not",
         "业务" => "Business",
-        "个隐藏字段" => "hidden fields",
         "中等" => "Medium",
         "为空" => "Is empty",
         "人员" => "Person",
         "人民币" => "Chinese yuan",
-        "任一" => "Any",
+        "任一" => "any",
         "位" => "places",
-        "位小数" => "decimal places",
         "低" => "Short",
         "俄罗斯卢布" => "Russian ruble",
-        "保留" => "Keep",
         "修改字段/列" => "Edit field",
         "倒序" => "Descending",
         "允许关联多条记录" => "Allow linking to multiple records",
@@ -2325,7 +2378,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "分组" => "Group",
         "创建于" => "Created",
         "删除字段/列" => "Delete field",
-        "个字段" => "fields",
         "删除数据表" => "Delete table",
         "删除视图" => "Delete view",
         "删除记录" => "Delete record",
@@ -2370,12 +2422,11 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "已勾选" => "Checked",
         "已填写" => "Filled",
         "已填写占比" => "Percent filled",
-        "已选" => "Selected",
         "巴西雷亚尔" => "Brazilian real",
         "常规" => "General",
         "平均值" => "Average",
         "成员" => "Members",
-        "所有" => "All",
+        "所有" => "all",
         "按 A 到 Z 排序" => "Sort A to Z",
         "按 Z 到 A 排序" => "Sort Z to A",
         "按此字段分组" => "Group by this field",
@@ -2400,7 +2451,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "早于" => "Is before",
         "显示时间" => "Include time",
         "晚于" => "Is after",
-        "暂未支持" => " is not supported yet",
         "最后更新于" => "Last modified",
         "最后更新时间" => "Last modified time",
         "最大值" => "Max",
@@ -2418,13 +2468,23 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "未来 7 天内" => "Next 7 days",
         "本周" => "This week",
         "本月" => "This month",
-        "条件" => "conditions",
         "条码" => "Barcode",
-        "条记录" => "records",
-        "条，使用筛选缩小范围" => "more: narrow them down with a filter",
         "查找引用" => "Lookup",
         "查找或创建选项" => "Find or create an option",
         "查看详情" => "Open record",
+        "打开链接" => "Open link",
+        "⌘ + 点击" => "⌘ + click",
+        "一起删除" => "Delete both",
+        "保留笔记" => "Keep the notes",
+        "找不到笔记" => "Note not found",
+        "指向已有笔记" => "Point to an existing note",
+        "搜索笔记" => "Search notes",
+        "整页打开" => "Open as a page",
+        "新建笔记" => "New note",
+        "没有笔记" => "No notes",
+        "独立的数据表才能加笔记列" => "Only a data table of its own can have a note column",
+        "空笔记" => "Empty",
+        "笔记" => "Note",
         "欧元" => "Euro",
         "求和" => "Sum",
         "没有符合筛选条件的记录" => "No records match the filter",
@@ -2448,7 +2508,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "看板视图" => "Kanban view",
         "看板需要按单选字段分组，请先添加一个单选字段" => "A kanban is grouped by a single select field: add one first",
         "空" => "Empty",
-        "符合以下" => "Match",
         "等于" => "Is",
         "筛选" => "Filter",
         "统计" => "Summary",
@@ -2492,11 +2551,11 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "货币" => "Currency",
         "超链接" => "URL",
         "超高" => "Extra tall",
+        "适应内容" => "Fit to content",
         "输入名字后回车添加" => "Type a name and press Enter",
         "输入名称后回车新建选项" => "Type a name and press Enter to create an option",
         "过去 30 天内" => "Past 30 days",
         "过去 7 天内" => "Past 7 days",
-        "还有" => "And",
         "还没有附件" => "No attachments yet",
         "进度" => "Progress",
         "选择一个单选或人员字段作为看板的分组依据" => "Choose a single select or person field to stack the kanban by",

@@ -2,9 +2,6 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 pub(crate) const APP_ID: &str = "com.s1dashu.quietmd";
-/// 数据表 can be made and edited (feature `datatable`). Off, nothing offers one and
-/// one already in the library shows as a read-only placeholder, its file untouched.
-pub(crate) const DATATABLE: bool = cfg!(feature = "datatable");
 
 mod app;
 mod agent;
@@ -29,6 +26,7 @@ mod devtools {
     pub static RENDER_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     pub fn scripted() -> bool { crate::selftest::active() }
     pub fn start(_: &mut gpui::Window, _: &mut gpui::App) {}
+    pub fn opened(_: &mut gpui::Window, _: &mut gpui::App) {}
     pub fn take_pick() -> Option<Vec<std::path::PathBuf>> { None }
     pub fn file_drag() -> bool { false }
     pub fn rows_begin(_: &gpui::Window) {}
@@ -46,6 +44,7 @@ mod html;
 mod input;
 mod logging;
 mod modes;
+mod import_sources;
 mod onboarding;
 #[cfg(target_os = "macos")]
 mod native_header;
@@ -53,6 +52,7 @@ mod native_header;
 #[path = "native_header_fallback.rs"]
 mod native_header;
 mod mermaid;
+mod on_top;
 mod printing;
 mod search;
 mod siyuan;
@@ -91,6 +91,8 @@ mod theme;
 mod transfer;
 mod trash;
 mod tree;
+mod entries;
+mod tree_writes;
 mod ui;
 mod update;
 #[cfg(target_family = "wasm")]

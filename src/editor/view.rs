@@ -29,6 +29,8 @@ pub enum EditorEvent {
     /// A 子页面列表 item or an @文档 link was clicked.
     OpenDoc(String),
     OpenRelative(String),
+    /// An attachment Quiet.md edits itself (`local_files::opens_here`): in a window of its own.
+    OpenFile(std::path::PathBuf),
     /// A 反向引用 line: that document, scrolled to its nth block.
     OpenDocAt(String, usize),
     /// The reference list's close button.
@@ -45,6 +47,10 @@ pub enum EditorEvent {
     Leave,
     /// Esc while 版本历史 is open: back to the live document, then close.
     HistoryEscape,
+    /// A 数据表 made, trashed or restored a note for a 笔记 cell: the library's lists are read again.
+    LibraryChanged,
+    /// A note edited in a 数据表's record panel was saved: its row follows.
+    NoteSaved(Box<crate::table::NoteSaved>),
 }
 
 /// A child page shown by 子页面列表 blocks.
@@ -164,7 +170,7 @@ pub struct Editor {
     /// Slash / "+" menu list (keyboard selection is kept in view).
     pub slash_scroll: ScrollHandle,
     /// The slash menu's scrollbar: when the list last scrolled (or opened) and the offset then.
-    pub slash_bar: Cell<Option<(std::time::Instant, f32)>>,
+    pub slash_bar: std::rc::Rc<crate::design::ScrollBar>,
     /// Sideways scroll of each unwrapped code block, and its scrollbar.
     pub code_hscroll: RefCell<HashMap<BlockId, (ScrollHandle, Rc<super::scrollbar::Scrollbar>)>>,
     pub mention_scroll: ScrollHandle,
@@ -222,6 +228,7 @@ pub struct Editor {
     pub lang_field: Entity<TextField>,
     pub emoji_field: Entity<TextField>,
     pub emoji_scroll: ScrollHandle,
+    pub emoji_bar: std::rc::Rc<crate::design::ScrollBar>,
     /// The emoji search box was clicked or typed into (draws its focus ring).
     pub emoji_search_active: bool,
     pub(super) cover_ui: super::cover::CoverUi,
@@ -440,7 +447,7 @@ impl Editor {
             frame: Default::default(),
             code_rows: HashMap::new(),
             slash_scroll: ScrollHandle::new(),
-            slash_bar: Cell::new(None),
+            slash_bar: std::rc::Rc::new(crate::design::ScrollBar::rounded(crate::design::geo().menu_r)),
             code_hscroll: Default::default(),
             mention_scroll: ScrollHandle::new(),
             links: Default::default(),
@@ -479,6 +486,7 @@ impl Editor {
             lang_field,
             emoji_field,
             emoji_scroll: ScrollHandle::new(),
+            emoji_bar: std::rc::Rc::new(crate::design::ScrollBar::rounded(0.)),
             emoji_search_active: false,
             cover_ui: super::cover::CoverUi::new(),
             find: None,
@@ -598,6 +606,7 @@ impl Editor {
     pub fn receive_document(&mut self, core: &Core, cx: &mut Context<Self>) {
         let sel = self.core.sel;
         let generation = self.core.generation;
+        let board_at = self.open_board_at();
         self.core = core.clone();
         self.core.sel = sel;
         self.core.block_sel = None;
@@ -614,6 +623,7 @@ impl Editor {
         self.slash = None;
         self.cat_generation = None;
         self.ro_doc = self.read_only.then(|| self.core.doc.clone());
+        self.follow_open_board(board_at, cx);
         self.refresh_find(false, cx);
         cx.notify();
     }
@@ -765,7 +775,7 @@ impl Editor {
         let ranked: Vec<usize> =
             ranked.into_iter().filter(|i| menus::SLASH_ITEMS[*i].group != 0 || menus::basic_visible(menus::SLASH_ITEMS[*i].kind, grid, with_text))
                 .filter(|i| !self.markdown || menus::markdown_ok(menus::SLASH_ITEMS[*i].kind))
-                .filter(|i| crate::DATATABLE || menus::SLASH_ITEMS[*i].kind != SlashKind::DataTable).collect();
+                .collect();
         let mut groups: Vec<usize> = vec![];
         for i in &ranked {
             let g = menus::SLASH_ITEMS[*i].group;

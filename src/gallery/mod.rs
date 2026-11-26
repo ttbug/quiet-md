@@ -60,7 +60,7 @@ const PAGES: [(&str, &str, Page); 13] = [
     ("标签", "Badge、Kbd、KbdGroup、关联、人员", pages::badges),
     ("菜单", "Popover、MenuItem、MenuLabel、MenuSeparator；应用和数据表的菜单", pages::menus),
     ("对话框", "Dialog；数据表的新增 / 修改字段", pages::dialogs),
-    ("卡片", "Card、Item、Separator、Toast", pages::cards),
+    ("卡片", "Card、Item、Separator、Toast、ScrollArea", pages::cards),
     ("面板", "数据表的筛选、排序、字段配置、填色", pages::panels),
     ("工具栏", "视图工具栏、勾选操作条、表内搜索", pages::bars),
     ("表格", "表头、行、勾选、选区、填色、分组、添加记录、统计", pages::grid),
@@ -217,6 +217,7 @@ impl Element for Scheme {
 
 impl Render for Gallery {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::design::menu::set_viewport(window);
         // the inputs' colours follow the theme
         for e in self.inputs.all() { e.update(cx, |t, _| { t.color = color::foreground(); t.placeholder_color = color::placeholder(); }); }
         let dark = crate::theme::dark();

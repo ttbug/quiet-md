@@ -90,7 +90,7 @@ The `quiet` command line tool lets an AI agent (Claude Code, Codex, or any MCP c
 - **Local Codex**: use the sidebar button in the upper-right corner, choose a working directory, and chat using your installed, signed-in Codex CLI. Drag its left edge to resize; the width is remembered. Opening the sidebar from a document adds a removable reference; its latest text, including unsaved edits, is included when you send a message. Pick a model above the input or follow your local Codex configuration. Stream replies, approve or decline tool requests, stop a turn, or start a new chat. Folding keeps the conversation; restarting restores the directory and panel width, without restoring chat history.
 - **Version history**: every note keeps snapshots as it saves (20 by default, up to 30). Open one to see what changed in place, restore it in one click, or give it a name.
 - **Quick notes**: on macOS, a global shortcut (`⌥ Space` by default) opens a small note window over any app.
-- **Your look**: four built-in styles — Craft, Feishu, Notion and Obsidian — each with a dark variant, or your own CSS ([docs/THEMES.md](docs/THEMES.md)). Choose the interface and document fonts.
+- **Your look**: four built-in styles — Craft, Feishu, Notion and Obsidian — each with a dark look worked out from its colours, or your own CSS ([docs/THEMES.md](docs/THEMES.md)). Choose the interface and document fonts.
 - **Your keys**: press `⌘ /` to see every shortcut, and rebind any of them. On Windows and Linux, Ctrl stands in for ⌘ and Alt for ⌥.
 - **Your language**: English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Spanish, French, Arabic and Turkish. Arabic text joins its letters and runs right to left.
 - **Housekeeping**: Settings › Documents finds images and files no note uses any more and moves them out once you confirm.
@@ -178,5 +178,5 @@ The code is licensed under [MIT](LICENSE). Third-party code, fonts and assets ar
 
 The following are not covered by the MIT license and should be replaced in forks:
 
-- The 70 Nucleo icons in `assets/icons/` are under a commercial Nucleo license. Do not extract or redistribute them on their own.
+- The Nucleo icons in `assets/icons/` (69) and `assets/editor-icons/` (24) are under a commercial Nucleo license. Do not extract or redistribute them on their own.
 - The name "Quiet.md" and the app icon.

@@ -19,6 +19,15 @@ pub fn is_markdown_path(p: &std::path::Path) -> bool {
     p.extension().and_then(|e| e.to_str()).is_some_and(|e| MARKDOWN_EXTS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
+/// A file Quiet.md edits where it is, by the one list of what it opens
+/// (`shown::LIBRARY_FILES`): Markdown. `Store::open_local` keeps a 本机文件 as
+/// Markdown only: a DocxXML page's file is named by its title and its links and
+/// pictures are read from the library, a 数据表 is found by its place there, and a
+/// 画板 keeps its pictures there, so those are not opened in place.
+pub fn opens_here(p: &std::path::Path) -> bool {
+    p.file_name().and_then(|n| n.to_str()).and_then(fdl_core::shown::kind_of_name).is_some_and(|(kind, markdown)| kind.is_doc() && markdown)
+}
+
 /// Markdown files to open: the system open panel, or a scripted answer.
 fn pick(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<PathBuf>>> + use<> {
     let picked = crate::devtools::take_pick();
@@ -33,9 +42,10 @@ fn pick(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<PathBuf>>>
 }
 
 impl Workspace {
-    /// 本机文件 (single files and opened folders, not what is in them), last opened first.
+    /// 本机文件 (single files and opened folders, not what is in them), last opened first;
+    /// an attachment opened in its own window is its page's, not one of them.
     pub(crate) fn local_entries(&self) -> Vec<&Entry> {
-        let mut v: Vec<&Entry> = self.entries.iter().filter(|e| e.meta.local() && e.meta.parent.is_none()).collect();
+        let mut v: Vec<&Entry> = self.entries.iter().filter(|e| e.meta.local() && !e.meta.attachment() && e.meta.parent.is_none()).collect();
         v.sort_by(|a, b| b.meta.opened.cmp(&a.meta.opened).then_with(|| a.id.cmp(&b.id)));
         v
     }
@@ -65,11 +75,26 @@ impl Workspace {
                 Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法打开文件：{}", "Could not open file: {}", crate::settings::diagnostic(&e.to_string())), cx),
             }
         }
-        self.entries = self.store.list();
+        self.entries.set(self.store.list());
         self.sort();
         if let Some(id) = last {
             self.folded[2] = false;
             self.open(&id, window, cx);
+        }
+        cx.notify();
+    }
+
+    /// An attachment Quiet.md edits (`opens_here`): opened where it is like
+    /// 打开文件…, in a window of its own, or the window already showing it.
+    pub(crate) fn open_in_own_window(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        match self.store.open_local(path) {
+            Ok(id) => {
+                self.entries.set(self.store.list());
+                self.sort();
+                // This window is being updated: the others are looked through once it is done.
+                cx.defer(move |cx| crate::quick_note::show_document(id, cx));
+            }
+            Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法打开文件：{}", "Could not open file: {}", crate::settings::diagnostic(&e.to_string())), cx),
         }
         cx.notify();
     }
@@ -109,7 +134,7 @@ impl Workspace {
         }
         let id = existing.or_else(|| self.store.open_local(&path).ok());
         let Some(id) = id else { return };
-        self.entries = self.store.list();
+        self.entries.set(self.store.list());
         self.sort();
         if self.try_open(&id, window, cx) && !anchor.is_empty() && let Some(ed) = &self.editor {
             let key = anchor.to_lowercase();
@@ -139,7 +164,7 @@ impl Workspace {
         match self.store.create_markdown(&doc, &front) {
             Ok(new) => {
                 if let Some(src) = self.store.local_path(id) { self.keep_times(&new, &src); }
-                self.entries = self.store.list();
+                self.entries.set(self.store.list());
                 self.sort();
                 self.open(&new, window, cx);
                 self.show_toast_kind(ToastKind::Info, tr("已导入到文档库，原文件未改动", "Imported into the library; the original file is unchanged"), cx);
@@ -161,7 +186,7 @@ impl Workspace {
         let row = |id: &'static str, glyph: &'static str, label: &'static str| crate::design::MenuItem::new(id).icon(glyph).label(label);
         let pos = m.pos;
         let shown = crate::local_folders::show_in_files();
-        vec![deferred(anchored().anchor(m.corner).position(pos).snap_to_window_with_margin(px(8.)).child(crate::design::Popover::new("local-row-menu").menu().min_w(px(200.))
+        vec![deferred(anchored().anchor(m.corner).position(pos).snap_to_window_with_margin(px(8.)).child(crate::design::Popover::new("local-row-menu").menu().fit(crate::design::room(pos, m.corner)).min_w(px(200.))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.row_menu = None; cx.notify(); }))
             .child(row("lr-import", "folder-input", tr("导入到文档库", "Import into library")).on_click(cx.listener(move |w, _, window, cx| w.import_local(&import, window, cx))))
             .child(row("lr-rename", "square-pen", tr("重命名", "Rename")).on_click(cx.listener(move |w, _, window, cx| w.start_rename(&rename, window, cx))))
@@ -230,5 +255,13 @@ mod tests {
     fn programs_only_show() {
         for p in ["a/报告.pdf", "幻灯片.PPTX", "页.html", "表.xlsx"] { assert!(!super::runs_program(std::path::Path::new(p)), "{p}"); }
         for p in ["安装.pkg", "x.command", "run.SH", "a.app", "setup.exe", "无扩展名"] { assert!(super::runs_program(std::path::Path::new(p)), "{p}"); }
+    }
+
+    /// Only Markdown is edited where it is; the list is `shown::LIBRARY_FILES`.
+    #[test]
+    fn markdown_opens_here() {
+        for p in ["a/会议记录.md", ".assets/files/x/notes.MD", "b.markdown", "c.mdown"] { assert!(super::opens_here(std::path::Path::new(p)), "{p}"); }
+        for p in ["报告.pdf", "页.xml", "图.excalidraw", "表.sqlite", "幻灯片.pptx", "a.txt", ".md", "无扩展名"] { assert!(!super::opens_here(std::path::Path::new(p)), "{p}"); }
+        for (ext, _, markdown) in fdl_core::shown::LIBRARY_FILES { assert_eq!(super::opens_here(std::path::Path::new(&format!("x.{ext}"))), markdown, "{ext}"); }
     }
 }

@@ -375,7 +375,13 @@ pub fn cards(g: &mut Gallery, _w: &mut Window, cx: &mut Cx) -> Div {
     let toasts = div().flex().gap(px(8.))
         .child(Button::outline("toast-ok").label("成功").on_click(says(cx, "已复制为 Markdown")))
         .child(Button::outline("toast-err").label("出错").on_click(says(cx, "导入未能完成")));
-    let live = row().child(item("Card + Item（设置分组，开关能点）", card)).child(item("Toast（在面板底部提示）", toasts));
+    // ScrollArea: a menu capped by `Popover::fit` and a square box, each under the shared scrollbar
+    let long = (0..14usize).fold(Popover::new("sa-menu").menu().fit(200.).w(px(200.)), |d, i| d.child(MenuItem::new(("sa-item", i)).icon("doc").label(format!("第 {} 项", i + 1)).on_click(says(cx, "滚动菜单"))));
+    let boxed = { thread_local! { static H: ScrollHandle = ScrollHandle::new(); } let h = H.with(|h| h.clone());
+        div().id("sa-box").w(px(220.)).h(px(160.)).border_1().border_color(color::border()).overflow_y_scroll().track_scroll(&h).p(px(12.)).flex().flex_col().gap(px(8.))
+            .children((0..16usize).map(|i| t(&format!("第 {} 行正文", i + 1)))).child(crate::design::scroll::bar("gallery-sa-box", &h, 0.)) };
+    let live = row().child(item("Card + Item（设置分组，开关能点）", card)).child(item("Toast（在面板底部提示）", toasts))
+        .child(item("ScrollArea · 菜单限高（悬停、滚动显示，可拖）", long)).child(item("ScrollArea · 方框", boxed));
     let still = row()
         .child(item("Separator · 横 / 竖", div().w(px(200.)).flex().flex_col().gap(px(12.)).child(t("上")).child(Separator::new()).child(div().h(px(20.)).flex().gap(px(12.)).child(t("左")).child(Separator::new().vertical()).child(t("右")))))
         .child(item("Toast · 成功 / 出错 / 提示", div().flex().flex_col().gap(px(8.)).child(Toast::new(ToastTone::Success, "已复制为 Markdown"))

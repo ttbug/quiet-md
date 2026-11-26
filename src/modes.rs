@@ -113,7 +113,7 @@ impl Workspace {
         if !self.save_before(cx, move |w, window, cx| w.set_mode(reading, window, cx)) {
             return;
         }
-        if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
+        if let Some(e) = self.entries.edit().iter_mut().find(|e| e.id == id) {
             e.meta.reading = reading;
         }
         let _ = self.store.update_meta(&id, |m| m.reading = reading);
@@ -126,7 +126,7 @@ impl Workspace {
 
     pub fn set_info_row(&mut self, info: crate::store::InfoRow) {
         let Some(id) = self.current.clone() else { return };
-        if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
+        if let Some(e) = self.entries.edit().iter_mut().find(|e| e.id == id) {
             e.meta.info = info;
         }
         let _ = self.store.update_meta(&id, |m| m.info = info);
@@ -158,7 +158,7 @@ impl Workspace {
             .child(item("mode-edit", "pen-line", crate::settings::text("编辑"), crate::settings::text("可编辑文档"), !reading, false))
             .child(item("mode-read", "eye-open", crate::settings::text("阅读"), crate::settings::text("仅查看或评论文档"), reading, true));
         let (pos, corner) = crate::design::hang(at, crate::design::Align::Start, None);
-        Some(deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(crate::design::menu::EDGE)).child(menu)).with_priority(2).into_any_element())
+        Some(deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(crate::design::menu::EDGE)).child(menu.fit(crate::design::room(pos, corner)))).with_priority(2).into_any_element())
     }
 
     /// The 快捷键 drawer to the right of the page, below the top bar: shadcn's `Sheet` (side

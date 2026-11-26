@@ -31,14 +31,39 @@ pub enum Align { Start, End }
 /// Where the menu of the button measured at `b` goes, as GPUI Kit's `Popup` and shadcn's DropdownMenu
 /// place it: `SIDE_OFFSET` under the button, lined up by `align`; the point, and the corner of the menu
 /// `anchored` puts on it. Only the button's bounds count, never the pointer, so a click anywhere on the
-/// button opens the menu in one place and the menu never covers it. With `flip` (the menu's height and
-/// the window's), a menu that would pass the bottom margin sits as far above the button instead.
-pub fn hang(b: Bounds<Pixels>, align: Align, flip: Option<(f32, Pixels)>) -> (Point<Pixels>, Anchor) {
+/// button opens the menu in one place and the menu never covers it. Below unless it doesn't fit there:
+/// a menu `menu_h` tall goes above when it fits there, else to the side with more room; without its
+/// height, above only when below is short (under 160) and above is longer. Whichever side, `room` caps
+/// the menu to what is there and `Popover::fit` scrolls the rest.
+pub fn hang(b: Bounds<Pixels>, align: Align, menu_h: Option<f32>) -> (Point<Pixels>, Anchor) {
+    let vh = viewport();
     let x = if align == Align::Start { b.left() } else { b.right() };
-    let up = flip.is_some_and(|(h, vh)| f32::from(b.bottom()) + SIDE_OFFSET + h > f32::from(vh) - EDGE && f32::from(b.top()) - SIDE_OFFSET - h >= EDGE);
+    let below = f32::from(vh - b.bottom()) - SIDE_OFFSET - EDGE;
+    let above = f32::from(b.top()) - SIDE_OFFSET - EDGE;
+    let up = match menu_h { Some(h) => h > below && (h <= above || above > below), None => below < 160. && above > below };
     let corner = match (up, align) { (false, Align::Start) => Anchor::TopLeft, (false, Align::End) => Anchor::TopRight, (true, Align::Start) => Anchor::BottomLeft, (true, Align::End) => Anchor::BottomRight };
     (point(x, if up { b.top() - px(SIDE_OFFSET) } else { b.bottom() + px(SIDE_OFFSET) }), corner)
 }
+
+/// The most a menu `anchored` at `pos` by `corner` may be tall in the window, `EDGE` short of
+/// the window's edge (for `Popover::fit`).
+pub fn room(pos: Point<Pixels>, corner: Anchor) -> f32 {
+    let vh = viewport();
+    match corner {
+        Anchor::BottomLeft | Anchor::BottomRight | Anchor::BottomCenter => f32::from(pos.y) - EDGE,
+        _ => f32::from(vh - pos.y) - EDGE,
+    }.max(ROW_H_MIN)
+}
+thread_local! {
+    /// The window's height, as last laid out (`set_viewport`): `hang` and `room` are asked where no
+    /// window is at hand (a click handler, a state change).
+    static VIEWPORT: Cell<f32> = const { Cell::new(f32::MAX) };
+}
+/// Notes the window's height for `hang` and `room`: the window's root calls it as it renders.
+pub fn set_viewport(window: &Window) { VIEWPORT.with(|v| v.set(f32::from(window.viewport_size().height))); }
+fn viewport() -> Pixels { px(VIEWPORT.with(|v| v.get())) }
+/// A capped menu still shows a row or two.
+const ROW_H_MIN: f32 = 64.;
 
 pub const PAD: f32 = G.menu_pad;
 /// A row's height.
@@ -57,25 +82,47 @@ pub const MIN_W: f32 = 128.;
 /// It has an opaque ground, which the shadow-drawn edge needs. `menu()` makes it a column of rows
 /// (`DropdownMenuContent`: p-1, at least 128 wide).
 #[derive(IntoElement)]
-pub struct Popover { id: ElementId, base: Stateful<Div>, menu: bool, padded: bool }
+pub struct Popover { id: ElementId, base: Stateful<Div>, menu: bool, padded: bool, fit: Option<f32>, handle: Option<ScrollHandle>, inset: Option<f32> }
 element!(Popover, parent);
 
 impl Popover {
-    pub fn new(id: impl Into<ElementId>) -> Self { let id = id.into(); Popover { base: div().id(id.clone()), id, menu: false, padded: false } }
+    pub fn new(id: impl Into<ElementId>) -> Self { let id = id.into(); Popover { base: div().id(id.clone()), id, menu: false, padded: false, fit: None, handle: None, inset: None } }
     /// A column of menu rows, `PAD` above and below them (rows keep `PAD` from the sides), `min-w-32`.
     pub fn menu(mut self) -> Self { self.menu = true; self }
     /// A popover holding a form: padded 16 (p-4), a column with 16 between its fields (gap-4).
     pub fn padded(mut self) -> Self { self.padded = true; self }
+    /// At most `max_h` tall (`room`), the rest scrolling under the shared scrollbar (`scroll::ScrollBar`).
+    pub fn fit(mut self, max_h: f32) -> Self { self.fit = Some(max_h); self }
+    /// `fit` with the caller's handle, for a caller that needs how far it scrolled (a submenu levelled
+    /// with its row).
+    pub fn scroll(mut self, handle: &ScrollHandle) -> Self { self.handle = Some(handle.clone()); self }
+    /// How far in from the right edge a `fit` popover's content keeps of itself, for the room it
+    /// makes the scrollbar (`scroll::ScrollBar::room`): a padded one's padding, else a row's `PAD`.
+    pub fn inset(mut self, inset: f32) -> Self { self.inset = Some(inset); self }
 }
 
 impl RenderOnce for Popover {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let (g, menu, padded) = (geo(), self.menu, self.padded);
-        let d = under(self.base, |d| {
+        set_viewport(window);
+        let fit = self.fit.map(|h| {
+            let id = self.id.clone();
+            let st = window.use_keyed_state((self.id.clone(), "fit"), cx, move |_, _| (ScrollHandle::new(), Rc::new(super::scroll::ScrollBar::rounded(g.menu_r).remembered(&id))));
+            let (own, bar) = st.read(cx).clone();
+            (h, (self.handle.clone().unwrap_or(own), bar))
+        });
+        let inset = self.inset.unwrap_or(if padded { g.popover_pad } else { PAD });
+        // the scrollbar's lane goes on the outside: a width the caller set grows by it, the content keeps its own
+        let room = fit.as_ref().map_or(0., |(_, (_, bar))| bar.room(inset));
+        let mut base = self.base;
+        let own_right = super::scroll::widen(base.style(), room);
+        let d = under(base, |d| {
             d.occlude().bg(color::popover()).rounded(px(g.menu_r)).shadow(shadow::popover()).font_family(crate::theme::ui_family())
                 .text_size(px(g.text)).line_height(px(super::text::SM_LINE)).text_color(color::foreground())
                 .when(menu, |d| d.min_w(px(MIN_W)).py(px(PAD)).flex().flex_col())
                 .when(padded, |d| d.p(px(g.popover_pad)).flex().flex_col().gap(px(g.popover_gap)))
+                .when(own_right, |d| d.pr(px(if padded { g.popover_pad } else { 0. } + room)))
+                .when_some(fit, |d, (h, (handle, bar))| d.max_h(px(h)).overflow_y_scroll().track_scroll(&handle).child(bar.render(&handle)))
         });
         MenuScope { id: self.id, child: d.into_any_element() }
     }
@@ -130,7 +177,7 @@ fn scope() -> Option<Shared> { SCOPE.with(|s| s.borrow().clone()) }
 struct MenuScope { id: ElementId, child: AnyElement }
 impl Element for MenuScope {
     type RequestLayoutState = ();
-    type PrepaintState = ();
+    type PrepaintState = bool;
     fn id(&self) -> Option<ElementId> { Some(self.id.clone()) }
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> { None }
     fn request_layout(&mut self, id: Option<&GlobalElementId>, _: Option<&InspectorElementId>, window: &mut Window, cx: &mut App) -> (LayoutId, ()) {
@@ -143,12 +190,14 @@ impl Element for MenuScope {
         DEPTH.with(|d| d.set(d.get() - 1));
         (l, ())
     }
-    fn prepaint(&mut self, id: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), window: &mut Window, cx: &mut App) {
+    /// Whether a scrollbar inside found its room a frame behind (`scroll::unsettled`): this frame isn't painted.
+    fn prepaint(&mut self, id: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), window: &mut Window, cx: &mut App) -> bool {
         let rows = window.with_element_state(id.unwrap(), |s: Option<Shared>, _| { let s = s.unwrap_or_default(); (s.clone(), s) });
         rows.borrow_mut().now.clear();
-        in_scope(rows, || self.child.prepaint(window, cx));
+        super::scroll::unsettled(|| { in_scope(rows, || self.child.prepaint(window, cx)); })
     }
-    fn paint(&mut self, id: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), _: &mut (), window: &mut Window, cx: &mut App) {
+    fn paint(&mut self, id: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), unsettled: &mut bool, window: &mut Window, cx: &mut App) {
+        if *unsettled { return; }
         let rows = window.with_element_state(id.unwrap(), |s: Option<Shared>, _| { let s = s.unwrap_or_default(); (s.clone(), s) });
         {
             let r = &mut *rows.borrow_mut();
@@ -205,6 +254,7 @@ pub struct MenuItem {
     extra: Vec<AnyElement>,
     shortcut: Option<SharedString>,
     checked: Option<bool>,
+    switch: Option<bool>,
     submenu: bool,
     inset: bool,
     selected: bool,
@@ -219,7 +269,7 @@ impl ParentElement for MenuItem {
 
 impl MenuItem {
     pub fn new(id: impl Into<ElementId>) -> Self {
-        MenuItem { base: div().id(id), icon: None, editor_icon: false, leading: None, label: None, description: None, extra: vec![], shortcut: None, checked: None,
+        MenuItem { base: div().id(id), icon: None, editor_icon: false, leading: None, label: None, description: None, extra: vec![], shortcut: None, checked: None, switch: None,
             submenu: false, inset: false, selected: false, open: false, destructive: false, disabled: false }
     }
     pub fn label(mut self, s: impl Into<SharedString>) -> Self { self.label = Some(s.into()); self }
@@ -235,6 +285,10 @@ impl MenuItem {
     pub fn shortcut(mut self, s: impl Into<SharedString>) -> Self { self.shortcut = Some(s.into()); self }
     /// One of a set of choices: a check at the end when on; when off, its room kept.
     pub fn checked(mut self, on: bool) -> Self { self.checked = Some(on); self }
+    /// A setting the row turns on and off: a `Switch` at the end, sliding when it flips. A switch row
+    /// keeps its menu open (Radix's CheckboxItem with `onSelect` prevented): its click toggles and
+    /// nothing else, so callers must not close the menu from it; Esc and a click outside still do.
+    pub fn switch(mut self, on: bool) -> Self { self.switch = Some(on); self }
     /// Opens a submenu: a chevron at the end.
     pub fn submenu(mut self, on: bool) -> Self { self.submenu = on; self }
     /// Keeps a glyph's room before the label though there is none (`data-inset`).
@@ -260,7 +314,8 @@ impl RenderOnce for MenuItem {
         let caption = if lit && !danger { fg } else { color::muted_foreground() };
         let fill = if danger { color::destructive_soft() } else { color::accent() };
         let two_lines = self.description.is_some();
-        let MenuItem { base, icon: ic, editor_icon, leading, label: lab, description, extra, shortcut, checked, submenu, inset, .. } = self;
+        let MenuItem { base, icon: ic, editor_icon, leading, label: lab, description, extra, shortcut, checked, switch, submenu, inset, .. } = self;
+        let key = id.clone();
         let probe = lab.clone().and_then(crate::devtools::row_probe);
         under(base, |d| {
             d.relative().children(probe).flex_none().when(!two_lines, |d| d.h(px(g.menu_row_h))).when(two_lines, |d| d.min_h(px(g.menu_row_h)).py(px(6.)))
@@ -284,6 +339,7 @@ impl RenderOnce for MenuItem {
                 .when_some(shortcut, |d, s| d.child(shortcut_text(s, caption)))
                 .when_some(checked, |d, on| d.child(div().flex_none().w(px(16.)).flex().justify_center().when(on, |d| d.child(icon("check", 16., fg)))))
                 .when(submenu, |d| d.child(icon("chevron-right", 16., fg)))
+                .when_some(switch, |d, on| d.child(match key { Some(k) => super::Switch::new(on).keyed(k), None => super::Switch::new(on) }))
         })
     }
 }

@@ -37,6 +37,7 @@ const _: () = assert!(row_sub_top(0.) == 168.5);
 /// (6 above its 28pt label).
 pub(crate) const SB_X: f32 = 14.;
 pub(crate) const ROW_H: f32 = 30.;
+
 const DOC_ROW_H: f32 = ROW_H;
 pub(crate) const ROW_R: f32 = 9.;
 pub(crate) const ROW_GAP: f32 = crate::design::G.sidebar_gap;
@@ -44,6 +45,8 @@ pub(crate) const ROW_ICON: f32 = 18.;
 pub(crate) const GROUP_GAP: f32 = 16.;
 pub(crate) const SECTION_H: f32 = 34.;
 pub(crate) const SECTION_TOP: f32 = 6.;
+/// 我的文档's heading is a row like 主页's: a `ROW_H` wash, `ROW_GAP` above the first row.
+pub(crate) const LIBRARY_H: f32 = SECTION_TOP + ROW_H + ROW_GAP;
 
 /// 批量操作 caps at 50 pages.
 pub(crate) const BATCH_LIMIT: usize = 50;
@@ -122,7 +125,7 @@ impl Workspace {
             .child(div().flex_1())
             .children(crate::settings::update_pill(cx));
 
-        // The nav: 主页, then 添加文件夹 (another folder beside the default one, as
+        // The nav: 主页, then 打开文件夹 (another folder beside the default one, as
         // 文件 › 打开文件夹… does). 36px items, a tint when selected. Their icon
         // column (x 17) is shared with 搜索 and the doc rows.
         let home_on = self.view == View::Home;
@@ -144,11 +147,11 @@ impl Workspace {
             .child(label)
             .relative().children(crate::devtools::row_probe(label));
         let nav = div().flex_none().pt(px(4.)).pb(px(4.)).px(px(SB_X)).flex().flex_col().gap(px(ROW_GAP))
-            .child(item("nav-home", "home", crate::settings::tr("主页", "Home"), home_on).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx))))
-            .child(item("nav-add-folder", "folder-plus", crate::settings::tr("添加文件夹", "Add a folder"), false)
-                .tip(crate::settings::tr("添加文件夹", "Add a folder"), Some(crate::shortcuts::hint("workspace::OpenFolder", "⌘ + Shift + O")))
-                .on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx))));
+            .child(item("nav-home", "home", crate::settings::tr("主页", "Home"), home_on).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx))));
 
+        // 置顶 and 我的文档's heading stand still above the list, as 我的文档's own header (the
+        // maintainer, 2026-11-25): the rows scroll under it, and so does the scrollbar's track.
+        let mut fixed = div().flex_none().flex().flex_col().px(px(SB_X));
         let mut list = div().flex().flex_col().px(px(SB_X)).pb(px(8.));
         // Pinned docs are shortcuts: they stay in 我的文档 too.
         // 置顶 follows the same order as the lists below it. Only the pinned are
@@ -157,22 +160,22 @@ impl Workspace {
         let mut pinned: Vec<&Entry> = self.entries.iter().filter(|e| e.meta.pinned).collect();
         pinned.sort_by(|a, b| order.cmp(a, b));
         if !pinned.is_empty() {
-            list = list.child(self.section(0, crate::settings::text("置顶"), cx));
+            fixed = fixed.child(self.section(0, crate::settings::text("置顶"), cx));
             if !self.folded[0] {
                 for e in pinned {
-                    list = list.child(self.doc_row(e, "pinned", 0, false, cx));
+                    fixed = fixed.child(self.doc_row(e, "pinned", 0, false, cx));
                 }
             }
-            list = list.child(div().h(px(GROUP_GAP - SECTION_TOP)));
+            fixed = fixed.child(div().h(px(GROUP_GAP - SECTION_TOP)));
         }
         // 主页: one top-level folder shows its contents under 我的文档; several show as rows
         // of the tree there; none, a way to open one.
-        let tops = self.store.top_folders();
+        let tops = self.store.shown_tops();
         if tops.is_empty() {
             list = list.child(self.empty_home(cx));
         } else {
             // One top-level folder or several, the heading is 我的文档 (#421); it never folds.
-            list = list.child(self.section(1, crate::settings::text("我的文档"), cx));
+            fixed = fixed.child(self.section(1, crate::settings::text("我的文档"), cx));
             list = list.child(self.render_folder_rows(window, cx));
         }
         // The first listing still running: grey rows in place of the tree, fading out over it once it is here.
@@ -235,7 +238,8 @@ impl Workspace {
             .flex_col()
             .child(header)
             .child(nav)
-            .child(self.sidebar_drop_zone(div().id("doc-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.list_scroll).child(list), cx))
+            .child(fixed)
+            .child(self.sidebar_drop_zone(div().id("doc-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.list_scroll).child(list).child(crate::design::scroll::bar("doc-list", &self.list_scroll, 0.)), cx))
             .children(crate::changelog::card(cx.listener(|_, _, _, cx| cx.notify())))
             .child(footer)
             .into_any_element()
@@ -326,7 +330,7 @@ impl Workspace {
         let folded = self.folded[idx];
         let trigger = |id: &'static str, name: &'static str| Button::ghost(id).sized(ButtonSize::Xs).on_wash().icon(name);
         let create_open = matches!(self.create_menu, Some((None, _)));
-        let row = div().h(px(SECTION_H)).pl(px(4.)).pt(px(SECTION_TOP)).flex().items_center().group(group.clone());
+        let row = div().h(px(if idx == 1 { LIBRARY_H } else { SECTION_H })).pl(px(4.)).pt(px(SECTION_TOP)).flex().items_center().group(group.clone());
         if let (1, Some(sel)) = (idx, self.batch.as_ref()) {
             let n = sel.len();
             let all = n > 0 && n >= self.entries.len().min(BATCH_LIMIT);
@@ -368,8 +372,8 @@ impl Workspace {
         // 批量操作 and "+" keep their clicks to themselves. Its wash stops `ROW_GAP` above the
         // first row, as rows do.
         if idx == 1 {
-            return div().h(px(SECTION_H)).pt(px(SECTION_TOP)).flex().child(
-                div().id("section-library").flex_1().h(px(SECTION_H - SECTION_TOP - ROW_GAP)).pl(px(8.)).flex().items_center().rounded(px(ROW_R)).cursor_pointer()
+            return div().h(px(LIBRARY_H)).pt(px(SECTION_TOP)).flex().child(
+                div().id("section-library").flex_1().h(px(ROW_H)).pl(px(8.)).flex().items_center().rounded(px(ROW_R)).cursor_pointer()
                     .relative().children(crate::devtools::row_probe(title.clone()))
                     .hover(|s| s.bg(Theme::sidebar_hover())).when(self.sidebar_drop_top(), |d| d.bg(Theme::sidebar_selected()))
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.))
@@ -385,7 +389,7 @@ impl Workspace {
                     .child(trigger("section-add", "plus").ml(px(2.)).mr(px(4.)).child(self.home.track("create-sidebar")).selected(create_open).tip(crate::settings::tr("新建", "New"), None)
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(|w, _: &ClickEvent, _, cx| { cx.stop_propagation(); let Some(b) = w.home.anchor("create-sidebar") else { return }; let pos = crate::design::hang(b, crate::design::Align::Start, None).0; w.create_menu = if w.create_menu.is_some() { None } else { Some((None, pos)) }; cx.notify(); })))
-                    .on_click(cx.listener(|w, _, _, cx| { w.home.tab = crate::home::HomeTab::Recent; w.home.sort_menu = false; w.show_view(View::Home, cx); })),
+                    .on_click(cx.listener(|w, _, _, cx| { w.home.tab = crate::home::HomeTab::Recent; w.show_view(View::Home, cx); })),
             );
         }
         row.child(
@@ -445,7 +449,7 @@ impl Workspace {
         for id in &ids {
             self.copy_doc(id, cx);
         }
-        self.entries = self.store.list();
+        self.entries.set(self.store.list());
         self.sort();
         self.batch = None;
         self.row_menu = None;
@@ -537,7 +541,7 @@ impl Workspace {
             .child(canvas(move |b, _, _| record.borrow_mut().insert(slot.clone(), b), |_, _, _, _| {}).absolute().inset_0())
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |w, _: &MouseDownEvent, window, cx| {
+                cx.listener(move |w, _: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
                     // The row menu's outside-click handler has already closed it on this press, so
                     // a press on its own button closes it rather than reopening it (see `open`).
@@ -545,7 +549,7 @@ impl Workspace {
                     // Hung from the measured button, never the pointer; above it when there's no room below.
                     let Some(b) = lookup.borrow().get(&slot2).copied() else { return };
                     let menu_h = row_menu_height(ROW_ITEMS + usize::from(w.takes_children(&id)), ROW_DIVIDERS);
-                    let (pos, corner) = crate::design::hang(b, crate::design::Align::Start, Some((menu_h, window.viewport_size().height)));
+                    let (pos, corner) = crate::design::hang(b, crate::design::Align::Start, Some(menu_h));
                     w.row_menu = Some(RowMenu { id: id.clone(), pos, corner, sub: false, batch: false, from: Some(from.clone()) });
                     cx.notify();
                 }),
@@ -688,7 +692,7 @@ impl Workspace {
                     _ if folder => {
                         let s = if key == "doc" { self.folder_drag.pop(&e.id) } else { 1. };
                         d.child(div().absolute().inset_0().flex().items_center().justify_center().opacity(1. - chevron)
-                            .child(icon(if drop_target { "folder-input" } else if open { "folder-open" } else { "folder" }, ROW_ICON, Theme::icon())
+                            .child(icon(if drop_target { "folder-input" } else { "folder" }, ROW_ICON, Theme::icon())
                                 .with_transformation(Transformation::scale(size(s, s)))))
                         .when(chevron > 0.005, |d| d.child(div().absolute().inset_0().flex().items_center().justify_center().opacity(chevron)
                             .child(icon("disclosure", ROW_ICON, Theme::icon())
@@ -722,7 +726,7 @@ impl Workspace {
             .when(!renaming && key != "doc" && batch.is_none(), |d| d.child(self.more_button(e, key, cx)))
     }
 
-    pub(crate) fn render_row_menu(&self, _window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(crate) fn render_row_menu(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(m) = self.row_menu.clone() else { return vec![] };
         if let Some(key) = crate::shared_store::top_of_row(&m.id).map(str::to_string) { return self.top_row_menu(&key, m, cx); }
         if !m.batch && self.entries.iter().any(|e| e.id == m.id && e.meta.folder.is_some() && e.note.is_none()) { return self.folder_row_menu(m, cx); }
@@ -749,7 +753,7 @@ impl Workspace {
                 .child(item("bm-move", "folder-input", crate::settings::text("移动到")).on_click(cx.listener(|w, _, window, cx| w.batch_move(window, cx))))
                 .child(item("bm-delete", "bin", crate::settings::text("删除")).on_click(cx.listener(|w, _, _, cx| w.ask_batch_delete(cx))));
             return vec![
-                deferred(anchored().anchor(m.corner).position(m.pos).snap_to_window_with_margin(px(8.)).child(menu))
+                deferred(anchored().anchor(m.corner).position(m.pos).snap_to_window_with_margin(px(8.)).child(menu.fit(crate::design::room(m.pos, m.corner))))
                     .with_priority(2)
                     .into_any_element(),
             ];
@@ -777,7 +781,9 @@ impl Workspace {
         let menu = Popover::new("row-menu")
             .menu()
             .min_w(px(ROW_MENU_W))
-            .child(canvas(move |b, _, _| menu_w_record.set(Some(f32::from(b.size.width))), |_, _, _, _| {}).absolute().inset_0())
+            // a line across the middle, not the whole box: the scrolling menu counts its children's extent as
+            // its content, and one as tall as the box, plus the padding, made a menu that fits scroll by 8
+            .child(canvas(move |b, _, _| menu_w_record.set(Some(f32::from(b.size.width))), |_, _, _, _| {}).absolute().left_0().right_0().top(relative(0.5)).h_0())
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 if sub_bounds.get().is_none_or(|b| !b.contains(&ev.position)) {
                     w.row_menu = None;
@@ -849,17 +855,19 @@ impl Workspace {
             );
         let extra = usize::from(child);
         let menu_h = row_menu_height(ROW_ITEMS + extra, ROW_DIVIDERS);
-        // From the "…" button: hang 2px below it, or sit 2px above it when
-        // there's no room below. From a right-click: at the pointer.
         // From the "…" button: where `design::hang` put it (under the button, or above when there's no
         // room below). From a right-click: at the pointer.
         let (origin, corner) = (m.pos, m.corner);
+        // capped to the room there (`room`), scrolled under the shared scrollbar: the submenu levels
+        // with 下载 where it is now
+        let room = crate::design::room(origin, corner);
+        let scrolled = window.use_keyed_state("row-menu-scroll", cx, |_, _| ScrollHandle::new()).read(cx).clone();
         let menu_top = match corner {
-            Anchor::BottomLeft | Anchor::BottomRight => f32::from(origin.y) - menu_h,
+            Anchor::BottomLeft | Anchor::BottomRight => f32::from(origin.y) - menu_h.min(room),
             _ => f32::from(origin.y),
-        };
+        } + f32::from(scrolled.offset().y);
         let mut out = vec![
-            deferred(anchored().anchor(corner).position(origin).snap_to_window_with_margin(px(8.)).child(menu))
+            deferred(anchored().anchor(corner).position(origin).snap_to_window_with_margin(px(8.)).child(menu.fit(room).scroll(&scrolled)))
                 .with_priority(2)
                 .into_any_element(),
         ];

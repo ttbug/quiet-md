@@ -538,11 +538,13 @@ impl Editor {
                 }),
             );
 
+        let btn_scroll = crate::design::scroll::handle("btn-panel-content");
         let content = div()
             .id("btn-panel-content")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&btn_scroll)
             .pt(px(12.))
             .px(px(12.))
             .child(item(false).child(label(crate::settings::text("按钮文字"))).child(input("btn-text", &self.btn.text, p.text_err.is_some())).children(p.text_err.map(error)))
@@ -550,7 +552,8 @@ impl Editor {
             .child(item(!link).child(label(crate::settings::text("执行操作"))).child(select))
             .when(link, |d| {
                 d.child(item(true).child(label(crate::settings::text("超链接地址"))).child(input("btn-url", &self.btn.url, p.link_err)).when(p.link_err, |d| d.child(error(crate::settings::text("超链接不合法，请重新输入")))))
-            });
+            })
+            .child(crate::design::scroll::bar("btn-panel-content", &btn_scroll, 0.));
         let footer = div()
             .flex_none()
             .pt(px(16.))
