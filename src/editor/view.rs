@@ -47,6 +47,8 @@ pub enum EditorEvent {
     Leave,
     /// Esc while 版本历史 is open: back to the live document, then close.
     HistoryEscape,
+    /// Esc in 专注模式 with nothing else to cancel: leave it.
+    FocusEscape,
     /// A 数据表 made, trashed or restored a note for a 笔记 cell: the library's lists are read again.
     LibraryChanged,
     /// A note edited in a 数据表's record panel was saved: its row follows.
@@ -213,10 +215,18 @@ pub struct Editor {
     pub menu_hovered: bool,
     /// Toolbar suppressed after typing / Esc until the selection changes.
     pub toolbar_hidden: bool,
+    /// The window is in 专注模式: Esc with nothing else to cancel leaves it (`EditorEvent::FocusEscape`).
+    pub focus_mode: bool,
     /// Typing hides the mouse pointer until it moves, as browsers do, so the
     /// I-beam left where the user clicked doesn't sit on top of the new text.
     pub pointer_hidden: bool,
     pub autoscroll: bool,
+    /// 打字机模式's glide toward the middle (丰富 motion): when the last step
+    /// ran, where the page stood before it and for how many frames it hasn't
+    /// moved (`apply_reveal`).
+    pub(super) glide: Option<(web_time::Instant, Pixels, u8)>,
+    /// The space below the last block this frame (`below_height`).
+    pub(super) below_h: f32,
     /// Last applied (text color, background) from the color panel.
     pub last_color: (Option<ColorName>, Option<ColorName>),
     pub last_lang: String,
@@ -474,8 +484,11 @@ impl Editor {
             menu: None,
             menu_hovered: false,
             toolbar_hidden: false,
+            focus_mode: false,
             pointer_hidden: false,
             autoscroll: false,
+            glide: None,
+            below_h: 200.,
             last_color: (None, Some(ColorName("light-yellow".into()))),
             last_lang: "Plain Text".into(),
             link_field,
@@ -663,6 +676,23 @@ impl Editor {
         }
         self.restart_blink(window, cx);
         cx.notify();
+    }
+
+    /// 打字机模式 was switched: the page pads its end for it, and turning it on
+    /// brings the caret's line to the middle at once.
+    pub fn typewriter_changed(&mut self, cx: &mut Context<Self>) {
+        self.glide = None;
+        self.items_key = None;
+        if crate::settings::typewriter() && self.reveal.is_none() { self.autoscroll = true; }
+        cx.notify();
+    }
+
+    /// The wheel takes over from a glide under way: the page stays where the
+    /// user scrolled it until the caret moves again.
+    pub(super) fn wheel_stops_glide(&mut self) {
+        if self.glide.take().is_some() && matches!(self.reveal, Some((super::render::Reveal::Caret, _))) {
+            self.reveal = None;
+        }
     }
 
     /// 重命名 from the sidebar: swap the title text as one undoable edit,
@@ -1950,6 +1980,9 @@ impl Editor {
             self.menu = None;
         } else if self.find.is_some() {
             return self.close_find(window, cx);
+        } else if self.focus_mode && self.core.cell_sel.is_none() && !self.core.in_block_mode() && (self.read_only || self.core.sel.is_collapsed()) {
+            // 专注模式: the first Esc leaves it instead of selecting the block
+            return cx.emit(EditorEvent::FocusEscape);
         } else if self.read_only {
             // Nothing to select blocks for.
             self.core.sel = Selection::caret(self.core.sel.head);

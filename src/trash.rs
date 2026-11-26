@@ -12,7 +12,7 @@ use crate::theme::{self, Theme};
 use crate::ui::{ROW_RADIUS, TipExt, TitleBarExt, icon, ui_text};
 use gpui::{prelude::FluentBuilder, *};
 
-pub const TRASH_MENU_W: f32 = 160.;
+pub const TRASH_MENU_W: f32 = crate::design::menu_w::SM;
 
 struct ListedTrash { lists: Vec<(String, Vec<TrashEntry>)>, warnings: Vec<String> }
 struct PurgedTrash { errors: Vec<String> }
@@ -215,7 +215,7 @@ impl Workspace {
             .menu()
             // At least TRASH_MENU_W, wider when a label needs it (English
             // "Delete permanently" ran into the edge).
-            .min_w(px(TRASH_MENU_W))
+            .w(px(TRASH_MENU_W))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| {
                 w.trash_menu = None;
                 cx.notify();

@@ -219,7 +219,7 @@ fn field_menu(v: &TableView, t: &Table, view: &View, fid: FieldId, pos: Point<Pi
         v.open_popup(pos, Popup::FieldForm(form), cx);
     };
     let sort = move |v: &mut TableView, desc: bool, window: &mut Window, cx: &mut Context<TableView>| { v.edit_view(cx, |view| view.opts.sorts = vec![SortBy { field: fid, desc }]); close(v, window, cx); };
-    shell("tb-field-menu", 228., v.popup_room(), cx)
+    shell("tb-field-menu", crate::design::menu_w::SM, v.popup_room(), cx)
         .child(menu_item("tb-fm-edit", "pen-line", label("修改字段/列"), false).on_click(cx.listener(move |v, _, window, cx| { v.popup = None; edit_field(v, fid, pos, window, cx); })))
         .child(menu_item("tb-fm-dup", "copy", label("复制字段/列"), false).on_click(cx.listener(move |v, _, window, cx| { v.edit(cx, |d| d.duplicate_field(tid, fid)); close(v, window, cx); })))
         .child(menu_rule())
@@ -259,7 +259,7 @@ fn cell_menu(v: &TableView, t: &Table, view: &View, rec: RecId, cx: &Context<Tab
         if let (Some(id), Some(f)) = (ids.first(), first) { v.sel = Some(Sel { anchor: (*id, f), head: (*id, f) }); }
         v.close_popup(window, cx);
     };
-    shell("tb-cell-menu", 216., v.popup_room(), cx)
+    shell("tb-cell-menu", crate::design::menu_w::SM, v.popup_room(), cx)
         .when(manual, |d| d
             .child(menu_item("tb-cm-up", "plus", label("向上插入 1 行"), false).on_click(cx.listener(move |v, _, window, cx| insert(v, false, window, cx))))
             .child(menu_item("tb-cm-down", "plus", label("向下插入 1 行"), false).on_click(cx.listener(move |v, _, window, cx| insert(v, true, window, cx))))
@@ -283,7 +283,7 @@ fn cell_menu(v: &TableView, t: &Table, view: &View, rec: RecId, cx: &Context<Tab
 }
 
 fn more_menu(v: &TableView, cx: &Context<TableView>) -> AnyElement {
-    shell("tb-more-menu", 220., v.popup_room(), cx)
+    shell("tb-more-menu", crate::design::menu_w::SM, v.popup_room(), cx)
         .child(menu_item("tb-mm-export", "export", label("导出为 CSV"), false).on_click(cx.listener(|v, _, window, cx| { v.close_popup(window, cx); keys::export_csv(v, window, cx); })))
         .child(menu_item("tb-mm-md", "copy", label("复制为 Markdown 表格"), false).on_click(cx.listener(|v, _, window, cx| { keys::copy(v, true, cx); v.close_popup(window, cx); })))
         .into_any_element()

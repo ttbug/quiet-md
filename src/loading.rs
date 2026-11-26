@@ -2,12 +2,12 @@
 //! 2 s for 15,000 notes without the parse cache), so it runs off the main
 //! thread and hands everything back at once. The window waits up to `WAIT`
 //! for it before its first frame, so a small or already-read library opens
-//! as it always did; past that, sidebar and 主页 hold still until
+//! as it always did; past that, sidebar and the page hold still until
 //! `SHOW_AFTER`, then skeleton rows and the onboarding's drifting light
 //! show with how far it got, and fade out over what was found.
 //!
 //! One hand-back, not batches: rows coming in batches would reorder the
-//! tree, 置顶 and 主页 under the pointer as each batch lands, and every batch
+//! tree, 置顶 and the page under the pointer as each batch lands, and every batch
 //! costs the main thread the full sort and shape hash of the list again.
 //!
 //! Meanwhile search, 新建 and the imports say the library is still loading
@@ -31,7 +31,7 @@ const FADE_IN: Duration = Duration::from_millis(220);
 const FADE_OUT: Duration = Duration::from_millis(420);
 
 /// What the loading layer looks like at a moment. The layer is a cover in
-/// the page's colour (so the empty 主页 under it never shows) with the
+/// the page's colour (so the empty page under it never shows) with the
 /// skeleton and light on it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Phase {
@@ -81,7 +81,7 @@ impl Load {
     pub fn phase(&self) -> Phase { Phase::at(self.started, self.done, self.fading, Instant::now()) }
     /// (documents gone through, of how many; 0 until the folders are scanned).
     pub fn counts(&self) -> (usize, usize) { (self.progress.done.load(Ordering::Relaxed), self.progress.total.load(Ordering::Relaxed)) }
-    /// How opaque the layer over 主页 is: over a folder being added, nothing at first
+    /// How opaque the layer over the page is: over a folder being added, nothing at first
     /// and then only as far as it faded in.
     pub fn cover(&self) -> f32 {
         let p = self.phase();
@@ -125,7 +125,7 @@ pub fn begin(store: &mut crate::shared_store::SharedStore, cx: &mut App) -> Opti
 }
 
 /// Top-level folder `key`, just added (打开文件夹…), listed the same way: here when
-/// quick enough, else in the background with the layer over 主页 once it takes a while.
+/// quick enough, else in the background with the layer over the page once it takes a while.
 #[cfg(not(target_family = "wasm"))]
 pub fn begin_added(store: &mut crate::shared_store::SharedStore, key: &str, cx: &mut App) -> Option<Vec<Entry>> {
     start(store, vec![key.to_string()], true, cx)
@@ -216,7 +216,7 @@ pub fn progress_line(done: usize, total: usize) -> String {
     else { crate::localized_format!("正在载入 {} / {} 篇", "Loading {} of {} notes", grouped(done.min(total)), grouped(total)) }
 }
 
-/// What 主页 shows meanwhile: the onboarding's drifting light, the spinner,
+/// What the page shows meanwhile: the onboarding's drifting light, the spinner,
 /// how far it got and a thin bar of it.
 pub fn note_layer(phase: Phase, cover: f32, t: f32, (done, total): (usize, usize)) -> Stateful<Div> {
     let bar = (total > 0).then(|| {

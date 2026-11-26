@@ -139,7 +139,7 @@ const CARD_H: f32 = 40.;
 /// The 更多 button's left edge in the card.
 const CARD_MORE_X: f32 = CARD_W - 8. - 24.;
 /// The 更多 menus: native-style, 200 wide.
-const SUBMENU_W: f32 = 200.;
+const SUBMENU_W: f32 = crate::design::menu_w::SM;
 
 #[derive(Default)]
 pub struct LinkUi {
@@ -463,7 +463,7 @@ impl Editor {
                 .absolute()
                 .left(px(CARD_MORE_X - 9.))
                 .top(px(8. + 24. + 2.))
-                .min_w(px(SUBMENU_W))
+                .w(px(SUBMENU_W))
                 .on_hover(cx.listener(|e, h: &bool, _, cx| e.card_over(2, *h, cx)))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(menu_item("lc-copy", "globe", crate::settings::text("复制原始网页链接")).on_click(cx.listener(move |e, _, _, cx| {
@@ -556,7 +556,7 @@ impl Editor {
     pub(super) fn tb_more_menu(&self, cx: &mut Context<Self>) -> Popover {
         Popover::new("tb-more-menu")
             .menu()
-            .min_w(px(SUBMENU_W))
+            .w(px(SUBMENU_W))
             .on_hover(cx.listener(|e, h: &bool, _, cx| e.tb_drop_over(Menu::TbMore, 1, *h, cx)))
             .child(menu_item("tm-search", "search", crate::settings::text("文档库内搜索")).on_click(cx.listener(|e, _, _, cx| {
                 e.menu = None;

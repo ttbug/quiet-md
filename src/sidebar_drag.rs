@@ -13,7 +13,9 @@ const PITCH: f32 = crate::sidebar::ROW_H + crate::sidebar::ROW_GAP;
 /// 动画 › 丰富. Otherwise rows appear and go in the same frame. Lifting and
 /// dropping an open folder keep their drawers either way.
 fn animate_folding() -> bool { crate::settings::motion_high() }
-const INDENT: f32 = 18.;
+/// Where a row at tree depth `depth` is drawn: a top-level folder is a group heading at the left
+/// edge, and what it holds starts there too (no indent for the heading's level).
+fn vx(depth: usize) -> f32 { depth.saturating_sub(1) as f32 * crate::sidebar::INDENT }
 
 /// A row of the tree; its entry is shared with the cached rows (`RowCache`).
 #[derive(Clone)]
@@ -273,7 +275,8 @@ impl Workspace {
         let rows = self.drag_rows();
         let Some(d) = self.folder_drag.active.as_mut().filter(|d| d.started) else { return };
         let y = f32::from(d.at.y - d.offset.y - bounds.top()) + crate::sidebar::ROW_H / 2.;
-        let desired = (d.initial_depth as i32 + (f32::from(d.at.x - d.start.x) / INDENT).round() as i32).max(0) as usize;
+        // never out to the top-level folders' own level: what is moved stays inside one
+        let desired = (d.initial_depth as i32 + (f32::from(d.at.x - d.start.x) / crate::sidebar::INDENT).round() as i32).max(1) as usize;
         // Hit the visible folder row with the pointer, including collapsed folders.
         // Accept immediately; the dwell timer only controls automatic expansion.
         let pointer_y = f32::from(d.at.y - bounds.top());
@@ -281,7 +284,7 @@ impl Workspace {
             let top = self.folder_drag.springs.get(&r.entry.id).map_or(
                 (*i + usize::from(*i >= d.index)) as f32 * PITCH, |s| s.p[1]);
             takes_drop(&r.entry) && pointer_y > top + 5. && pointer_y < top + 26.
-                && f32::from(d.at.x - bounds.left()) >= r.depth as f32 * INDENT
+                && f32::from(d.at.x - bounds.left()) >= vx(r.depth)
         });
         if let Some((i, r)) = folder {
             if d.hover.as_ref().is_none_or(|(id, _)| *id != r.entry.id) {
@@ -364,7 +367,7 @@ impl Workspace {
         let mut spring = d.ghost;
         if let Some(b) = bounds { spring.p[0] -= f32::from(b.left()); spring.p[1] -= f32::from(b.top()); }
         spring.p[0] -= 3. * lift; spring.p[1] -= lift; spring.p[2] += 6. * lift;
-        spring.target = [depth as f32 * INDENT, index as f32 * PITCH, spring.p[2]];
+        spring.target = [vx(depth), index as f32 * PITCH, spring.p[2]];
         self.folder_drag.springs.insert(movement.id.clone(), spring);
         let fx = self.folder_drag.fx.entry(movement.id.clone()).or_insert_with(RowFx::new);
         fx.show = SHOW;
@@ -384,11 +387,11 @@ impl Workspace {
             self.queue_tree_write(TreeWrite::Move(movement), cx);
             self.sync_sub_pages(cx);
         }
-        if reorder { self.show_toast_kind(crate::ui::ToastKind::Info, crate::settings::tr("自动排序时不能拖动调整顺序，可在主页改为手动排序", "Pages are sorted automatically. Switch to Manual order on Home to rearrange them."), cx); }
+        if reorder { self.show_toast_kind(crate::ui::ToastKind::Info, crate::settings::tr("自动排序时不能拖动调整顺序，可在文件夹页的「显示」里改为手动排序", "Pages are sorted automatically. Switch to Manual order in a folder's View menu to rearrange them."), cx); }
         cx.notify();
     }
 
-    /// Put `id` last in `folder` (a drop on 主页's folder card), saved like a sidebar drop.
+    /// Put `id` last in `folder` (a drop on a folder card), saved like a sidebar drop.
     pub(crate) fn move_into_folder(&mut self, id: &str, folder: &str, cx: &mut Context<Self>) {
         let mut movement = PendingMove { id: id.to_string(), parent: Some(folder.to_string()), before: None, history: 0, joined: false };
         let file_before = self.entries.to_vec();
@@ -441,7 +444,7 @@ impl Workspace {
         let index: FxHashMap<&str, usize> = rows.iter().enumerate().map(|(i, r)| (r.entry.id.as_str(), i)).collect();
         let targets: Vec<[f32; 3]> = rows.iter().enumerate().map(|(i, r)| {
             let y = (i + usize::from(slot.is_some_and(|(index, _)| i >= index))) as f32 * PITCH;
-            let x = r.depth as f32 * INDENT;
+            let x = vx(r.depth);
             let inset = if receiving.zip(receiving_end).is_some_and(|(start, end)| i >= start && i < end) { 8. } else { 0. };
             [x, y, width - x - inset]
         }).collect();
@@ -589,7 +592,7 @@ impl Workspace {
                 moving = true;
                 let edge = (top, top + d.h.max(0.));
                 for (n, r) in d.rows.iter().enumerate() {
-                    let x = r.depth as f32 * INDENT;
+                    let x = vx(r.depth);
                     let local = ((d.h - n as f32 * PITCH) / (PITCH * 0.7)).clamp(0., 1.);
                     closing.push((r.clone(), [x, top + n as f32 * PITCH, width - x], edge, local * local * (3. - 2. * local)));
                 }
@@ -615,7 +618,7 @@ impl Workspace {
             } else {
                 let fi = fi.unwrap_or(0);
                 for (n, r) in d.rows.iter().enumerate() {
-                    let x = r.depth as f32 * INDENT;
+                    let x = vx(r.depth);
                     let local = ((d.h - n as f32 * PITCH) / (PITCH * 0.7)).clamp(0., 1.);
                     closing.push((r.clone(), [x, top + n as f32 * PITCH, width - x], edge, local * local * (3. - 2. * local)));
                 }
@@ -631,7 +634,7 @@ impl Workspace {
             let top = drawn[start][1];
             let mut bottom = (start..end).map(|i| drawn[i][1] + crate::sidebar::ROW_H).fold(top, f32::max);
             if let Some((index, _)) = slot && index > start && index <= end { bottom = bottom.max(index as f32 * PITCH + crate::sidebar::ROW_H); }
-            let x = rows[start].depth as f32 * INDENT;
+            let x = vx(rows[start].depth);
             [x - 3., top - 3., width - x + 3., bottom - top + 6.]
         });
         match (zone, &mut fd.zone) {
@@ -646,7 +649,7 @@ impl Workspace {
             if !m && a.to == 0. { fd.zone = None; }
         }
         // The slot the row will land in.
-        let slot_target = slot.map(|(index, depth)| [depth as f32 * INDENT, index as f32 * PITCH, width - depth as f32 * INDENT - if receiving.is_some() { 8. } else { 0. }]);
+        let slot_target = slot.map(|(index, depth)| [vx(depth), index as f32 * PITCH, width - vx(depth) - if receiving.is_some() { 8. } else { 0. }]);
         match (slot_target, &mut fd.slot) {
             (Some(t), Some((s, a))) => { if a.p < 0.02 { *s = Spring::new(t); } s.target = t; a.to = 1.; }
             (Some(t), None) => fd.slot = Some((Spring::new(t), QUICK.from(0., 1.))),

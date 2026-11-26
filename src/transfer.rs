@@ -1,5 +1,5 @@
 //! 导入 / 导出: 下载为 → PDF / Markdown (with the 导出 Markdown 设置
-//! dialog), 打印, and 导入为文档 (主页's 上传, the app menu): local Markdown
+//! dialog), 打印, and 导入为文档 (the app menu): local Markdown
 //! or DocxXML files picked straight away. The Word / PDF settings and
 //! 打印选项 only choose what happens to comments, so they are left out.
 
@@ -9,8 +9,8 @@ use crate::settings::display_title;
 use crate::model::{Block, BlockKind, Document, RichText};
 use crate::printing::{self, Job};
 use crate::design::{Button, Dialog, scrim};
-use crate::ui::{TipExt, ToastKind};
-use gpui::{prelude::FluentBuilder, *};
+use crate::ui::ToastKind;
+use gpui::*;
 use std::path::{Path, PathBuf};
 
 /// The open 导出 Markdown 设置 dialog: the page, and 所有内容 picked.
@@ -589,7 +589,7 @@ impl Workspace {
         }).detach();
     }
 
-    /// The header's 导入 menu (主页, a folder's page): what it imports goes
+    /// 导入 (a folder's "+", the app menu): what it imports goes
     /// into the folder shown, or the top of 我的文档.
     pub(crate) fn open_import_kind(&mut self, kind: ImportKind, parent: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         self.open_import_kind_asking(kind, parent, true, window, cx)
@@ -697,10 +697,10 @@ impl Workspace {
         use crate::design::MenuItem;
         vec![
             MenuItem::new("vault-in-place").icon("folder").label(crate::settings::tr("原位打开（推荐）", "Open where it is (recommended)"))
-                .description(crate::settings::tr("继续和 Obsidian 共用这个库，两边改的是同一份文件", "Keep sharing the vault with Obsidian: both edit the same files"))
+                .description(crate::settings::tr("和 Obsidian 共用同一份文件", "Shared with Obsidian"))
                 .ml(px(24.)).on_click(cx.listener(|w, _, window, cx| w.choose_vault(true, window, cx))).into_any_element(),
             MenuItem::new("vault-copy").icon("copy").label(crate::settings::tr("导入一份副本", "Import a copy"))
-                .description(crate::localized_format!("复制到「{}」，之后和 Obsidian 互不影响", "Copied into “{}”; from then on the two are apart", place))
+                .description(crate::localized_format!("复制到「{}」", "Copies into “{}”", place))
                 .ml(px(24.)).on_click(cx.listener(|w, _, window, cx| w.choose_vault(false, window, cx))).into_any_element(),
         ]
     }
@@ -766,8 +766,8 @@ impl Workspace {
         };
         let mut out = vec![
             // The two that read like 打开: the line under each says it copies.
-            item("import-md", "doc-md", crate::settings::tr("导入 Markdown 文件…", "Import Markdown Files…"), ImportKind::Markdown).description(crate::settings::tr("复制到这里，原文件不变", "Copied here; the originals stay as they are")),
-            item("import-folder", "folder", crate::settings::tr("导入文件夹…", "Import Folder…"), ImportKind::Folder).description(crate::settings::tr("复制到这里，原文件夹不变", "Copied here; the folder stays as it is")),
+            item("import-md", "doc-md", crate::settings::tr("导入 Markdown 文件…", "Import Markdown Files…"), ImportKind::Markdown).description(crate::settings::tr("复制到这里", "Copies here")),
+            item("import-folder", "folder", crate::settings::tr("导入文件夹…", "Import Folder…"), ImportKind::Folder).description(crate::settings::tr("复制到这里", "Copies here")),
             {
                 let parent = parent.clone();
                 crate::design::MenuItem::new("import-apps").icon("import").label(crate::settings::tr("从其他应用导入…", "Import from Another App…"))
@@ -777,42 +777,6 @@ impl Workspace {
         ];
         out.push(item("import-csv", "datatable", crate::settings::tr("从 CSV 新建数据表…", "New Data Table from CSV…"), ImportKind::Csv));
         out
-    }
-
-    /// 主页's "…": the ways in from this computer besides 打开文件夹 (its "+") — each used where it is,
-    /// nothing copied — and where 导入 is.
-    pub(crate) fn render_place_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let pos = self.place_menu?;
-        let item = |id: &'static str, glyph: &'static str, label: &'static str| crate::design::MenuItem::new(id).icon(glyph).label(label);
-        Some(deferred(anchored().anchor(Anchor::TopRight).position(pos).snap_to_window_with_margin(px(8.)).child(
-            crate::design::Popover::new("place-items").menu().fit(crate::design::room(pos, Anchor::TopRight)).min_w(px(240.))
-                .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.place_menu = None; cx.notify(); }))
-                // a single file opened where it is; 从其他应用导入 copies, so it is a folder's (its "+"),
-                // not 主页's: a vault opened in place is just 打开文件夹
-                .child(item("home-open-file", "doc-md", crate::settings::tr("打开 Markdown 文件…", "Open Markdown File…"))
-                    .description(crate::settings::tr("单独打开，在原位置编辑", "Opened on its own, edited where it is"))
-                    .on_click(cx.listener(|w, _, window, cx| { w.place_menu = None; w.open_file_dialog(window, cx) })))
-                // 主页 holds no files of its own, so nothing is copied into it: say where 导入 is
-                .child(crate::design::MenuSeparator::new())
-                .child(div().px(px(12.)).py(px(6.)).max_w(px(260.)).text_size(px(12.)).line_height(px(17.)).text_color(crate::design::color::muted_foreground())
-                    .child(crate::settings::tr("要把文件复制进来，请进入某个文件夹，用它的「+」导入。", "To copy files in, open a folder and import from its “+”."))),
-        )).with_priority(3).into_any_element())
-    }
-
-    /// 主页's header "…"; its menu hangs below it, right-aligned.
-    pub(crate) fn place_button(&self, id: &'static str, cx: &mut Context<Self>) -> crate::design::Button {
-        let open = self.place_menu.is_some();
-        crate::ui::header_icon(id, "ellipsis")
-            .selected(open)
-            .when(!open, |d| d.tip(crate::settings::tr("更多", "More"), None))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .relative().child(self.home.track(id))
-            .on_click(cx.listener(move |w, _: &ClickEvent, _, cx| {
-                // hung from the measured button, never the pointer; not yet measured: not yet
-                let Some(b) = w.home.anchor(id) else { return };
-                w.place_menu = if w.place_menu.is_some() { None } else { Some(crate::design::hang(b, crate::design::Align::End, None).0) };
-                cx.notify();
-            }))
     }
 
     /// 导入文件夹: pick a folder; it lands at the top of 我的文档 as a folder,

@@ -1,4 +1,4 @@
-//! 主页 and a folder's page: the one-row header (`topbar`, home_topbar.rs), then one level of the
+//! A folder's page: the one-row header (`topbar`, folder_header.rs), then one level of the
 //! tree as cards or a list, in the order 显示 picks. Dressed as 所有文档: a hairline list with quiet
 //! hover fills, white cards and pills, native menus.
 
@@ -7,8 +7,8 @@ use crate::app::{RowMenu, Workspace};
 mod bs;
 #[path = "home_text.rs"]
 mod text_preview;
-#[path = "home_topbar.rs"]
-pub(crate) mod topbar;
+#[path = "folder_header.rs"]
+pub(crate) mod header;
 use crate::settings::display_title;
 use crate::model::BlockKind;
 use crate::search::doc_icon;
@@ -23,20 +23,12 @@ use std::cell::RefCell;
 use std::collections::{HashMap};
 use std::rc::Rc;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum HomeTab {
-    #[default]
-    Recent,
-    Starred,
-}
-
 /// The optional list columns (标题 is always shown).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Col {
     Modified,
     Created,
     Visited,
-    Starred,
 }
 
 impl Col {
@@ -45,23 +37,20 @@ impl Col {
             Col::Modified => "修改时间",
             Col::Created => "创建时间",
             Col::Visited => "最近访问",
-            Col::Starred => "收藏时间",
         }
     }
-    /// The order this column sorts by (收藏时间 is not an order).
+    /// The order this column sorts by.
     fn sort(self) -> Option<HomeSort> {
         match self {
             Col::Modified => Some(HomeSort::Modified),
             Col::Created => Some(HomeSort::Created),
             Col::Visited => Some(HomeSort::Visited),
-            Col::Starred => None,
         }
     }
 }
 
-/// 最近访问's columns (no 所有者); 显示设置 toggles them.
-const RECENT_COLS: [Col; 3] = [Col::Modified, Col::Created, Col::Visited];
-const STARRED_COLS: [Col; 4] = [Col::Modified, Col::Created, Col::Visited, Col::Starred];
+/// The list's columns beside 标题.
+const COLS: [Col; 3] = [Col::Modified, Col::Created, Col::Visited];
 
 /// Bounded document trees retain formatting without retaining a whole long document.
 type EquationNumbers = HashMap<crate::model::BlockId, u32>;
@@ -374,11 +363,7 @@ impl HomeSort {
 }
 
 pub struct Home {
-    pub tab: HomeTab,
     pub grid: bool,
-    grid_scroll: UniformListScrollHandle,
-    list_scroll: ScrollHandle,
-    /// A folder's page has its own scroll positions, so 主页 keeps its place.
     folder_grid_scroll: UniformListScrollHandle,
     folder_list_scroll: ScrollHandle,
     grid_scrollbar: Rc<crate::design::ScrollBar>,
@@ -409,10 +394,7 @@ struct Level { key: u64, parent: Option<String>, order: Order, entries: Rc<Vec<E
 impl Default for Home {
     fn default() -> Self {
         Home {
-            tab: HomeTab::Recent,
             grid: true,
-            grid_scroll: Default::default(),
-            list_scroll: Default::default(),
             folder_grid_scroll: Default::default(),
             folder_list_scroll: Default::default(),
             // both run down to the window's bottom corner
@@ -461,11 +443,6 @@ impl Home {
         .inset_0()
     }
 
-    /// The list's columns: the library's (`library`: the top level is listed) or 收藏's.
-    fn cols(&self, library: bool) -> Vec<Col> {
-        if library { RECENT_COLS.to_vec() } else { STARRED_COLS.to_vec() }
-    }
-
     /// The column drawn as sorted; 标题 and 手动排序 mark their own header.
     fn sort_col(&self) -> Option<Col> {
         match self.sort {
@@ -484,14 +461,14 @@ fn sort_glyph(dir: SortDir, size: f32) -> Svg {
     if dir == SortDir::Asc { g.with_transformation(Transformation::rotate(radians(std::f32::consts::PI))) } else { g }
 }
 
-/// Sort 主页 and a folder's page. 手动排序 is the sidebar's order; the
+/// Sort a folder's page. 手动排序 is the sidebar's order; the
 /// automatic ones never write it, and fall back to it (then the id) for equal
 /// values, so equal pages keep the order the user arranged by hand.
 pub(crate) fn sort_entries(v: &mut [Entry], order: Order) {
     v.sort_by(|a, b| order.cmp(a, b));
 }
 
-/// How pages are ordered, as one value: 主页's setting, used there and by the
+/// How pages are ordered, as one value: the folder pages' setting, used there and by the
 /// sidebar's tree so both lists always agree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Order {
@@ -532,7 +509,6 @@ fn cell_text(e: &Entry, c: Col) -> String {
         Col::Modified => crate::ui::format_visit(e.meta.modified),
         Col::Created => crate::ui::format_visit(e.meta.created),
         Col::Visited => crate::ui::format_visit(visited(e)),
-        Col::Starred => crate::ui::format_visit(e.meta.starred),
     }
 }
 
@@ -570,15 +546,7 @@ impl Workspace {
         Some(checkbox(if on { Check::On } else { Check::Off }, !on && sel.len() >= BATCH_LIMIT))
     }
 
-    pub(crate) fn home_entries(&self) -> Rc<Vec<Entry>> {
-        match self.home.tab {
-            // 我的文档 is the library's top level.
-            HomeTab::Recent => self.level_entries(None),
-            HomeTab::Starred => Rc::new(self.sorted_entries(self.entries.iter().filter(|e| e.meta.folder.is_none() && e.meta.starred > 0).cloned().collect())),
-        }
-    }
-
-    /// One level of the tree as 主页 shows it (a folder's page uses it too).
+    /// One level of the tree as a folder's page shows it.
     /// Cards show no body, links or reminders: the entries come without them (`tree::face`).
     pub(crate) fn level_entries(&self, parent: Option<&str>) -> Rc<Vec<Entry>> {
         let (key, order) = (self.entries.generation(), self.home.order());
@@ -604,9 +572,7 @@ impl Workspace {
         true
     }
 
-    pub(crate) fn manual_home_sort(&self) -> bool { self.home.sort == HomeSort::Manual && self.lists_library() }
-    /// 主页 shows its 我的文档 tab: the top level under 主页, every top-level folder a card.
-    pub(crate) fn lists_library(&self) -> bool { self.home.tab == HomeTab::Recent }
+    pub(crate) fn manual_home_sort(&self) -> bool { self.home.sort == HomeSort::Manual }
 
     /// A list header: clicking it sorts by that column; clicking the sorted
     /// one flips the direction. Headers without an order are not clickable.
@@ -644,9 +610,7 @@ impl Workspace {
             self.home.sort_dir = field.default_dir();
         }
         self.save_home();
-        self.home.grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
         self.home.folder_grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
-        self.home.list_scroll.set_offset(point(px(0.), px(0.)));
         self.home.folder_list_scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
     }
@@ -765,8 +729,8 @@ impl Workspace {
         self.home.folder_list_scroll.set_offset(point(px(0.), px(0.)));
     }
 
-    /// 主页's view and sort order are remembered (`settings.json`).
-    /// Whether 主页 lists by hand (手动排序) under these settings, as `load_home` reads them.
+    /// The folder pages' view and sort order are remembered (`settings.json`).
+    /// Whether folder pages list by hand (手动排序) under these settings, as `load_home` reads them.
     pub(crate) fn sorts_by_hand(s: &crate::store::Settings) -> bool { s.home_sort.as_deref().map(HomeSort::of).unwrap_or(HomeSort::Manual) == HomeSort::Manual }
 
     pub(crate) fn load_home(&mut self) {
@@ -785,26 +749,18 @@ impl Workspace {
         (s.home_list, s.home_sort) = (!self.home.grid, Some(self.home.sort.key().to_string()));
         s.home_sort_dir = Some(self.home.sort_dir.key().to_string());
         self.store.set_place_by_hand(self.home.sort == HomeSort::Manual);
-        if let Err(e) = self.store.save_settings(&s) { eprintln!("无法保存主页视图：{e}"); }
+        if let Err(e) = self.store.save_settings(&s) { eprintln!("无法保存文件夹视图：{e}"); }
     }
 
-    /// 主页: the one-row header (`topbar`), then the top level in the view chosen.
-    pub(crate) fn render_home(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let header = self.topbar(None, window, cx);
-        // No top-level folder open (2.8): nothing to list or sort, a way to open one.
-        if self.store.shown_tops().is_empty() {
-            return div().flex_1().min_w_0().h_full().flex().flex_col().child(header).child(self.empty_main(cx)).into_any_element();
-        }
-        let entries = self.home_entries();
-        let body = if entries.is_empty() {
-            empty_state("illus/empty-list.svg", crate::settings::text("当前列表暂无内容")).into_any_element()
-        } else if self.home.grid { self.render_home_grid(&entries, false, window, cx) } else { self.render_home_list(&entries, false, cx) };
-        div().flex_1().min_w_0().h_full().flex().flex_col().child(header).child(div().h(px(8.)).flex_none()).child(body).into_any_element()
+    /// No folder open (2.8): nothing to list or sort, a way to open one.
+    pub(crate) fn render_empty(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let header = crate::trash::page_header_with(self, div(), 18., cx);
+        div().flex_1().min_w_0().h_full().flex().flex_col().child(header).child(self.empty_main(cx)).into_any_element()
     }
 
-    pub(crate) fn render_home_list(&self, entries: &[Entry], in_folder: bool, cx: &mut Context<Self>) -> AnyElement {
-        let list_scroll = if in_folder { &self.home.folder_list_scroll } else { &self.home.list_scroll };
-        let cols = self.home.cols(self.lists_library());
+    pub(crate) fn render_home_list(&self, entries: &[Entry], cx: &mut Context<Self>) -> AnyElement {
+        let list_scroll = &self.home.folder_list_scroll;
+        let cols = COLS.to_vec();
         let sort = self.home.sort_col();
         // The title is sized at about three times a column.
         let title_cell = || div().flex_grow_1().flex_shrink_1().flex_basis(relative(0.)).min_w(px(200.));
@@ -886,8 +842,8 @@ impl Workspace {
             .child(div().relative().flex_1().min_h_0().flex().flex_col().child(rows).child(self.home.list_scrollbar.render(list_scroll))).into_any_element()
     }
 
-    pub(crate) fn render_home_grid(&self, entries: &Rc<Vec<Entry>>, in_folder: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let grid_scroll = if in_folder { &self.home.folder_grid_scroll } else { &self.home.grid_scroll };
+    pub(crate) fn render_home_grid(&self, entries: &Rc<Vec<Entry>>, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let grid_scroll = &self.home.folder_grid_scroll;
         let main_w = f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. };
         let avail = (main_w - 48.).max(1.);
         let entries = entries.clone();
@@ -1026,7 +982,7 @@ impl Workspace {
     /// native menu row.
     pub(crate) fn render_home_menus(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut out = vec![];
-        if !matches!(self.view, crate::app::View::Home | crate::app::View::Folder) {
+        if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) {
             return out;
         }
         let place = |pos: Point<Pixels>, corner: Anchor, menu: Popover| {

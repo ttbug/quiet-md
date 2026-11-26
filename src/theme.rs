@@ -326,7 +326,7 @@ pub fn shadow_card() -> Vec<BoxShadow> {
     vec![shadow(0.04, 1., 2., 0.), shadow(0.06, 4., 14., 0.)]
 }
 
-/// 主页's document cards: the folder card's shadow (`home_folder`), fainter,
+/// A folder page's document cards: the folder card's shadow (`home_folder`), fainter,
 /// cast from the same inset box so the two line up along the bottom.
 pub fn shadow_sheet() -> Vec<BoxShadow> {
     vec![shadow(0.035, 8., 22., -2.)]
@@ -392,7 +392,7 @@ impl Theme {
     pub fn bg_overlay() -> Hsla { c(craft::N100) }
     pub fn line_divider() -> Hsla { ca(craft::N1000, 0.06) }
     pub fn line_border() -> Hsla { ca(craft::N1000, 0.08) }
-    /// The 0.5pt edge of a 主页 document card, and the ring around it under the pointer.
+    /// The 0.5pt edge of a folder page's document card, and the ring around it under the pointer.
     pub fn line_sheet() -> Hsla { ca(craft::N1000, 0.14) }
     pub fn ring_sheet() -> Hsla { ca(craft::N1000, 0.07) }
     pub fn fill_hover() -> Hsla { ca(craft::N1000, 0.045) }

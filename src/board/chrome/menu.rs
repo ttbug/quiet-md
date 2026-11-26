@@ -14,7 +14,7 @@ use crate::design::{self, MenuItem, MenuSeparator, Popover};
 
 /// `DropdownMenuContent`: the app's menu (`design::Popover`).
 pub(crate) fn dropdown(id: impl Into<ElementId>) -> Popover {
-    eat(Popover::new(id).menu().max_w(px(320.)))
+    eat(Popover::new(id).menu().w(px(crate::design::menu_w::SM)))
 }
 
 /// `DropdownMenuItem`: a menu row with the upstream icon and the shortcut at
@@ -39,7 +39,7 @@ pub(crate) fn main_menu(me: &BoardView, window: &mut Window, cx: &mut Context<Bo
     let mut col = div().absolute().top(px(style::TOP_PADDING)).left(px(style::PADDING)).child(trigger);
     if open {
         let run = |a: BoardAction| cx.listener(move |me: &mut BoardView, _: &ClickEvent, window, cx| { set_pop(None, cx); me.run(a.clone(), window, cx) });
-        let menu = dropdown("board-main-menu-list").min_w(px(232.)).max_w(px(320.))
+        let menu = dropdown("board-main-menu-list").w(px(crate::design::menu_w::MD))
             .on_mouse_down_out(cx.listener(|_, _, _, cx| if pop(cx) == Some(Pop::MainMenu) { set_pop(None, cx) }))
             .child(dropdown_item("board-mm-help", Some("help"), tr("帮助", "Help"), Some("?".into()), false).on_click(run(BoardAction::ShowHelp)))
             // (upstream shows it on an empty canvas too)

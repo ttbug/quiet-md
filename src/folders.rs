@@ -121,16 +121,6 @@ impl Workspace {
         else { None }
     }
 
-    /// The first top-level folder's page, shown as the window first opens (after 开始使用).
-    pub(crate) fn show_first_folder(&mut self, cx: &mut Context<Self>) {
-        let Some(key) = self.store.shown_tops().first().map(|r| r.0.clone()) else { return };
-        let row = crate::shared_store::top_row(&key);
-        self.folder_current = Some(row.clone());
-        self.view = View::Folder;
-        self.expanded.insert(row);
-        cx.notify();
-    }
-
     pub(crate) fn open_folder(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         // A folder with a 正文 has no page of its own: it is that document (#357).
         if let Some(note) = self.entries.iter().find(|e| e.id == id).and_then(|e| e.note.clone()) { return self.try_open(&note, window, cx); }
@@ -143,7 +133,6 @@ impl Workspace {
         self.schedule_view_state(cx);
         if self.manual_home_sort() { self.prepare_manual_order(cx); }
         // 只看收藏 belongs to the page it was turned on in.
-        if self.folder_current.as_deref() != Some(id) { self.home.tab = crate::home::HomeTab::Recent; }
         self.folder_current = Some(id.to_string());
         self.view = View::Folder;
         self.row_menu = None;
@@ -181,22 +170,26 @@ impl Workspace {
         // A header "+" sits at the right edge, so its menu hangs by its right edge.
         let header_new = ["create-folder", "create-home"].iter().any(|k| self.home.anchor(k).is_some_and(|b| crate::design::hang(b, crate::design::Align::End, None).0 == pos));
         let corner = if header_new { Anchor::TopRight } else { Anchor::TopLeft };
-        // 主页's "+" (its header's and 我的文档's): 主页 holds no files, so it only opens — 打开文件夹,
-        // a folder hung under 主页 and used where it is. Making and importing happen in a folder.
+        // 我的文档's "+": it holds no files, so it only opens — 打开文件夹, a folder used where it is,
+        // or a single file. Making and importing happen in a folder.
         if parent.is_none() {
             return Some(deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(
-                crate::design::Popover::new("create-items").menu().fit(crate::design::room(pos, corner)).min_w(px(240.))
+                crate::design::Popover::new("create-items").menu().fit(crate::design::room(pos, corner)).w(px(crate::design::menu_w::MD))
                     .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.create_menu = None; cx.notify(); }))
                     .child(crate::design::MenuItem::new("create-open-folder").icon("folder-plus").label(tr("打开文件夹…", "Open Folder…"))
-                        .description(tr("在原位置使用，不复制；也可以在打开窗口里新建", "Used where it is, not copied; a new one can be made in the open window"))
+                        .description(tr("原位打开", "Opens in place"))
                         .on_click(cx.listener(|w, _, window, cx| { w.create_menu = None; w.open_folder_dialog(window, cx) })))
+                    // the other way in from this computer, under 本机文件
+                    .child(crate::design::MenuItem::new("create-open-file").icon("doc-md").label(tr("打开 Markdown 文件…", "Open Markdown File…"))
+                        .description(tr("原位编辑", "Edits in place"))
+                        .on_click(cx.listener(|w, _, window, cx| { w.create_menu = None; w.open_file_dialog(window, cx) })))
             )).with_priority(3).into_any_element());
         }
         // Every 新建 menu ends with the 导入 rows, into the same place it makes things: the same
         // rows each time it opens, whichever "+" opened it.
         let import = self.import_items(parent.clone(), cx);
         Some(deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(
-            crate::design::Popover::new("create-items").menu().fit(crate::design::room(pos, corner)).min_w(px(180.))
+            crate::design::Popover::new("create-items").menu().fit(crate::design::room(pos, corner)).w(px(crate::design::menu_w::MD))
                 .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.create_menu = None; cx.notify(); }))
                 .children(self.create_rows(parent.clone(), cx))
                 .child(crate::design::MenuSeparator::new()).children(import)
@@ -219,7 +212,7 @@ impl Workspace {
         out
     }
 
-    /// A folder's path, 主页 first, as its page's header shows it.
+    /// A folder's path from its top-level folder, as its page's header shows it.
     pub(crate) fn folder_crumbs(&self, id: &str, fold: bool, cx: &mut Context<Self>) -> Div {
         let id = id.to_string();
         let title = self.entries.iter().find(|e| e.id == id).map(|e| display_title(&e.title)).unwrap_or_else(|| tr("文件夹", "Folder").to_string());
@@ -240,16 +233,15 @@ impl Workspace {
                 .overflow_hidden().whitespace_nowrap().text_ellipsis().cursor_pointer()
                 .text_color(crate::ui::crumb_ink()).hover(|s| s.text_color(crate::ui::crumb_page()))
                 .child(ui_text(label))
-                .on_click(cx.listener(move |w, _, window, cx| match &target { Some(t) => w.open(t, window, cx), None => w.show_view(View::Home, cx) }))
+                .on_click(cx.listener(move |w, _, window, cx| match &target { Some(t) => w.open(t, window, cx), None => w.show_view(View::Default, cx) }))
         };
         // The path starts at its top-level folder, by that folder's name (W5).
         let root = self.entries.iter().find(|e| e.id == id).map(|e| e.top.clone()).unwrap_or_default();
-        // 主页 is the one root (W5 named the path after its top-level folder; that comes second now).
-        let home = link("home".into(), crate::settings::text("主页").to_string(), None).into_any_element();
+        // The path starts at its top-level folder (W5).
         let first = link("top".into(), self.folder_name(&root), self.top_crumb(&root)).into_any_element();
         // A top-level folder's own page is the top-level folder: its name is the page's title, not a crumb before it.
         let own = crate::shared_store::top_of_row(&id).is_some();
-        let mut crumbs = div().min_w_0().overflow_hidden().flex().items_center().text_size(px(crate::ui::CRUMB_SIZE)).line_height(px(20.)).child(home).when(!own, |d| d.child(sep()).child(first));
+        let mut crumbs = div().min_w_0().overflow_hidden().flex().items_center().text_size(px(crate::ui::CRUMB_SIZE)).line_height(px(20.)).when(!own, |d| d.child(first));
         for (i, e) in path.iter().enumerate() {
             if folds && i >= from && i < to {
                 if let Some(m) = more.take() { crumbs = crumbs.child(sep()).child(m); }
@@ -257,20 +249,26 @@ impl Workspace {
             }
             crumbs = crumbs.child(sep()).child(link(e.id.clone(), display_title(&e.title), Some(e.id.clone())));
         }
-        crumbs.child(sep()).child(div().min_w_0().px(px(4.)).overflow_hidden().whitespace_nowrap().text_ellipsis()
+        crumbs.when(!own, |d| d.child(sep())).child(div().min_w_0().px(px(4.)).overflow_hidden().whitespace_nowrap().text_ellipsis()
             .text_color(crate::ui::crumb_page()).child(ui_text(title)))
     }
 
+    /// The folder shown when no page is picked (`View::Default`): the documents folder, else the first top-level folder.
+    pub(crate) fn default_folder(&self) -> Option<String> {
+        let tops = self.store.shown_tops();
+        let docs = crate::store::Store::legacy_dir();
+        tops.iter().find(|r| r.2 == docs).or(tops.first()).map(|r| crate::shared_store::top_row(&r.0))
+    }
+
     /// A folder's page: one header row (the path on the left, the actions on
-    /// the right), then its contents in the view 主页 shows.
+    /// the right), then its contents in the view picked.
     pub(crate) fn render_folder(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let id = self.folder_current.clone().unwrap_or_default();
-        let header = self.topbar(Some(&id), window, cx);
-        let children = self.page_entries(Some(&id));
+        let header = self.topbar(&id, window, cx);
+        let children = self.level_entries(Some(&id));
         let body = if children.is_empty() {
-            let empty = if self.home.tab == crate::home::HomeTab::Starred { tr("这里还没有收藏的文档", "Nothing starred here yet") } else { tr("这个文件夹还是空的", "This folder is empty") };
-            crate::trash::empty_state("illus/empty-list.svg", empty).into_any_element()
-        } else if self.home.grid { self.render_home_grid(&children, true, window, cx) } else { self.render_home_list(&children, true, cx) };
+            crate::trash::empty_state("illus/empty-list.svg", tr("这个文件夹还是空的", "This folder is empty")).into_any_element()
+        } else if self.home.grid { self.render_home_grid(&children, window, cx) } else { self.render_home_list(&children, cx) };
         div().size_full().flex().flex_col().child(header).child(div().h(px(8.)).flex_none()).child(body).into_any_element()
     }
 
@@ -282,7 +280,7 @@ impl Workspace {
         // right-click still creates straight from the menu. The folder page's header "…"
         // is this same menu, its "+" the same 新建 menu.
         let create = m.from.is_none();
-        vec![deferred(anchored().anchor(m.corner).position(pos).snap_to_window_with_margin(px(8.)).child(crate::design::Popover::new("folder-row-menu").menu().fit(crate::design::room(pos, m.corner)).min_w(px(190.))
+        vec![deferred(anchored().anchor(m.corner).position(pos).snap_to_window_with_margin(px(8.)).child(crate::design::Popover::new("folder-row-menu").menu().fit(crate::design::room(pos, m.corner)).w(px(crate::design::menu_w::SM))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.row_menu = None; cx.notify(); }))
             .when(create, |d| d
                 .child(row("fr-new-doc", "doc", tr("新建文档", "New document")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.new_child(&doc, window, cx); })))
@@ -295,7 +293,7 @@ impl Workspace {
     }
 }
 
-/// Where a breadcrumb goes: 主页 (None), or a page or folder by id.
+/// Where a breadcrumb goes: the default page (None), or a page or folder by id.
 pub(crate) type Crumb = (String, Option<String>);
 
 impl Workspace {
@@ -321,18 +319,18 @@ impl Workspace {
     /// The menu of a breadcrumb's folded crumbs.
     pub(crate) fn render_crumb_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (items, pos, corner) = self.crumb_menu.clone()?;
-        let menu = crate::design::Popover::new("crumb-menu").menu().fit(crate::design::room(pos, corner)).min_w(px(180.)).max_w(px(320.))
+        let menu = crate::design::Popover::new("crumb-menu").menu().fit(crate::design::room(pos, corner)).w(px(crate::design::menu_w::SM))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.crumb_menu = None; cx.notify(); }))
             .children(items.into_iter().enumerate().map(|(i, (label, target))| crate::design::MenuItem::new(("crumb-item", i)).label(label)
                 .on_click(cx.listener(move |w, _, window, cx| {
                     w.crumb_menu = None;
-                    match &target { Some(t) => { w.open(t, window, cx); } None => w.show_view(View::Home, cx) }
+                    match &target { Some(t) => { w.open(t, window, cx); } None => w.show_view(View::Default, cx) }
                     cx.notify();
                 }))));
         Some(deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(3).into_any_element())
     }
 
-    /// Where a path's top-level folder crumb goes: its own page when it has one, else 主页.
+    /// Where a path's top-level folder crumb goes: its own page when it has one, else the default page.
     pub(crate) fn top_crumb(&self, key: &str) -> Option<String> {
         let row = crate::shared_store::top_row(key);
         self.entries.iter().any(|e| e.id == row).then_some(row)

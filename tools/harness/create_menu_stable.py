@@ -50,7 +50,7 @@ assert app.wait() == 0, f"the run failed; see {run_dir / 'log'}"
 
 # The menu alone (it hangs under the header's "+", right-aligned, from window point 1032 across and
 # 44 down), at 2x: inside its rounded edge and shadow, where a card arriving under it shows through.
-box = (1510, 110, 2040, 680)
+box = (1560, 100, 2056, 816)
 open_, later = (Image.open(run_dir / f"{n}.png").convert("RGB").crop(box) for n in ("open", "later"))
 assert open_.tobytes() == later.tobytes(), f"the 新建 menu changed while open: {run_dir}/open.png vs later.png"
 # The new document reached the sidebar while the menu stayed open (the refresh did happen).

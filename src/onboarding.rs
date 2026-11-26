@@ -468,7 +468,7 @@ impl Onboarding {
             if let Some((_, t)) = self.film_tex.take() { let _ = window.drop_image(t); }
             return cx.emit(Done);
         }
-        // 主页: the folders picked open where they are, else a new one (W12).
+        // The folders picked open where they are, else a new one (W12).
         let fixed = std::env::var_os("QUIET_MD_HOME").is_some();
         // A test run's one folder (`QUIET_MD_HOME`) is the top-level folder; it gets the guides as a new folder would.
         let home = crate::store::Store::legacy_dir();
@@ -518,8 +518,6 @@ impl Onboarding {
         self._ticker = Task::ready(());
         if let Some((_, t)) = self.film_tex.take() { let _ = window.drop_image(t); }
         let ws = crate::start(existed, self.scripted, Some(window), self.incoming.take().unwrap_or_default(), cx);
-        // The first look is the folder the notes are in, not 主页: its page, with its "+" to make the first one.
-        if let Some(ws) = &ws { ws.update(cx, |w, cx| w.show_first_folder(cx)); }
         let hotkey_error = (cfg!(target_os = "macos") && self.hotkey != crate::shortcuts::global_key())
             .then(|| crate::shortcuts::set_global(&self.hotkey, cx).err()).flatten().map(|e| e.to_string());
         if let Some(e) = hotkey_error.or(import_error) && let Some(ws) = ws {
@@ -601,7 +599,7 @@ impl Onboarding {
                 .on_click(cx.listener(move |w, _, _, cx| w.set_lang(l, cx)))
         });
         let anchor = self.lang_anchor.clone();
-        let menu = crate::design::Popover::new("onb-lang-menu").menu().w(px(160.))
+        let menu = crate::design::Popover::new("onb-lang-menu").menu().w(px(crate::design::menu_w::SM))
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 if anchor.get().is_some_and(|b| b.contains(&ev.position)) { return }
                 w.lang_menu = None;

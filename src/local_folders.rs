@@ -1,4 +1,4 @@
-//! 主页's top-level folders from the window's side: 打开文件夹… (or the Finder's Open
+//! The top-level folders from the window's side: 打开文件夹… (or the Finder's Open
 //! With, or a folder dropped on the window) adds a top-level folder to the
 //! sidebar, edited where it is (a new one is made in the system's open panel); 从侧栏移除
 //! forgets one and leaves every file alone. See docs/design/workspaces.md.
@@ -124,11 +124,11 @@ impl Workspace {
             self.current = None;
             self.editor = None;
             self.editor_sub = None;
-            if self.view == View::Doc { self.view = View::Home; }
+            if self.view == View::Doc { self.view = View::Default; }
         }
         if inside(self, &self.folder_current) {
             self.folder_current = None;
-            if self.view == View::Folder { self.view = View::Home; }
+            if self.view == View::Folder { self.view = View::Default; }
         }
         let _ = window;
         if let Err(e) = self.store.remove_folder(key) { self.show_toast_kind(ToastKind::Error, &crate::settings::diagnostic(&e.to_string()), cx); }
@@ -200,7 +200,7 @@ impl Workspace {
         let open = self.store.top_folders().into_iter().find(|r| r.0 == key);
         let (name, path, missing) = open.map(|r| (r.1, r.2, r.3.is_some())).unwrap_or_default();
         let (doc, folder, rename, k1, k2) = (m.id.clone(), m.id.clone(), m.id.clone(), key.to_string(), key.to_string());
-        let mut menu = crate::design::Popover::new("top-row-menu").menu().min_w(px(200.))
+        let mut menu = crate::design::Popover::new("top-row-menu").menu().w(px(crate::design::menu_w::SM))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.row_menu = None; cx.notify(); }));
         if missing {
             menu = menu.child(row("rr-retry", "folder", tr("重新查找", "Look again")).on_click(cx.listener(move |w, _, _, cx| {
@@ -211,9 +211,12 @@ impl Workspace {
                 cx.notify();
             })));
         } else {
-            menu = menu
+            // As a folder's: its "…" (the sidebar row's, its page's) only manages it, 新建 is its "+"; a
+            // right-click still creates straight from the menu.
+            let create = m.from.is_none();
+            menu = menu.when(create, |menu| menu
                 .child(row("rr-new-doc", "doc", tr("新建文档", "New document")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.create_doc(false, Some(doc.clone()), window, cx); })))
-                .child(row("rr-new-folder", "folder", tr("新建文件夹", "New folder")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.new_folder(Some(folder.clone()), window, cx); })))
+                .child(row("rr-new-folder", "folder", tr("新建文件夹", "New folder")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.new_folder(Some(folder.clone()), window, cx); }))))
                 .when(self.store.can_rename_folder_top(key), |m| m.child(row("rr-rename", "square-pen", tr("重命名", "Rename")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.start_rename(&rename.clone(), window, cx); }))))
                 .child(row("rr-reveal", "folder", show_in_files()).on_click(cx.listener(move |w, _, _, cx| { w.row_menu = None; cx.reveal_path(&path); cx.notify(); })));
         }

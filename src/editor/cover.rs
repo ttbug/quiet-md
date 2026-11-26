@@ -417,7 +417,7 @@ impl Editor {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         };
         let el = Popover::new("cover-menu")
-            .menu()
+            .menu().w(px(crate::design::menu_w::SM))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(item("cover-pick", "image", crate::settings::text("选择图片")).on_click(cx.listener(|e, _, _, cx| e.open_cover_menu(Some(Menu::CoverPick { upload: false }), cx))))
             .when(loaded, |d| d.child(item("cover-move", "move", crate::settings::text("调整图片位置")).on_click(cx.listener(|e, _, _, cx| e.start_cover_drag(cx)))))

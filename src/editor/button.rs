@@ -631,7 +631,7 @@ impl Editor {
         // the size picker in the slash menu.
         let mut el = Popover::new("btn-type-menu")
             .menu()
-            .w(px(200.))
+            .w(px(crate::design::menu_w::SM))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(MenuLabel::new(crate::settings::text("选择按钮类型")));
         for (i, act) in ACTIONS.into_iter().enumerate() {

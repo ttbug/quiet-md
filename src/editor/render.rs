@@ -156,6 +156,8 @@ pub(super) struct Env {
 }
 
 const TEXT_PLACEHOLDER: &str = "输入“/”快速插入内容";
+/// 打字机模式 holds the caret's line this far down the page (0.5: the middle).
+pub(super) const TYPEWRITER_LINE: f32 = 0.5;
 
 pub(super) fn margins(b: &Block, env: Env) -> (f32, f32) {
     if env.cell {
@@ -1194,7 +1196,8 @@ impl Editor {
         self.core.doc.cover.as_ref().map(|_| cover_h.to_bits()).hash(&mut h);
         self.info.hidden.hash(&mut h);
         let mut keys = vec![h.finish()];
-        let links = self.links_key();
+        // The space below the last block changes with 打字机模式 and the page's height.
+        let links = self.links_key() ^ (self.below_h.to_bits() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         // Rows whose look depends on editor state, not the document.
         let mut nonces = self.grid_overrides();
         nonces.extend(self.image_nonces(focused).into_iter().chain(self.button_nonce()).chain(self.diagram_nonce(focused)));
@@ -1403,7 +1406,7 @@ impl Editor {
                 .id("below")
                 .w_full()
                 .children(self.refs_list(window, cx))
-                .child(div().h(px(200.)).w_full())
+                .child(div().h(px(self.below_h)).w_full())
                 .on_mouse_down(MouseButton::Left, cx.listener(Self::on_click_below))
                 .into_any_element(),
         };
@@ -1415,6 +1418,31 @@ impl Editor {
             Some(c) => div().w_full().child(c).child(padded).into_any_element(),
             None => padded.into_any_element(),
         }
+    }
+
+    /// 打字机模式 applies: the caret is a caret in an editable page, not a
+    /// selection, a word the input method is composing, or a mouse drag.
+    pub(super) fn typewriter_on(&self) -> bool {
+        crate::settings::typewriter() && !self.read_only && self.marked.is_none() && !self.dragging
+            && self.core.block_sel.is_none() && self.core.sel.is_collapsed()
+    }
+
+    /// For scripts (`caret`): the caret line's middle and the page's height,
+    /// both from the page's top, as last drawn.
+    #[cfg(feature = "devtools")]
+    pub fn caret_probe(&self) -> Option<(f32, f32)> {
+        let h = self.core.sel.head;
+        let view = self.list.viewport_bounds();
+        let y = self.cache.borrow().get(&h.block).map(|l| l.position_for(h.offset).y + l.line_height / 2.)?;
+        Some((f32::from(y - view.top()), f32::from(view.size.height)))
+    }
+
+    /// The space below the last block: 200px, or with 打字机模式 half the page,
+    /// so the last line can come up to the middle too. Read before the list
+    /// draws (its state is borrowed while it does) and kept in `below_h`.
+    fn below_height(&self) -> f32 {
+        let half = f32::from(self.list.viewport_bounds().size.height) * TYPEWRITER_LINE;
+        if crate::settings::typewriter() && !self.read_only { 200f32.max((half / 8.).ceil() * 8.) } else { 200. }
     }
 
     /// Applies the pending scroll request against this frame's layout. A
@@ -1457,7 +1485,14 @@ impl Editor {
             return;
         };
         let margin = px(40.);
+        // 打字机模式: a caret (not a selection, nor a word being composed) keeps
+        // its line in the middle; a line taller than the page reveals as usual.
+        let tw = matches!(req, Reveal::Caret) && self.typewriter_on() && t.size.height <= view.size.height - margin * 2.;
         let d = match req {
+            Reveal::Caret if tw => {
+                let d = t.center().y - (view.top() + view.size.height * TYPEWRITER_LINE);
+                if d.abs() < px(1.) { px(0.) } else { d }
+            }
             Reveal::Caret if t.top() < view.top() + margin => t.top() - (view.top() + margin),
             Reveal::Caret if t.bottom() > view.bottom() - margin => {
                 (t.bottom() - (view.bottom() - margin)).min(t.top() - view.top() - margin)
@@ -1468,8 +1503,27 @@ impl Editor {
             Reveal::Find(_) => t.top() - (view.top() + view.size.height / 2.),
             Reveal::Block(_) => t.top() - view.top() - px(24.),
         };
-        if d != px(0.) {
-            self.list.scroll_by(d);
+        let at = self.list.scroll_px_offset_for_scrollbar().y;
+        // The page's start or end held the last glide steps: the line goes no
+        // further. (Some frames draw before a step lands: one still frame is no stop.)
+        let still = self.glide.map_or(0, |(_, before, n)| if (at - before).abs() < px(0.25) { n + 1 } else { 0 });
+        let held = tw && still >= 3;
+        if d == px(0.) || held {
+            self.glide = None;
+        } else {
+            // 丰富 glides there (the rest of the way shrinks by e^(−t/60ms),
+            // re-aimed each frame as the text moves); 克制 jumps.
+            let step = match tw && crate::settings::motion_high() {
+                true => {
+                    let dt = self.glide.map_or(1. / 60., |(t, _, _)| t.elapsed().as_secs_f32().min(0.05));
+                    let s = d * (1. - (-dt / 0.06).exp());
+                    if s.abs() < px(1.) { d } else { s }
+                }
+                false => d,
+            };
+            self.list.scroll_by(step);
+            self.glide = (step != d).then(|| (web_time::Instant::now(), at, still));
+            if self.glide.is_some() { self.reveal = Some((req, 0)); }
             window.request_animation_frame();
         }
         // Unwrapped code scrolls sideways to keep the caret (or find hit) in view.
@@ -1538,6 +1592,7 @@ impl Editor {
             window.request_animation_frame();
         }
         let focused = self.focus.is_focused(window);
+        self.below_h = self.below_height();
         self.sync_items(focused, super::cover::cover_height(window));
         let generation = self.core.generation;
         let (units, eqnos) = match self.frame.generation == Some(generation) {
@@ -1758,6 +1813,7 @@ impl Editor {
             .font_family(theme::ui_family())
             .text_color(Theme::text())
             .on_mouse_move(cx.listener(Self::on_hover_move))
+            .on_scroll(cx.listener(|ed, _: &ScrollEvent, _, _| ed.wheel_stops_glide()))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|ed, ev: &MouseUpEvent, window, cx| {

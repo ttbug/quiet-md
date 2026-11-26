@@ -48,7 +48,6 @@ Checked 2026-11-24 against the official packages `nucleo-ui-outline-18` 1.5.0 an
 | `heading-1.svg` | UI Outline 18 | Heading1 | identical to the package |
 | `heading-2.svg` | UI Outline 18 | Heading2 | identical to the package |
 | `heading-3.svg` | UI Outline 18 | Heading3 | identical to the package |
-| `home.svg` | UI Outline 18 | House | identical to the package |
 | `image-broken.svg` | UI Outline 18 | Image | identical to the package |
 | `indent-decrease.svg` | UI Outline 18 | TextOutdentLeft | identical to the package |
 | `indent-increase.svg` | UI Outline 18 | TextOutdentRight | identical to the package |

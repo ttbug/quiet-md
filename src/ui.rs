@@ -92,7 +92,7 @@ pub fn spinner(t: f32, color: Hsla) -> Div {
 
 
 
-/// A list row's corners under the pointer (主页, 回收站).
+/// A list row's corners under the pointer (a folder's page, 回收站).
 pub const ROW_RADIUS: f32 = 6.;
 
 
@@ -761,7 +761,7 @@ pub(crate) fn tilde(p: &std::path::Path) -> String {
     }
 }
 
-/// The breadcrumbs' size in every page header (a document's, a folder's, 主页's): shadcn's
+/// The breadcrumbs' size in every page header (a document's, a folder's): shadcn's
 /// Breadcrumb, text-sm.
 pub const CRUMB_SIZE: f32 = 14.;
 

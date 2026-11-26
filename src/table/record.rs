@@ -230,7 +230,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, r: &Rec
             .child(format!("{} {}", label("最后更新于"), field::format_date(r.modified, DateFmt::Dash, true))));
 
     let menu = ui.menu.map(|pos| deferred(anchored().position(pos).snap_to_window_with_margin(px(8.)).child(
-        crate::design::Popover::new("tb-rec-menu").occlude().w(px(180.)).py(px(4.)).on_mouse_down_out(cx.listener(|v, _, _, cx| { v.record.menu = None; cx.notify(); }))
+        crate::design::Popover::new("tb-rec-menu").occlude().w(px(crate::design::menu_w::SM)).py(px(4.)).on_mouse_down_out(cx.listener(|v, _, _, cx| { v.record.menu = None; cx.notify(); }))
             .child(menu_item("tb-rec-dup", "copy", label("创建副本"), false).on_click(cx.listener(move |v, _, _, cx| {
                 v.record.menu = None;
                 let tid = v.table;

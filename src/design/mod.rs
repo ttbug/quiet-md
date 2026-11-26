@@ -175,6 +175,18 @@ pub mod chip {
     pub fn neutral() -> (Hsla, Hsla) { (super::color::secondary(), if dark() { super::color::muted_foreground() } else { hex(0x6b6b6b) }) }
 }
 
+/// A menu's width: one of three, as shadcn sets each DropdownMenuContent by hand (`w-56`, `w-64`,
+/// `w-72`), never its content's, so a menu is as wide in every language. A label too long is cut
+/// with an ellipsis; a description wraps to two lines.
+pub mod menu_w {
+    /// Row and context menus, submenus, short pickers.
+    pub const SM: f32 = 224.;
+    /// Menus whose rows carry a description or a shortcut, and the editor's block menus.
+    pub const MD: f32 = 256.;
+    /// The roomiest menus.
+    pub const LG: f32 = 288.;
+}
+
 /// Corner radii past the `R` steps.
 pub mod radius {
     /// Badges and switches (`rounded-4xl` / `rounded-full`).

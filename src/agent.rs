@@ -517,7 +517,7 @@ pub(crate) fn check_references(phase: &str, cx: &mut App) {
             let peer = cx.global_mut::<Qa>().peer.take().unwrap();
             peer.update(cx, |_, window, _| window.remove_window()).unwrap();
         }
-        "home" => { handle.update(cx, |w, _, cx| w.show_view(View::Home, cx)).unwrap(); }
+        "home" => { handle.update(cx, |w, _, cx| w.show_view(View::Default, cx)).unwrap(); }
         "settings" => { handle.update(cx, |w, _, cx| w.show_view(View::Settings, cx)).unwrap(); }
         "missing" => {
             panel.update(cx, |p, cx| {

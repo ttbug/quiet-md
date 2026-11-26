@@ -99,7 +99,7 @@ fn extra_tools(me: &BoardView, cx: &mut Context<BoardView>) -> Stateful<Div> {
         .when(!open, |d| d.ex_tip(tr("更多工具", "More tools"), None))
         .on_click(cx.listener(|_, _, _, cx| { let open = pop(cx) == Some(Pop::ExtraTools); set_pop(if open { None } else { Some(Pop::ExtraTools) }, cx) }));
     if !open { return trigger; }
-    let mut menu = dropdown("board-extra-tools-menu").min_w(px(190.));
+    let mut menu = dropdown("board-extra-tools-menu");
     for t in EXTRA {
         let k = match t { Tool::Image => Some("9".to_string()), Tool::Frame => Some("F".to_string()), _ => None };
         menu = menu.child(dropdown_item(("board-extra-tool", t as usize), Some(tool_icon_name(t)), tool_label(t), k, tool == t)

@@ -3,9 +3,9 @@
 <p>这组指南大约十分钟就能带你熟悉 Quiet.md。它们本身就是用 Quiet.md 写的，你看到的每一种排版都可以自己做出来。<b>尽管放心修改。</b>它们是可以动手练习的示例，而不是只读的说明书。</p>
 <callout emoji="💡" background-color="light-blue" border-color="blue"><p>最好的学习方式是边读边试。想找一块空白的地方随便练习，可以打开 {{doc:practice}}。</p></callout>
 <h1>认识界面</h1>
-<img src="assets/guides/home.jpg" caption="主页：所有文档一目了然" align="center"/>
+<img src="assets/guides/home.jpg" caption="文件夹：所有文档一目了然" align="center"/>
 <p>窗口主要分为两个区域。</p>
-<ol><li><b>侧栏</b>包含主页、置顶、我的文档和设置。按 <code>⌘ ]</code> 可以展开或收起侧栏。</li><li><b>文档</b>是中间白色的书写区域。顶部显示页面路径和标题，右侧是更多、搜索和新建按钮。</li></ol>
+<ol><li><b>侧栏</b>包含置顶、“我的文档”（你的文件夹）和设置。按 <code>⌘ ]</code> 可以展开或收起侧栏。</li><li><b>文档</b>是中间白色的书写区域。顶部显示页面路径和标题，右侧是更多、搜索和新建按钮。</li></ol>
 <p>带标题的文档还会在页面左上方显示<b>目录</b>。点击某个标题即可跳转过去；滚动页面时，当前所在的章节会高亮显示。</p>
 <h1>上手五分钟</h1>
 <p>跟着下面的清单做一遍。点击复选框可以把一项标记为完成，也可以把光标放在这一项上按 <code>⌘ Enter</code>。</p>

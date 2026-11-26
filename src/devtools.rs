@@ -9,13 +9,14 @@
 //!   activate (make the window key; takes focus) | quit |
 //!   pick <path>[|<path>...] (answers the next file dialog instead of showing it)
 //!   row <title> | rrow <title> | hoverrow <title> (click, right-click or hover the sidebar row
-//!   with that title: 主页, 我的文档, a document or folder, 设置, a page in 设置's list…, or
+//!   with that title: 我的文档, a document or folder, 设置, a page in 设置's list…, or
 //!   the menu item (`design::MenuItem`: the + menu's 画板, a board's right-click menu); the
 //!   topmost if several; no row shown by that title ends the run with exit code 3) |
 //!   anchor <name> (click the middle of a tracked control, e.g. `create-sidebar`: 我的文档's "+",
 //!   `doc-font-picker` / `ui-font-picker`: 外观's font lists, `font-del-<id>`: a downloaded font's delete) |
 //!   window <n> (the steps after it play in the n-th window, 0 the main one, in the order they opened) |
 //!   windows <n> (that many windows are open; else the run ends with exit code 3) |
+//!   caret (logs `caret <y> of <height>`: the caret line's middle on the page) |
 //!   showing <title> (the document or folder page in front has that title; else the run ends with exit code 3) |
 //!   origin board | origin window (the points of the mouse and file steps after it count from the open
 //!   画板's top-left corner, or again from the window's; no board open ends the run with exit code 3)
@@ -232,6 +233,15 @@ pub fn start(window: &mut Window, cx: &mut App) {
                     if shown.as_deref() == Some(want) { eprintln!("devtools: showing {want:?}"); continue }
                     eprintln!("devtools: showing: wanted {want:?}, in front: {shown:?}");
                     std::process::exit(3);
+                }
+                // `caret`: logs where the caret's line sits on the page (`caret <y> of <height>`).
+                "caret" => {
+                    let at = handle.update(cx, |root, _, cx| {
+                        let ws = root.downcast::<crate::app::Workspace>().ok()?;
+                        ws.read(cx).editor.as_ref()?.read(cx).caret_probe()
+                    }).ok().flatten();
+                    match at { Some((y, h)) => eprintln!("devtools: caret {y:.1} of {h:.1}"), None => eprintln!("devtools: caret none") }
+                    continue
                 }
                 _ => { resolved = shifted(cmd, rest); (cmd, resolved.as_str()) }
             };

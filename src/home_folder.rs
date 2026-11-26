@@ -1,4 +1,4 @@
-//! 主页's folders: a glass folder with its documents tucked inside as paper,
+//! A folder page's folders: a glass folder with its documents tucked inside as paper,
 //! and dragging a document card into one.
 //!
 //! The folder is painted, not laid out: the papers tilt and fan, which GPUI
@@ -451,7 +451,7 @@ impl Workspace {
     fn move_home_drag(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
         if !self.home.folders.drag.as_ref().is_some_and(|d| d.started && !d.returning) { return; }
         // Only folders on the page now: bounds linger for cards of pages left behind.
-        let shown = if self.view == crate::app::View::Folder { self.page_entries(self.folder_current.as_deref()) } else { self.home_entries() };
+        let shown = self.level_entries(self.folder_current.as_deref());
         let over = shown.iter().filter(|e| e.meta.folder.is_some() && e.note.is_none())
             .find(|e| self.home.folders.bounds.borrow().get(&e.id).is_some_and(|b| b.contains(&at)))
             .map(|e| e.id.clone());
@@ -495,7 +495,7 @@ impl Workspace {
     }
 
     pub(crate) fn render_home_drag_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !matches!(self.view, crate::app::View::Home | crate::app::View::Folder) { self.home.folders.drag = None; return None; }
+        if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) { self.home.folders.drag = None; return None; }
         let folder_bounds = self.home.folders.drag.as_ref().and_then(|d| d.over.clone()).and_then(|f| self.home.folders.bounds.borrow().get(&f).copied());
         let d = self.home.folders.drag.as_mut().filter(|d| d.started)?;
         let now = Instant::now();
@@ -540,7 +540,7 @@ impl Workspace {
 
 // ---- Files dragged in from the Finder
 
-/// A drag of files from outside (the Finder) over 主页 or a folder's page:
+/// A drag of files from outside (the Finder) over a folder's page:
 /// the list dims behind a receiving tray, a glass folder whose papers (one
 /// per file, up to three) rise out of it, follow the pointer and part as it
 /// comes near; let go, they slide in, the folder dips, and the documents are
@@ -625,7 +625,7 @@ impl FileDrop {
 }
 
 impl Workspace {
-    /// Files dragged over 主页 or a folder's page (the pointer, the folder
+    /// Files dragged over a folder's page (the pointer, the folder
     /// card under it, whether it is over the tray).
     pub(crate) fn file_drag_move(&mut self, ev: &DragMoveEvent<ExternalPaths>, cx: &mut Context<Self>) {
         // Every listener hears every move: off the page (over the sidebar) it steps back.
@@ -639,10 +639,10 @@ impl Workspace {
 
     /// `file_drag_move` from a position and the dragged paths (scripted runs too).
     pub(crate) fn file_drag_at(&mut self, at: Point<Pixels>, paths: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
-        if !matches!(self.view, crate::app::View::Home | crate::app::View::Folder) { return; }
+        if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) { return; }
         let fresh = self.home.folders.file_drop.as_ref().is_none_or(|d| d.landed.is_some());
         if fresh { self.home.folders.file_drop = Some(FileDrop::new(paths)); }
-        let shown = if self.view == crate::app::View::Folder { self.page_entries(self.folder_current.as_deref()) } else { self.home_entries() };
+        let shown = self.level_entries(self.folder_current.as_deref());
         let over = shown.iter().filter(|e| e.meta.folder.is_some() && e.note.is_none())
             .find(|e| self.home.folders.bounds.borrow().get(&e.id).is_some_and(|b| b.contains(&at)))
             .map(|e| e.id.clone());
@@ -665,7 +665,7 @@ impl Workspace {
     }
 
     pub(crate) fn file_drop_paths(&mut self, paths: Vec<std::path::PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
-        if !matches!(self.view, crate::app::View::Home | crate::app::View::Folder) { return; }
+        if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) { return; }
         // The first listing still running: Markdown files and folders open where they are, as from the Finder.
         if self.store.loading() {
             self.home.folders.file_drop = None;
@@ -701,7 +701,7 @@ impl Workspace {
 
     /// The veil and the tray, over the page while files are dragged in.
     pub(crate) fn render_file_drop(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !matches!(self.view, crate::app::View::Home | crate::app::View::Folder) { self.home.folders.file_drop = None; return None; }
+        if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) { self.home.folders.file_drop = None; return None; }
         let dragging = cx.has_active_drag() || crate::devtools::file_drag();
         let target_title = |w: &Self, id: Option<&String>| id.and_then(|id| w.entries.iter().find(|e| &e.id == id)).map(|e| display_title(&e.title))
             .unwrap_or_else(|| w.home_name());

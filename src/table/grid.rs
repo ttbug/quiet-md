@@ -455,8 +455,9 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
             .child(if renaming {
                 div().flex_1().min_w_0().child(v.aux.clone()).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).into_any_element()
             } else {
-                div().flex_1().min_w_0().flex().items_center().gap(px(6.))
-                    .child(div().flex_shrink_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().font_weight(FontWeight::MEDIUM).text_color(header_text()).child(ui_text(f.name.clone())))
+                // the name first: narrow, the type goes (wrapped onto a second line, cut off) before the name is cut short
+                div().flex_1().min_w_0().h(px(20.)).overflow_hidden().flex().flex_wrap().content_start().items_center().gap_x(px(6.))
+                    .child(div().flex_none().max_w_full().overflow_hidden().whitespace_nowrap().text_ellipsis().font_weight(FontWeight::MEDIUM).text_color(header_text()).child(ui_text(f.name.clone())))
                     .child(div().id(("tb-hdr-type", fid)).flex_none().px(px(4.)).mx(px(-4.)).rounded(px(crate::design::geo().tool_r)).cursor_pointer()
                         .text_size(px(text_xs())).text_color(Theme::text_placeholder()).hover(|s| s.bg(Theme::fill_hover_strong()).text_color(Theme::text_caption()))
                         .whitespace_nowrap().child(crate::settings::label(f.ty.label()))

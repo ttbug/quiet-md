@@ -147,7 +147,7 @@ impl Workspace {
         let btn = self.mode_btn_bounds.clone();
         let menu = Popover::new("doc-mode-menu")
             .menu()
-            .w(px(200.))
+            .w(px(crate::design::menu_w::MD))
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 // The button toggles the menu itself.
                 if btn.get().is_none_or(|b| !b.contains(&ev.position)) {

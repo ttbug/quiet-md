@@ -1,5 +1,5 @@
-//! The header "…" menu: how the document is seen (page width, then the 阅读模式, 显示引用列表
-//! and 窗口保持在最前 switches), find & replace, move, pin, star, 新建子文档, duplicate,
+//! The header "…" menu: how the document is seen (page width, then the 阅读模式 and 打字机模式
+//! switches, 专注模式, then 显示引用列表 and 窗口保持在最前), find & replace, move, pin, star, 新建子文档, duplicate,
 //! 下载为 PDF / Markdown, 复制为 Markdown, 打印, document info, 版本历史, delete, 快捷键.
 
 use crate::app::Workspace;
@@ -15,7 +15,7 @@ pub enum DocSub {
     Download,
 }
 
-const MENU_W: f32 = 200.;
+const MENU_W: f32 = crate::design::menu_w::MD;
 /// The menu's padding (`design::menu`): a submenu's first item sits this far below its top.
 const PAD: f32 = menu::PAD;
 
@@ -27,9 +27,10 @@ thread_local! {
 
 /// What a page's 「…」 holds, by what the page is: each kind its own list, nothing in it that the
 /// page can't do. How the page is seen comes first (页宽, then the 阅读模式, 显示引用列表 and
-/// 窗口保持在最前 switches: the user's order, 2026-11-25), then what is done to it.
+/// 窗口保持在最前 switches: the user's order, 2026-11-25; 打字机模式 and 专注模式, a document's only, after 阅读模式),
+/// then what is done to it.
 #[derive(Clone, Copy, PartialEq)]
-enum Item { Width, Read, Refs, OnTop, Find, Move, Pin, Star, Child, Copy, Download, CopyMd, Print, Info, History, Delete, Shortcuts, Rule }
+enum Item { Width, Read, Typewriter, Focus, Refs, OnTop, Find, Move, Pin, Star, Child, Copy, Download, CopyMd, Print, Info, History, Delete, Shortcuts, Rule }
 
 /// The page open: a document, one with a 画板 opened in its place, a 画板 file, a 数据表 file.
 #[derive(Clone, Copy, PartialEq)]
@@ -42,7 +43,7 @@ fn items(page: Page, child: bool) -> Vec<Item> {
     let top: &[Item] = if crate::on_top::SUPPORTED { &[OnTop] } else { &[] };
     let top_rule: &[Item] = if crate::on_top::SUPPORTED { &[OnTop, Rule] } else { &[] };
     let list: Vec<&[Item]> = match page {
-        Page::Doc => vec![&[Width, Read, Refs], top, &[Rule, Find, Rule, Move, Pin, Star, Rule], child, &[Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete, Rule, Shortcuts]],
+        Page::Doc => vec![&[Width, Read, Typewriter, Focus, Refs], top, &[Rule, Find, Rule, Move, Pin, Star, Rule], child, &[Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete, Rule, Shortcuts]],
         // a board isn't the page: no page width, no find in its text, its own shortcut help (`?`)
         Page::Board => vec![&[Read, Refs], top, &[Rule, Move, Pin, Star, Rule], child, &[Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete]],
         // a board file: no Markdown, no reading mode or references either
@@ -173,6 +174,7 @@ impl Workspace {
         // which list the 「…」 shows (`items`)
         let page = self.editor.as_ref().map_or(Page::Doc, |e| { let e = e.read(cx); if e.table_file { Page::Table } else if e.board_file { Page::BoardFile } else if e.board_open() { Page::Board } else { Page::Doc } });
         let reading = self.reading();
+        let typewriter = crate::settings::typewriter();
         let on_top = self.on_top;
         let sub = self.doc_sub;
         let hover_sub = |s: Option<DocSub>| {
@@ -184,14 +186,6 @@ impl Workspace {
             })
         };
         let sub_bounds = self.doc_sub_bounds.clone();
-        // The menu follows its longest translation (#225); its rendered width
-        // (from the previous frame — a submenu only opens after one) places
-        // the submenus that open to its left.
-        let menu_w_record = self.doc_menu_w.clone();
-        let menu_w = move || {
-            let record = menu_w_record.clone();
-            canvas(move |b, _, _| record.set(Some(f32::from(b.size.width))), |_, _, _, _| {}).absolute().inset_0()
-        };
         let (pin_id, star_id, mv_id, del_id, dup_id, print_id) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
         // 新建子文档 (#357): under a document of the library.
         let child = matches!(page, Page::Doc | Page::Board) && self.takes_children(&id);
@@ -199,8 +193,7 @@ impl Workspace {
         let child_id = id.clone();
         let mut menu = Popover::new("doc-menu")
             .menu()
-            .min_w(px(MENU_W))
-            .child(menu_w())
+            .w(px(MENU_W))
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 if sub_bounds.get().is_none_or(|b| !b.contains(&ev.position)) {
                     w.close_doc_menu(cx);
@@ -218,6 +211,11 @@ impl Workspace {
                     .switch(reading)
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(move |w, _, window, cx| w.set_mode(!reading, window, cx))).into_any_element(),
+                Item::Typewriter => menu_item("dm-typewriter", crate::typewriter::ICON, crate::settings::tr("打字机模式", "Typewriter Mode"), false, false)
+                    .switch(typewriter)
+                    .tip_right(crate::settings::tr("正在写的一行停在窗口中间", "Keeps the line you write in the middle"), Some(crate::shortcuts::hint("workspace::ToggleTypewriter", "⌘ + Shift + T")))
+                    .on_hover(hover_sub(None))
+                    .on_click(cx.listener(move |w, _, _, cx| w.set_typewriter(!typewriter, false, cx))).into_any_element(),
                 Item::Refs => menu_item("dm-refs", "list", crate::settings::text("显示引用列表"), false, false)
                     .switch(refs_shown)
                     .on_hover(hover_sub(None))
@@ -227,6 +225,10 @@ impl Workspace {
                     .tip_right(crate::settings::tr("窗口会一直显示在其他应用的窗口之上", "Stays above other apps' windows"), None)
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(move |w, _, window, cx| w.set_on_top(!on_top, window, cx))).into_any_element(),
+                Item::Focus => menu_item("dm-focus", crate::focus::ICON, crate::settings::tr("专注模式", "Focus Mode"), false, false)
+                    .tip_right(crate::settings::tr("只留正文，鼠标移到顶部可退出", "Just the page; point at the top to exit"), Some(crate::focus::hint()))
+                    .on_hover(hover_sub(None))
+                    .on_click(cx.listener(|w, _, window, cx| w.enter_focus(window, cx))).into_any_element(),
                 Item::Find => menu_item("dm-find", "text-search", crate::settings::text("查找和替换"), false, false)
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(|w, _, window, cx| w.find_in_doc(false, window, cx))).into_any_element(),
@@ -297,7 +299,7 @@ impl Workspace {
                 .into_any_element(),
         ];
         // Submenus open to the left, 4px from the menu, level with their item.
-        let sub_at = point(right - px(self.doc_menu_w.get().unwrap_or(MENU_W) + 4.), px(0.));
+        let sub_at = point(right - px(MENU_W + 4.), px(0.));
         let record = self.doc_sub_bounds.clone();
         record.set(None);
         let recorder = move || {
@@ -314,7 +316,7 @@ impl Workspace {
                     let pdf = id.clone();
                     Popover::new("dm-download-menu")
                         .menu()
-                        .min_w(px(130.))
+                        .w(px(crate::design::menu_w::SM))
                         .child(recorder())
                         .when(crate::printing::SUPPORTED, |d| d.child(sub_item("dm-pdf", "PDF").on_click(cx.listener(move |w, _, window, cx| w.export_pdf(&pdf, window, cx)))))
                         .child(sub_item("dm-md", "Markdown").on_click(cx.listener(move |w, _, _, cx| w.open_export_md(&id, cx))))

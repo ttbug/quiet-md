@@ -1,4 +1,4 @@
-//! 主页 the windows share: every top-level folder's library behind one
+//! The top-level folders the windows share: every top-level folder's library behind one
 //! handle. A call about a document goes to the top-level folder it is in; a new one goes
 //! into its folder's top-level folder, else the top-level folder of the document in front (`active`),
 //! else the first top-level folder. Nothing here crosses top-level folders: moves and links stay
@@ -235,7 +235,7 @@ impl SharedStore {
         if let Some(s) = self.0.borrow_mut().ws.store(key) { s.adopt(writer); }
         self.merge_entries(key, entries)
     }
-    /// Whether top-level folders show as rows of the tree: always, one or many (主页 is the one root,
+    /// Whether top-level folders show as rows of the tree: always, one or many (
     /// every top-level folder a folder under it, with a page and a "+" of its own; 2026-11-25).
     pub fn top_rows(&self) -> bool { !self.0.borrow().ws.folders.is_empty() }
     /// `entries` as the window shows them: a row for each top-level folder, holding what is at its top level.

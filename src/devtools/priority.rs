@@ -16,8 +16,6 @@ pub(super) fn step(phase: &str, ws: &mut Workspace, window: &mut Window, cx: &mu
             cx.notify();
         }
         "menu" => {
-            let width = ws.row_menu_w.get().unwrap();
-            assert!(width > 180., "French menu remained at its fixed width: {width}");
             ws.row_menu = None;
             ws.open_paths(&[dir.join("Source.md")], window, cx);
         }

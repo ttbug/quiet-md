@@ -465,7 +465,13 @@ pub fn bars(g: &mut Gallery, _w: &mut Window, cx: &mut Cx) -> Div {
             .child(Button::ghost("fb-n").icon("chevron-right").sized(ButtonSize::Xs).on_click(tap(cx, |g, _, _| { let n = g.at(("found", 0)); g.pick.insert(("found", 0), (n + 1) % 7); })))
             .child(Button::ghost("fb-x").icon("x").sized(ButtonSize::Xs).on_click(tap(cx, |g, _, _| { g.on.insert(("find-off", 0)); }))).into_any_element()
     };
-    let live = row().child(item("工具栏（工具点一下切换在用）", bar)).child(item("勾选记录后的操作条", selbar)).child(item("表内搜索（能打字，上一个 / 下一个）", find));
+    // 专注模式's header: empty until the pointer is on it (`focus::focus_bar`)
+    let lit = g.is(("focus-top", 0));
+    let focus = div().id("focus-top").w(px(420.)).h(px(48.)).px(px(12.)).flex().items_center().border_b_1().border_color(line())
+        .on_hover(tap(cx, |g, _, _| g.flip(("focus-top", 0))))
+        .child(div().opacity(if lit { 1. } else { 0. }).child(crate::focus::exit_button("focus-exit").on_click(says(cx, "退出专注模式"))));
+    let live = row().child(item("工具栏（工具点一下切换在用）", bar)).child(item("勾选记录后的操作条", selbar)).child(item("表内搜索（能打字，上一个 / 下一个）", find))
+        .child(item("专注模式的顶栏（鼠标移上来出现）", focus));
     div().flex().flex_col().gap(px(32.)).child(group("可操作", live))
 }
 

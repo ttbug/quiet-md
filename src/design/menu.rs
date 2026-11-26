@@ -331,7 +331,7 @@ impl RenderOnce for MenuItem {
                     let text = div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(label(s));
                     match description {
                         Some(desc) => d.child(div().flex_1().min_w_0().flex().flex_col().child(text)
-                            .child(div().text_size(px(g.text_xs)).line_height(px(super::text::XS_LINE)).text_color(caption).child(label(desc)))),
+                            .child(div().text_size(px(g.text_xs)).line_height(px(super::text::XS_LINE)).text_color(caption).line_clamp(2).child(desc))),
                         None => d.child(text),
                     }
                 })

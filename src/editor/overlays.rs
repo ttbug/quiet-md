@@ -15,9 +15,9 @@ use crate::design::toolbar::{TOOLBAR_H, TOOLBAR_PAD, toolbar_layout};
 use crate::design::{ButtonGroup, ButtonGroupSeparator, Toggle, Toolbar};
 use gpui::{prelude::FluentBuilder, *};
 
-const SLASH_W: f32 = 247.;
+const SLASH_W: f32 = crate::design::menu_w::MD;
 const SLASH_MAX_H: f32 = 351.;
-pub(super) const MENU_W: f32 = 247.;
+pub(super) const MENU_W: f32 = crate::design::menu_w::MD;
 /// Table handle: 44.5 left of the grid, centred on the column-dot row 16.5 above it.
 const TABLE_HANDLE_DX: f32 = 44.5;
 const TABLE_HANDLE_DY: f32 = 16.5 + 13.;
@@ -1287,7 +1287,7 @@ impl Editor {
 
         let drop_el: Option<AnyElement> = match dropdown {
             Some(Menu::TurnInto) => {
-                let mut list = Popover::new("tb-turn-menu").menu().min_w(px(200.)).fit(f32::from(turn_height)).on_scroll(|_, _, cx| cx.stop_propagation());
+                let mut list = Popover::new("tb-turn-menu").menu().w(px(crate::design::menu_w::SM)).fit(f32::from(turn_height)).on_scroll(|_, _, cx| cx.stop_propagation());
                 for (i, it) in TURN_ITEMS.iter().enumerate() {
                     let k = (it.kind)();
                     if self.markdown && matches!(k, BlockKind::Callout { .. }) {
@@ -1322,7 +1322,7 @@ impl Editor {
                 };
                 let list = Popover::new("tb-align-menu")
                     .menu()
-                    .w(px(180.))
+                    .w(px(crate::design::menu_w::SM))
                     .child(item("ta-l", "align-left", crate::settings::text("左对齐"), crate::shortcuts::hint("editor::AlignLeft", "⌘ + Shift + L"), Align::Left))
                     .child(item("ta-c", "align-center", crate::settings::text("居中对齐"), crate::shortcuts::hint("editor::AlignCenter", "⌘ + Shift + E"), Align::Center))
                     .child(item("ta-r", "align-right", crate::settings::text("右对齐"), crate::shortcuts::hint("editor::AlignRight", "⌘ + Shift + R"), Align::Right));
@@ -1595,7 +1595,7 @@ impl Editor {
         let x_color = if md { 0. } else { f32::min(at_x[13], w - CALLOUT_PANEL_W).max(0.) };
         let drop_el: Option<AnyElement> = match dropdown {
             Some(Menu::TurnInto) => {
-                let mut list = Popover::new("ttb-turn-menu").menu().min_w(px(200.)).fit(f32::from(turn_height)).on_scroll(|_, _, cx| cx.stop_propagation());
+                let mut list = Popover::new("ttb-turn-menu").menu().w(px(crate::design::menu_w::SM)).fit(f32::from(turn_height)).on_scroll(|_, _, cx| cx.stop_propagation());
                 for (i, it) in TURN_ITEMS.iter().enumerate() {
                     let k = (it.kind)();
                     if matches!(k, BlockKind::Callout { .. }) {
@@ -1648,7 +1648,7 @@ impl Editor {
                 };
                 let list = Popover::new("ttb-align-menu")
                     .menu()
-                    .w(px(232.))
+                    .w(px(crate::design::menu_w::SM))
                     .child(h("tta-l", "align-left", crate::settings::text("左对齐"), crate::shortcuts::hint("editor::AlignLeft", "⌘ + Shift + L"), Align::Left))
                     .child(h("tta-c", "align-center", crate::settings::text("居中对齐"), crate::shortcuts::hint("editor::AlignCenter", "⌘ + Shift + E"), Align::Center))
                     .child(h("tta-r", "align-right", crate::settings::text("右对齐"), crate::shortcuts::hint("editor::AlignRight", "⌘ + Shift + R"), Align::Right))
