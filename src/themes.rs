@@ -170,6 +170,9 @@ pub static PROPS: LazyLock<Vec<Prop>> = LazyLock::new(|| {
 
 static BY_KEY: LazyLock<HashMap<&'static str, usize>> = LazyLock::new(|| PROPS.iter().enumerate().map(|(i, p)| (p.key.as_str(), i)).collect());
 
+/// `--token-*` names the app no longer reads (`scrollbar_thumb`: every scrollbar is `design::scroll`'s).
+const RETIRED: &[&str] = &["scrollbar_thumb"];
+
 /// Tokens a rule sets (the rest are listed as `--token-*` in full files).
 #[cfg(test)]
 static RULE_TOKENS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
@@ -372,7 +375,22 @@ pub fn doc_step(pref: &str) -> i32 { match pref { "small" => -1, "large" => 2, "
 pub const DOC_PRESETS: [&str; 4] = ["small", "", "large", "xlarge"];
 /// A custom 正文字号's range, in pt.
 pub const DOC_MIN: f32 = 12.;
-pub const DOC_MAX: f32 = 24.;
+pub const DOC_MAX: f32 = 28.;
+/// 放大 / 缩小 (⌘+ / ⌘−): the 正文字号 a step up or down from `pt`, 1pt at a time up to
+/// 18pt and 2pt above, the theme's own `body` a stop too, within `DOC_MIN..=DOC_MAX`.
+pub fn doc_zoom_step(pt: f32, body: f32, up: bool) -> f32 {
+    let mut stops: Vec<f32> = (12..=18).map(|n| n as f32).chain([20., 22., 24., 26., 28.]).collect();
+    if (DOC_MIN..=DOC_MAX).contains(&body) && !stops.contains(&body) { stops.push(body); stops.sort_by(f32::total_cmp); }
+    match up {
+        true => stops.iter().copied().find(|&s| s > pt + 0.01).unwrap_or(pt.max(DOC_MAX)),
+        false => stops.iter().rev().copied().find(|&s| s < pt - 0.01).unwrap_or(pt.min(DOC_MIN)),
+    }
+}
+/// How `doc_size` stores the body size `pt`: a preset's name when one gives it (外观 lights
+/// that preset), else the size.
+pub fn doc_pref_for(pt: f32, body: f32) -> String {
+    DOC_PRESETS.iter().find(|n| doc_size_pt(n, body) == pt).map_or_else(|| format!("{pt}"), |n| n.to_string())
+}
 /// A custom 正文字号 (自定义): `doc_size` holds the size in pt ("17") where a preset holds its name.
 /// An older version reads the number as no preset, 标准, and carries on.
 pub fn custom_size(pref: &str) -> Option<f32> { pref.trim().parse::<f32>().ok().filter(|n| (DOC_MIN..=DOC_MAX).contains(n)).map(f32::round) }
@@ -632,6 +650,8 @@ fn parse_with_fonts<'a>(css: &str, fonts: &mut dyn FnMut() -> &'a [String]) -> R
         }
         if let Some(t) = n.strip_prefix("--token-") {
             let t = t.replace('-', "_");
+            // tokens the app no longer reads: older files that set them load without a warning
+            if RETIRED.contains(&t.as_str()) { continue }
             match (TOKENS.iter().position(|x| *x == t), parse_color(&v)) {
                 (Some(i), Some(c)) => st.tokens[i] = Some(c),
                 _ => warn.push(format!("{n}: {v}")),
@@ -942,6 +962,23 @@ const FEISHU_DESCRIPTION: &str = "飞书文档的正文样式：16 / 26，标题
 #[cfg(test)]
 mod tests {
     #[test]
+    fn doc_zoom_steps() {
+        use super::{doc_pref_for, doc_zoom_step as z};
+        assert_eq!(z(16., 16., true), 17.);
+        assert_eq!(z(18., 16., true), 20.);
+        assert_eq!(z(20., 16., false), 18.);
+        assert_eq!(z(28., 16., true), 28.);
+        assert_eq!(z(12., 16., false), 12.);
+        // a custom size between the stops goes to the next one
+        assert_eq!(z(19., 16., true), 20.);
+        // a theme whose body is no stop still lands on it
+        assert_eq!(z(15., 15.5, true), 15.5);
+        assert_eq!(doc_pref_for(16., 16.), "");
+        assert_eq!(doc_pref_for(18., 16.), "large");
+        assert_eq!(doc_pref_for(22., 16.), "22");
+    }
+
+    #[test]
     fn doc_size_presets_and_custom() {
         // the presets keep their names (and an older library's values); a number is a custom size
         for (pref, pt) in [("small", 15.), ("", 16.), ("large", 18.), ("xlarge", 20.), ("17", 17.), ("12", 12.), ("24", 24.)] {
@@ -1035,7 +1072,7 @@ mod tests {
     fn css_values() {
         let css = r#"
             /* comment */
-            :root { --theme-name: "T"; --accent: hsl(254, 80%, 68%); --color-red: #d44c47; --token-block-hover: rgba(0,0,0,.05); --mine: 1px; }
+            :root { --theme-name: "T"; --accent: hsl(254, 80%, 68%); --color-red: #d44c47; --token-block-hover: rgba(0,0,0,.05); --token-scrollbar-thumb: #00000038; --token-no-such: red; --mine: 1px; }
             .page, body { font-size: 16px; line-height: 1.5; font-family: "No Such", -apple-system, sans-serif; }
             h1 { font-size: 1.875em; line-height: 1.3; margin-top: 2em; font-weight: 600; }
             blockquote { border-left: 3px solid var(--accent); }
@@ -1057,7 +1094,9 @@ mod tests {
         assert_eq!((st.num("callout.pad-y"), st.num("callout.pad-x")), (16., 12.));
         assert!(st.palette("color", "red").is_some());
         assert!(st.tokens[TOKENS.iter().position(|t| *t == "block_hover").unwrap()].is_some());
-        assert_eq!(warn.len(), 2, "{warn:?}");
+        // a retired token loads quietly; an unknown one is listed
+        assert_eq!(warn.len(), 3, "{warn:?}");
+        assert!(warn.iter().any(|w| w.starts_with("--token-no-such")), "{warn:?}");
         assert!(warn.iter().any(|w| w.starts_with("@media")), "{warn:?}");
         assert!(warn.iter().any(|w| w == ".made-up { color }"), "{warn:?}");
     }

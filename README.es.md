@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/readme-home.webp" width="100%" alt="Quiet.md sobre una pradera en pixel art: la barra lateral muestra las carpetas y el Inicio presenta cada carpeta como una pila de tarjetas de notas con imágenes.">
+  <img src="docs/images/readme-home.webp" width="100%" alt="Quiet.md sobre una pradera en pixel art: la barra lateral muestra las carpetas y la página de la carpeta principal presenta cada carpeta como una pila de tarjetas de notas con imágenes.">
 </p>
 
 > [!NOTE]
@@ -69,12 +69,12 @@ Las pizarras son un tablero portado de Excalidraw: formas, flechas que siguen un
 
 ### Organiza en carpetas de verdad
 
-El Inicio muestra cada carpeta como una pila de sus páginas. Mantén una nota sobre una carpeta y se abrirá sola; las carpetas pueden ir dentro de otras carpetas y los movimientos se pueden deshacer. Fija notas y márcalas como favoritas, busca en todos los títulos y líneas con `⌘ J`, y busca y reemplaza dentro de una nota, también con expresiones regulares. Las notas eliminadas esperan en la papelera. Los archivos y carpetas Markdown que tengas en otras partes del ordenador se pueden abrir en **Archivos de este ordenador** y editar donde están.
+El Inicio muestra cada carpeta como una pila de sus páginas. Mantén una nota sobre una carpeta y se abrirá sola; las carpetas pueden ir dentro de otras carpetas y los movimientos se pueden deshacer. Fija notas en la barra lateral, busca en todos los títulos y líneas con `⌘ J`, y busca y reemplaza dentro de una nota, también con expresiones regulares. Las notas eliminadas esperan en la papelera. Los archivos y carpetas Markdown que tengas en otras partes del ordenador se pueden abrir en **Archivos de este ordenador** y editar donde están.
 
 ### Trae tus notas
 
 <p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="La pantalla del primer inicio de Quiet.md, que ofrece importar una bóveda de Obsidian que ha encontrado.">
+  <img src="docs/images/readme-import.webp" width="100%" alt="La pantalla del primer inicio de Quiet.md, que ofrece abrir donde está una bóveda de Obsidian que ha encontrado.">
 </p>
 
 En el primer inicio, Quiet.md busca tus bibliotecas de Obsidian, Logseq, iA Writer y Typora y las copia, sin tocar los originales. Los `[[enlaces wiki]]` de Obsidian siguen funcionando: haz clic en uno para abrir la nota a la que apunta. Más adelante, arrastra archivos y carpetas Markdown al Inicio o directamente a una carpeta de la barra lateral. Las notas vuelven a salir como Markdown o PDF, o directas a la impresora.
@@ -171,5 +171,5 @@ El código se publica bajo la licencia [MIT](LICENSE). El código, las fuentes y
 
 Lo siguiente no está cubierto por la licencia MIT y debe sustituirse en los forks:
 
-- Los iconos de Nucleo de `assets/icons/` (69) y `assets/editor-icons/` (24) están bajo una licencia comercial de Nucleo. No los extraigas ni los redistribuyas por separado.
+- Los iconos de Nucleo de `assets/icons/` (82) y `assets/editor-icons/` (24) están bajo una licencia comercial de Nucleo. No los extraigas ni los redistribuyas por separado.
 - El nombre “Quiet.md” y el icono de la app.

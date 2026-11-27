@@ -206,33 +206,30 @@ const FIELD_ROW_W: f32 = 272.;
 
 // ---- pickers ----
 
-/// Where a picker opens for a click on its box.
-fn below(ev: &ClickEvent) -> Point<Pixels> { let p = ev.position(); point(p.x - px(16.), p.y + px(18.)) }
-
 /// The table's fields but `skip`, `cur` ticked.
-fn pick_field(v: &mut TableView, pos: Point<Pixels>, cur: Option<FieldId>, skip: Vec<FieldId>, cx: &mut Context<TableView>, pick: impl Fn(&mut TableView, FieldId, &mut Window, &mut Context<TableView>) + 'static) {
+fn pick_field(v: &mut TableView, from: Bounds<Pixels>, cur: Option<FieldId>, skip: Vec<FieldId>, cx: &mut Context<TableView>, pick: impl Fn(&mut TableView, FieldId, &mut Window, &mut Context<TableView>) + 'static) {
     let Some(list) = peek(v, cx, |t, view| t.ordered_fields(view).into_iter().filter(|f| !skip.contains(&f.id)).map(|f| (f.id, f.name.clone(), f.ty)).collect::<Vec<_>>()) else { return };
     if list.is_empty() { return; }
     let items = list.iter().map(|(id, name, ty)| DropItem::new(name.clone()).glyph(field_glyph(*ty)).on(Some(*id) == cur)).collect();
-    v.open_dropdown(pos, 212., items, move |v, k, window, cx| if let Some((id, ..)) = list.get(k) { pick(v, *id, window, cx) }, cx);
+    v.open_dropdown(from, 212., items, move |v, k, window, cx| if let Some((id, ..)) = list.get(k) { pick(v, *id, window, cx) }, cx);
 }
 
 /// A select condition's options. 单选 等于 / 不等于 takes one and closes; the rest tick several and stay open.
-fn pick_options(v: &mut TableView, kind: Kind, i: usize, pos: Point<Pixels>, cx: &mut Context<TableView>) {
+fn pick_options(v: &mut TableView, kind: Kind, i: usize, from: Bounds<Pixels>, cx: &mut Context<TableView>) {
     let Some((opts, chosen, single)) = peek(v, cx, |t, view| {
         let c = cond(view, kind, i)?;
         let f = t.field(c.field)?;
         Some((f.opts.options.iter().map(|o| (o.name.clone(), o.color)).collect::<Vec<_>>(), field::split_list(&c.value), f.ty == FieldType::SingleSelect && matches!(c.op, FilterOp::Is | FilterOp::IsNot)))
     }).flatten() else { return };
-    if opts.is_empty() { return v.open_dropdown(pos, 216., vec![DropItem::new(label("没有选项"))], |_, _, _, _| {}, cx); }
+    if opts.is_empty() { return v.open_dropdown(from, 216., vec![DropItem::new(label("没有选项"))], |_, _, _, _| {}, cx); }
     let items = opts.iter().map(|(name, color)| DropItem::new(name.clone()).tag(*color).on(chosen.contains(name))).collect();
-    v.open_dropdown(pos, 216., items, move |v, k, window, cx| {
+    v.open_dropdown(from, 216., items, move |v, k, window, cx| {
         let Some((name, _)) = opts.get(k) else { return };
         let mut now = chosen.clone();
         if single { now = if now == [name.clone()] { vec![] } else { vec![name.clone()] }; }
         else if let Some(at) = now.iter().position(|n| n == name) { now.remove(at); } else { now.push(name.clone()); }
         set_cond(v, kind, i, window, cx, |c| c.value = now.join(","));
-        if !single { pick_options(v, kind, i, pos, cx); }
+        if !single { pick_options(v, kind, i, from, cx); }
     }, cx);
 }
 
@@ -277,45 +274,45 @@ fn order_words(ty: Option<FieldType>) -> (&'static str, &'static str) {
 fn cond_controls(t: &Table, kind: Kind, i: usize, c: &Cond, panel: &Panel, field_w: f32, cx: &Context<TableView>) -> Div {
     let f = t.field(c.field);
     let row = div().flex_1().min_w_0().flex().items_center().gap(px(8.))
-        .child(pick_box(("tb-pc-field", i), field_body(f)).flex_none().w(px(field_w)).on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| {
+        .child({ let (mk, at) = TableView::mark(); pick_box(("tb-pc-field", i), field_body(f)).child(mk).flex_none().w(px(field_w)).on_click(cx.listener(move |v, _: &ClickEvent, _, cx| {
             let cur = peek(v, cx, |_, view| cond(view, kind, i).map(|c| c.field)).flatten();
-            pick_field(v, below(ev), cur, vec![], cx, move |v, fid, window, cx| set_cond_field(v, kind, i, fid, window, cx));
-        })));
+            pick_field(v, at.get(), cur, vec![], cx, move |v, fid, window, cx| set_cond_field(v, kind, i, fid, window, cx));
+        })) });
     let Some(f) = f else { return row };
     let typed = |row: Div| row.child(input_box(("tb-pc-input", i)).flex_1().min_w_0().children(panel.inputs.get(i).map(|(e, _)| div().flex_1().min_w_0().child(e.clone()))));
     if f.ty == FieldType::Checkbox {
         let on = !field::parse(f, &c.value).is_empty();
-        return row.child(select_box(("tb-pc-check", i), label(if on { "已勾选" } else { "未勾选" })).flex_1().min_w_0().on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| {
+        return row.child({ let (mk, at) = TableView::mark(); select_box(("tb-pc-check", i), label(if on { "已勾选" } else { "未勾选" })).child(mk).flex_1().min_w_0().on_click(cx.listener(move |v, _: &ClickEvent, _, cx| {
             let items = vec![DropItem::new(label("已勾选")).on(on), DropItem::new(label("未勾选")).on(!on)];
-            v.open_dropdown(below(ev), 140., items, move |v, k, window, cx| set_cond(v, kind, i, window, cx, |c| { c.op = FilterOp::Is; c.value = if k == 0 { "true" } else { "false" }.into(); }), cx);
-        })));
+            v.open_dropdown(at.get(), 140., items, move |v, k, window, cx| set_cond(v, kind, i, window, cx, |c| { c.op = FilterOp::Is; c.value = if k == 0 { "true" } else { "false" }.into(); }), cx);
+        })) });
     }
-    let row = row.child(select_box(("tb-pc-op", i), op_label(c.op)).flex_none().w(px(108.)).on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| {
+    let row = row.child({ let (mk, at) = TableView::mark(); select_box(("tb-pc-op", i), op_label(c.op)).child(mk).flex_none().w(px(108.)).on_click(cx.listener(move |v, _: &ClickEvent, _, cx| {
         let Some((ops, cur)) = peek(v, cx, |t, view| { let c = cond(view, kind, i)?; Some((query::ops_for(t.field(c.field)?.ty), c.op)) }).flatten() else { return };
         let items = ops.iter().map(|o| DropItem::new(op_label(*o)).on(*o == cur)).collect();
-        v.open_dropdown(below(ev), 140., items, move |v, k, window, cx| if let Some(op) = ops.get(k).copied() {
+        v.open_dropdown(at.get(), 140., items, move |v, k, window, cx| if let Some(op) = ops.get(k).copied() {
             set_cond(v, kind, i, window, cx, |c| {
                 c.op = op;
                 // 早于 / 晚于 take a day, not a span
                 if matches!(op, FilterOp::Before | FilterOp::After) && !DateRef::ALL[..4].contains(&c.date) { c.date = DateRef::Exact; c.value.clear(); }
             });
         }, cx);
-    })));
+    })) });
     if !c.op.needs_value() { return row; }
     if f.ty.select() {
         let names = field::split_list(&c.value);
         let mut body = div().flex().items_center().gap(px(4.));
         if names.is_empty() { body = body.text_color(Theme::text_placeholder()).child(label("请选择选项")); }
         for n in &names { body = body.child(tag(n, f.option_named(n).map_or(9, |o| o.color))); }
-        return row.child(pick_box(("tb-pc-opts", i), body).flex_1().min_w_0().on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| pick_options(v, kind, i, below(ev), cx))));
+        return row.child({ let (mk, at) = TableView::mark(); pick_box(("tb-pc-opts", i), body).child(mk).flex_1().min_w_0().on_click(cx.listener(move |v, _: &ClickEvent, _, cx| pick_options(v, kind, i, at.get(), cx))) });
     }
     if f.ty.is_date() {
         let (cur, exact, near) = (c.date, c.date == DateRef::Exact, matches!(c.op, FilterOp::Before | FilterOp::After));
-        let row = row.child(select_box(("tb-pc-date", i), label(cur.label())).map(|d| if exact { d.flex_none().w(px(104.)) } else { d.flex_1().min_w_0() }).on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| {
+        let row = row.child({ let (mk, at) = TableView::mark(); select_box(("tb-pc-date", i), label(cur.label())).child(mk).map(|d| if exact { d.flex_none().w(px(104.)) } else { d.flex_1().min_w_0() }).on_click(cx.listener(move |v, _: &ClickEvent, _, cx| {
             let refs: &'static [DateRef] = if near { &DateRef::ALL[..4] } else { DateRef::ALL };
             let items = refs.iter().map(|r| DropItem::new(label(r.label())).on(*r == cur)).collect();
-            v.open_dropdown(below(ev), 160., items, move |v, k, window, cx| if let Some(r) = refs.get(k).copied() { set_cond(v, kind, i, window, cx, |c| c.date = r) }, cx);
-        })));
+            v.open_dropdown(at.get(), 160., items, move |v, k, window, cx| if let Some(r) = refs.get(k).copied() { set_cond(v, kind, i, window, cx, |c| c.date = r) }, cx);
+        })) });
         return if exact { typed(row) } else { row };
     }
     typed(row)
@@ -386,7 +383,7 @@ fn field_list(t: &Table, view: &View, panel: &Panel, room: f32, cx: &Context<Tab
         .child(menu_item("tb-pl-add", "plus", label("新增字段"), false).on_click(cx.listener(|v, _, window, cx| {
             let Some((pos, _)) = v.popup.take() else { return };
             let form = fields::FieldForm::add(v, None, window, cx);
-            v.open_popup(pos, Popup::FieldForm(form), cx);
+            v.swap_popup(pos, Popup::FieldForm(form), cx);
         })))
         .into_any_element()
 }
@@ -407,10 +404,10 @@ fn filter_panel(t: &Table, view: &View, panel: &Panel, room: f32, cx: &Context<T
         let (before, after) = (before.trim().to_string(), after.trim().to_string());
         p = p.child(div().flex().items_center().gap(px(8.)).text_color(Theme::text_caption())
             .when(!before.is_empty(), |d| d.child(before))
-            .child(select_box("tb-pf-all", label(if all { "所有" } else { "任一" })).flex_none().w(px(76.)).on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| {
+            .child({ let (mk, at) = TableView::mark(); select_box("tb-pf-all", label(if all { "所有" } else { "任一" })).child(mk).flex_none().w(px(76.)).on_click(cx.listener(move |v, _: &ClickEvent, _, cx| {
                 let items = vec![DropItem::new(label("所有")).on(all), DropItem::new(label("任一")).on(!all)];
-                v.open_dropdown(below(ev), 96., items, |v, k, _, cx| v.edit_view(cx, |view| view.opts.filter.all = k == 0), cx);
-            })))
+                v.open_dropdown(at.get(), 96., items, |v, k, _, cx| v.edit_view(cx, |view| view.opts.filter.all = k == 0), cx);
+            })) })
             .when(!after.is_empty(), |d| d.child(after)));
     }
     for (i, c) in f.conds.iter().enumerate() {
@@ -441,14 +438,14 @@ fn order_panel(t: &Table, view: &View, kind: Kind, room: f32, cx: &Context<Table
         let seg = |k: usize, text: &str, on: bool| segment(("tb-po-seg", i * 2 + k), on, label(text))
             .on_click(cx.listener(move |v, _, _, cx| v.edit_view(cx, |view| if let Some(s) = sorts_mut(view, kind).get_mut(i) { s.desc = k == 1; })));
         p = p.child(div().flex().items_center().gap(px(8.))
-            .child(pick_box(("tb-po-field", i), field_body(f)).flex_none().w(px(140.)).on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| {
+            .child({ let (mk, at) = TableView::mark(); pick_box(("tb-po-field", i), field_body(f)).child(mk).flex_none().w(px(140.)).on_click(cx.listener(move |v, _: &ClickEvent, _, cx| {
                 // a field sorts (groups) once
                 let Some((cur, used)) = peek(v, cx, |_, view| { let l = sorts(view, kind); (l.get(i).map(|s| s.field), l.iter().enumerate().filter(|(k, _)| *k != i).map(|(_, s)| s.field).collect::<Vec<_>>()) }) else { return };
-                pick_field(v, below(ev), cur, used, cx, move |v, fid, _, cx| v.edit_view(cx, |view| {
+                pick_field(v, at.get(), cur, used, cx, move |v, fid, _, cx| v.edit_view(cx, |view| {
                     if let Some(s) = sorts_mut(view, kind).get_mut(i) { s.field = fid; }
                     if kind == Kind::Group { view.opts.folded.clear(); }
                 }));
-            })))
+            })) })
             .child(seg_track().flex_1().min_w_0().child(seg(0, asc, !s.desc)).child(seg(1, desc, s.desc)))
             .child(x_btn(("tb-po-del", i)).on_click(cx.listener(move |v, _, _, cx| v.edit_view(cx, |view| {
                 let l = sorts_mut(view, kind);
@@ -458,13 +455,13 @@ fn order_panel(t: &Table, view: &View, kind: Kind, room: f32, cx: &Context<Table
     }
     // 飞书's last line is an empty picker: choosing a field adds the next level
     if t.fields.iter().any(|f| !list.iter().any(|s| s.field == f.id)) && (!group || list.len() < GROUP_LEVELS) {
-        p = p.child(div().flex().child(pick_box("tb-po-add", div().text_color(Theme::text_placeholder()).child(label("选择条件"))).flex_none().w(px(140.)).on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| {
+        p = p.child(div().flex().child({ let (mk, at) = TableView::mark(); pick_box("tb-po-add", div().text_color(Theme::text_placeholder()).child(label("选择条件"))).child(mk).flex_none().w(px(140.)).on_click(cx.listener(move |v, _: &ClickEvent, _, cx| {
             let used = peek(v, cx, |_, view| sorts(view, kind).iter().map(|s| s.field).collect::<Vec<_>>()).unwrap_or_default();
-            pick_field(v, below(ev), None, used, cx, move |v, fid, _, cx| v.edit_view(cx, |view| {
+            pick_field(v, at.get(), None, used, cx, move |v, fid, _, cx| v.edit_view(cx, |view| {
                 let l = sorts_mut(view, kind);
                 if !l.iter().any(|s| s.field == fid) && (kind != Kind::Group || l.len() < GROUP_LEVELS) { l.push(SortBy { field: fid, desc: false }); }
             }));
-        }))));
+        })) }));
     }
     if group && !list.is_empty() {
         let fold = |id: &'static str, text: &str, shut: bool| text_btn(id, "", text).on_click(cx.listener(move |v, _, _, cx| {

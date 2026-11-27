@@ -653,7 +653,11 @@ impl Editor {
     /// 预览 (the eye, 全屏, a video's play): Quick Look, whatever the file is.
     pub(super) fn preview_file(&mut self, p: Option<&Path>, cx: &mut Context<Self>) {
         match p.filter(|p| p.fs_is_file()) {
-            Some(p) => quick_look(p),
+            // Quick Look is the Mac's (`qlmanage`); elsewhere the system's own app for the file, or
+            // the file shown in its folder when opening it would run a program
+            Some(p) if cfg!(target_os = "macos") || crate::devtools::scripted() || cfg!(target_family = "wasm") => quick_look(p),
+            Some(p) if crate::local_files::runs_program(p) => cx.reveal_path(p),
+            Some(p) => cx.open_with_system(p),
             None => self.toast(crate::settings::text("文件不存在"), cx),
         }
     }

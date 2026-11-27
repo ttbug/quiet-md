@@ -7,7 +7,11 @@ script and log stays in a temporary directory; each run quits the app.
 Cases: typing, enter, arrows, start, end, wheel (a manual scroll stays until
 the next keystroke), click (a click doesn't scroll), select (a selection
 reveals as usual), off (the switch off: no centring), shortcut (⌘⇧T turns it
-on), low (克制 motion jumps), perf (typing in a long document stays fast).
+on), low (克制 motion jumps), perf (typing in a long document stays fast),
+focus (段落聚焦 fades the other paragraphs, light and dark, and keeps a selection clear),
+find (a hit comes to the middle), resize (a resize keeps a centred line there, not a
+scrolled page), paste (a big paste is there at once), ime (composing keeps the page
+still), focus_key (⌘⇧F toggles 段落聚焦, remembered).
 """
 import json
 import os
@@ -24,12 +28,12 @@ W, H = 1200, 850
 LINE = 30  # a body line is about 26px; the middle may be off by up to half of one
 
 
-def fixture(name, typewriter=True, motion="high", paragraphs=80, long=False):
+def fixture(name, typewriter=True, motion="high", paragraphs=80, long=False, focus=False, appearance="light"):
     source = work / (name + "-source")
     (source / "docs").mkdir(parents=True)
     (source / "index.json").write_text(json.dumps({doc_id: {"created": 1, "modified": 1, "opened": 1}}))
     (source / "preferences.json").write_text(json.dumps({
-        "theme": "craft", "appearance": "light", "english": True, "seen_version": "9.9.9",
+        "theme": "craft", "appearance": appearance, "paragraph_focus": focus, "english": True, "seen_version": "9.9.9",
         "auto_update": False, "quick_hotkey": False, "typewriter": typewriter, "motion": motion,
     }))
     xml = '<title>Typewriter</title>\n'
@@ -49,6 +53,21 @@ def run(name, steps, **kw):
     log = (folder / "log").read_text(errors="replace")
     carets = [(float(y), float(h)) for y, h in re.findall(r"devtools: caret (-?[\d.]+) of ([\d.]+)", log)]
     return carets, log, folder
+
+
+def page_top(log):
+    return float(re.findall(r"devtools: caret -?[\d.]+ of [\d.]+ at ([\d.]+)", log)[-1])
+
+
+def ink(folder, shot, y):
+    """How far the text on the line at window y (points) stands from the page: 0–255."""
+    from PIL import Image
+    im = Image.open(folder / (shot + ".png")).convert("L")
+    k = im.width / W
+    strip = im.crop((round(330 * k), round((y - 10) * k), round(900 * k), round((y + 10) * k)))
+    px = sorted(strip.get_flattened_data())
+    bg = px[len(px) // 2]
+    return max(abs(v - bg) for v in px)
 
 
 # Puts the caret in the middle of the document (find, then close the bar),
@@ -155,6 +174,63 @@ def case_perf():
     off = bench_mean(run("perf-off", steps, paragraphs=2000, long=True, typewriter=False)[1])
     print(f"perf: frame mean {on:.2f}ms on, {off:.2f}ms off")
     assert on < max(off * 1.5, off + 4), f"typing is slower with 打字机模式: {on:.2f} vs {off:.2f} ms"
+
+
+def case_focus():
+    # 段落聚焦: the caret's paragraph keeps its ink, the others fade (both looks);
+    # a selection over three paragraphs keeps all three clear; the title alone at the start.
+    for look in ("light", "dark"):
+        steps = to_middle + "type x\n" + settle + "shot mid\nkey shift-down\nkey shift-down\nwait 600\nshot sel\n"
+        carets, log, f = run("focus-" + look, steps, focus=True, appearance=look)
+        y = page_top(log) + carets[0][0]
+        lit, above, below3 = ink(f, "mid", y), ink(f, "mid", y - 2 * 35), ink(f, "mid", y + 3 * 35)
+        assert lit > 1.8 * max(above, below3), f"{look}: the other paragraphs don't fade ({lit} vs {above}, {below3}); see {f}"
+        sel = [ink(f, "sel", y + i * 35) for i in range(3)]
+        assert min(sel) > 1.8 * ink(f, "sel", y + 4 * 35), f"{look}: a selected paragraph faded {sel}; see {f}"
+    carets, log, f = run("focus-off", to_middle + "type x\n" + settle + "shot mid\n")
+    y = page_top(log) + carets[0][0]
+    assert ink(f, "mid", y + 3 * 35) > 0.7 * ink(f, "mid", y), f"faded with the switch off; see {f}"
+
+
+def case_find():
+    # A find hit comes to the middle, where the caret will write.
+    carets, _, f = run("find", "key cmd-f\ntype MIDDLE_MARK\nwait 700\nkey escape\nkey right\n" + settle)
+    centred(carets[0], "find", f)
+
+
+def case_resize():
+    # The window resized under a centred caret: the line stays in the middle;
+    # scrolled away by the wheel first, the page stays where it was put.
+    carets, log, f = run("resize", to_middle + "type x\n" + settle + f"resize {W} 600\n" + settle + f"resize {W} {H}\n" + settle
+                         + "wheel 700 400 -150\n" + settle + f"resize {W} 700\n" + settle)
+    for i in (1, 2): centred(carets[i], f"resize {i}", f)
+    assert abs(carets[4][0] - carets[3][0]) < 1, f"a resize pulled a scrolled page back: {carets}; see {f}"
+
+
+def case_paste():
+    # A big paste lands the caret far below: the page is there at once, not gliding a long way.
+    clip = work / "big.txt"
+    clip.write_text("\n".join(f"Pasted line {i}" for i in range(150)))
+    carets, _, f = run("paste", to_middle + "type x\n" + settle + f"clip text {clip}\nkey cmd-v\nwait 60\ncaret\n" + settle)
+    centred(carets[1], "paste, next frames", f)
+    centred(carets[2], "paste", f)
+
+
+def case_ime():
+    # A word being composed keeps the page still; once committed, the line comes to the middle.
+    carets, _, f = run("ime", to_middle + "wait 300\ncaret\nmark nihao\n" + settle + "commit 你好\n" + settle)
+    assert abs(carets[1][0] - carets[0][0]) < 1, f"composing moved the page: {carets}; see {f}"
+    centred(carets[2], "ime committed", f)
+
+
+def case_focus_key():
+    # ⌘⇧F turns 段落聚焦 on and off, remembered.
+    carets, log, f = run("focus-key", to_middle + "type x\n" + settle + "key cmd-shift-f\nwait 600\nshot on\nkey cmd-shift-f\nwait 600\nshot off\n")
+    y = page_top(log) + carets[0][0]
+    assert ink(f, "on", y) > 1.8 * ink(f, "on", y + 3 * 35), f"⌘⇧F didn't fade the others; see {f}"
+    assert ink(f, "off", y + 3 * 35) > 0.7 * ink(f, "off", y), f"⌘⇧F didn't turn it off; see {f}"
+    saved = json.loads(next((f / "lib").rglob("preferences.json")).read_text())
+    assert saved.get("paragraph_focus") is False, f"not remembered: {saved}; see {f}"
 
 
 CASES = {n[5:]: f for n, f in globals().items() if n.startswith("case_")}

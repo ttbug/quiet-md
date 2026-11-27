@@ -167,7 +167,7 @@ fn color_title(t: &'static str) -> Div {
 /// 在下方添加 ›: hovering opens the insert panel next to the handle menu.
 fn add_below_row(open: bool, cx: &Context<Editor>) -> MenuItem {
     row("bm-add", "square-plus", "在下方添加", true, open)
-        .on_mouse_move(cx.listener(|e: &mut Editor, _: &MouseMoveEvent, _, cx| {
+        .on_mouse_move(crate::design::sub_move(cx.listener(|e: &mut Editor, _: &MouseMoveEvent, _, cx| {
             if let Some(Menu::Block { sub, .. }) = &mut e.menu
                 && !matches!(sub, Some(BlockSub::Add(_)))
             {
@@ -176,7 +176,7 @@ fn add_below_row(open: bool, cx: &Context<Editor>) -> MenuItem {
                 e.slash_scroll.set_offset(Point::default());
                 cx.notify();
             }
-        }))
+        })))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
@@ -438,7 +438,7 @@ impl Editor {
             .flex()
             .flex_col(), PAD);
         let hover_sel = |n: usize| {
-            cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
+            crate::design::sub_move(cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
                 let cur = match (&mut e.slash, &mut e.menu) {
                     (Some(s), _) => &mut s.selected,
                     (None, Some(Menu::Add { selected, .. })) => selected,
@@ -450,7 +450,7 @@ impl Editor {
                     e.size_pick = (0, 0);
                     cx.notify();
                 }
-            })
+            }))
         };
         // In the "+" panel 表格 and 分栏 open a size picker instead of inserting.
         let add_panel = self.slash.is_none();
@@ -553,7 +553,9 @@ impl Editor {
         };
         // The shared scrollbar (shadcn's ScrollArea): shows while the pointer is over the menu or it scrolls.
         let thumb = self.slash_bar.render(&self.slash_scroll);
+        // beside the handle menu's 在下方添加 it is that row's submenu
         let el = Popover::new("slash-menu")
+            .when(beside.is_some(), |d| d.submenu())
             .relative()
             .w(px(SLASH_W + lane))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -573,7 +575,7 @@ impl Editor {
         let off = -f32::from(self.slash_scroll.offset().y);
         let top = (f32::from(menu_top) + row_top - off + ROW_H / 2. - ph / 2.).min(vh - 8. - ph).max(8.);
         let left = pos.x + px(SLASH_W + lane + 4.);
-        out.push(at(self.rel(point(left, px(top))), Anchor::TopLeft, picker));
+        out.push(at(self.rel(point(left, px(top))), Anchor::TopLeft, div().relative().child(picker).child(crate::design::submenu_area())));
         Some(())
     }
 
@@ -672,14 +674,14 @@ impl Editor {
             })
         };
         let set_sub = |s: Option<BlockSub>| {
-            cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
+            crate::design::sub_move(cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
                 if let Some(Menu::Block { sub, .. }) = &mut e.menu
                     && *sub != s
                 {
                     *sub = s;
                     cx.notify();
                 }
-            })
+            }))
         };
         let mut m = Popover::new("block-menu").menu().w(px(MENU_W));
         let mut turn = shape.turn_items();
@@ -754,6 +756,7 @@ impl Editor {
                 Some(
                     Popover::new("bm-indent-sub")
                         .menu()
+                        .submenu()
                         .absolute()
                         .left(px(MENU_W + 4.))
                         .top(px(indent_y - PAD))
@@ -775,7 +778,7 @@ impl Editor {
                 } else {
                     self.color_panel(Some(block), cx).into_any_element()
                 };
-                Some(div().absolute().left(px(MENU_W + 4.)).top(px(color_y - PAD)).child(p).into_any_element())
+                Some(div().absolute().left(px(MENU_W + 4.)).top(px(color_y - PAD)).child(p).child(crate::design::submenu_area()).into_any_element())
             }
             _ => None,
         };
@@ -1715,14 +1718,14 @@ impl Editor {
             })
         };
         let set_sub = |s: Option<BlockSub>| {
-            cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
+            crate::design::sub_move(cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
                 if let Some(Menu::Block { sub, .. }) = &mut e.menu
                     && *sub != s
                 {
                     *sub = s;
                     cx.notify();
                 }
-            })
+            }))
         };
         let plain = |id: &'static str, ic: &'static str, label: &'static str, a: BlockAct| {
             row(id, ic, label, false, false).on_mouse_move(set_sub(None)).on_mouse_down(MouseButton::Left, act(a))
@@ -1756,6 +1759,7 @@ impl Editor {
             };
             Popover::new("bm-indent-sub")
                 .menu()
+                .submenu()
                 .absolute()
                 .left(px(MENU_W + 4.))
                 .top_0()

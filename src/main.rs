@@ -5,6 +5,7 @@ pub(crate) const APP_ID: &str = "com.s1dashu.quietmd";
 
 mod app;
 mod agent;
+mod agent_connect;
 #[cfg(unix)]
 mod big_alloc;
 mod board;
@@ -45,6 +46,7 @@ mod input;
 mod logging;
 mod modes;
 mod typewriter;
+mod zoom;
 mod import_sources;
 mod onboarding;
 #[cfg(target_os = "macos")]
@@ -97,6 +99,7 @@ mod entries;
 mod tree_writes;
 mod ui;
 mod update;
+mod usage;
 #[cfg(target_family = "wasm")]
 mod web;
 
@@ -152,7 +155,7 @@ pub(crate) fn main_window_options(scripted: bool, at: Option<Bounds<Pixels>>, cx
         titlebar: Some(TitlebarOptions {
             title: Some("Quiet.md".into()),
             appears_transparent: cfg!(any(target_os = "macos", target_os = "windows")),
-            traffic_light_position: Some(point(px(20.), px(app::HEADER_H / 2. - 7.))),
+            traffic_light_position: Some(crate::focus::lights_at()),
         }),
         window_min_size: Some(size(px(app::DOC_MIN_W), px(480.))),
         // AppKit does not drag from the transparent title bar: the app marks its
@@ -192,6 +195,7 @@ pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, in
     if !scripted && !cfg!(target_family = "wasm") { quick_note::install(cx); }
     app::set_menus(cx);
     update::init(cx);
+    usage::init(cx);
     let took = into.map(|window| window.replace_root(cx, app::Workspace::new));
     if took.is_none() { open_main_window(scripted, None, cx); }
     // A synced library (or one used elsewhere) moves to real folders only once the user agrees.

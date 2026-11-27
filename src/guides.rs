@@ -41,7 +41,7 @@ const WINDOWS_TEXT: &[(&str, &str)] = &[
     ("you put into the folder in the Finder show up", "you put into the folder in File Explorer show up"),
     ("a project banner from your Mac.", "a project banner from your computer."),
     ("<h2>Move to another Mac</h2><ol><li>Quit Quiet.md on the old Mac with", "<h2>Move to another computer</h2><ol><li>Quit Quiet.md on the old computer with"),
-    ("Copy the complete Quiet.md folder into Documents on the new Mac.", "Copy the complete Quiet.md folder into Documents on the new computer."),
+    ("Copy the complete documents folder into Documents on the new Mac.", "Copy the complete documents folder into Documents on the new computer."),
     ("Press a new combination containing Command, Control or Option.", "Press a new combination containing Ctrl or Alt."),
     ("Hold <code>⌥</code> to do the same for every folder inside.", "Hold <code>Alt</code> to do the same for every folder inside."),
     // ⌃⌘D is Ctrl+Shift+D there (Ctrl+Alt reads as AltGr, #290); this entry serves the Chinese guides too
@@ -63,7 +63,7 @@ const WINDOWS_TEXT_ZH: &[(&str, &str)] = &[
     ("在访达中放进这个文件夹", "在文件资源管理器中放进这个文件夹"),
     ("可以使用 Mac 里的照片、插画或项目横幅。", "可以使用电脑里的照片、插画或项目横幅。"),
     ("<h2>迁移到另一台 Mac</h2><ol><li>在旧 Mac 上按", "<h2>迁移到另一台电脑</h2><ol><li>在旧电脑上按"),
-    ("把完整的 Quiet.md 文件夹拷贝到新 Mac 的“文稿”文件夹中。", "把完整的 Quiet.md 文件夹复制到新电脑的“文档”文件夹中。"),
+    ("把完整的文档文件夹拷贝到新 Mac 的“文稿”文件夹中。", "把完整的文档文件夹复制到新电脑的“文档”文件夹中。"),
     ("只要“文稿”文件夹在时间机器的备份范围内，它也会一并受到保护。", "只要“文档”文件夹在你的备份范围内，它也会一并受到保护。"),
     ("按下新的组合键，需包含 Command、Control 或 Option。", "按下新的组合键，需包含 Ctrl 或 Alt。"),
     ("按住 <code>⌥</code> 点击，可以一并展开或收起里面的所有文件夹。", "按住 <code>Alt</code> 点击，可以一并展开或收起里面的所有文件夹。"),

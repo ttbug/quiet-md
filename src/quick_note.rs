@@ -78,7 +78,7 @@ pub fn open_document(document: Option<String>, cx: &mut App) {
         titlebar: Some(TitlebarOptions {
             title: Some(crate::settings::text("Quiet.md · 快速笔记").into()),
             appears_transparent: cfg!(any(target_os = "macos", target_os = "windows")),
-            traffic_light_position: Some(point(px(20.), px(crate::app::HEADER_H / 2. - 7.))),
+            traffic_light_position: Some(crate::focus::lights_at()),
         }),
         window_min_size: Some(size(px(480.), px(480.))),
         app_owns_titlebar_drag: true,
@@ -151,14 +151,15 @@ mod hotkey {
 
 pub fn install(cx: &mut App) -> bool {
     cx.on_action(|_: &QuickNew, cx| open(cx));
-    // Settings › 快速笔记 shows a failure; no alert on every launch.
-    crate::settings::prefs().quick_hotkey && register(cx)
+    // Settings › 快捷键 shows a failure under its row; no alert on every launch.
+    register(cx)
 }
 
 /// Why each global hotkey (快速笔记, 打开上次的文档) isn't registered, if it failed.
 static HOTKEY_ERROR: std::sync::Mutex<[Option<String>; 2]> = std::sync::Mutex::new([None, None]);
-pub fn hotkey_error() -> Option<String> { HOTKEY_ERROR.lock().unwrap().iter().flatten().next().cloned() }
-/// Register the global hotkeys from the shortcuts file.
+pub fn hotkey_error(id: u32) -> Option<String> { HOTKEY_ERROR.lock().unwrap()[id as usize - 1].clone() }
+/// Register the global hotkeys from the shortcuts file, each on its own: a cleared one is let go.
+/// Whether 快速笔记's went through.
 pub fn register(cx: &mut App) -> bool {
     let r = set_hotkey(&crate::shortcuts::global_key(), cx);
     if let Err(e) = &r { eprintln!("全局快捷键注册失败：{e}"); }
@@ -258,7 +259,8 @@ fn set(id: u32, combo: &str, cx: &mut App) -> anyhow::Result<()> {
 pub fn suspend_hotkey() { #[cfg(target_os = "macos")] hotkey::suspend(); *HOTKEY_ERROR.lock().unwrap() = [None, None]; }
 
 #[cfg(not(target_os = "macos"))]
-fn set(id: u32, _: &str, _: &mut App) -> anyhow::Result<()> {
+fn set(id: u32, combo: &str, _: &mut App) -> anyhow::Result<()> {
+    if combo.is_empty() { HOTKEY_ERROR.lock().unwrap()[id as usize - 1] = None; return Ok(()); }
     let error = crate::settings::tr("当前系统暂不支持全局快捷键", "Global shortcuts are not supported on this platform yet");
     HOTKEY_ERROR.lock().unwrap()[id as usize - 1] = Some(error.into());
     Err(anyhow::anyhow!(error))

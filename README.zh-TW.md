@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/readme-home.webp" width="100%" alt="像素風草坡背景上的 Quiet.md：左側側邊欄列出資料夾，首頁將每個資料夾顯示成一疊附圖的筆記卡片。">
+  <img src="docs/images/readme-home.webp" width="100%" alt="像素風草坡背景上的 Quiet.md：左側側邊欄列出資料夾，頂層資料夾頁將每個資料夾顯示成一疊附圖的筆記卡片。">
 </p>
 
 > [!NOTE]
@@ -69,12 +69,12 @@
 
 ### 用真實的資料夾整理
 
-首頁將每個資料夾顯示成一疊紙，裡面有什麼一目了然。把筆記拖到資料夾上稍候片刻，資料夾就會自動展開；資料夾裡還能再放資料夾，移動也能復原。筆記可以釘選、收藏；按 `⌘ J` 搜尋所有標題與內文，在筆記裡尋找與取代，也可以使用規則運算式。刪除的筆記會先移到垃圾桶。電腦上其他位置的 Markdown 檔案和資料夾，可以在「本機檔案」中開啟並就地編輯。
+首頁將每個資料夾顯示成一疊紙，裡面有什麼一目了然。把筆記拖到資料夾上稍候片刻，資料夾就會自動展開；資料夾裡還能再放資料夾，移動也能復原。筆記可以釘選到側欄；按 `⌘ J` 搜尋所有標題與內文，在筆記裡尋找與取代，也可以使用規則運算式。刪除的筆記會先移到垃圾桶。電腦上其他位置的 Markdown 檔案和資料夾，可以在「本機檔案」中開啟並就地編輯。
 
 ### 帶上舊筆記
 
 <p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="Quiet.md 首次啟動的畫面，提示匯入它找到的 Obsidian 筆記庫。">
+  <img src="docs/images/readme-import.webp" width="100%" alt="Quiet.md 首次啟動的畫面，提示原地開啟它找到的 Obsidian 筆記庫。">
 </p>
 
 第一次開啟時，Quiet.md 會找到你的 Obsidian、Logseq、iA Writer 與 Typora 筆記庫並複製進來，原始檔案不會被更動。Obsidian 的 `[[雙向連結]]` 照樣能用，點一下就會開啟它指向的筆記。之後也可以把 Markdown 檔案和資料夾拖到首頁，或直接拖進側邊欄的某個資料夾。筆記也能匯出為 Markdown 或 PDF，或直接列印。
@@ -171,5 +171,5 @@
 
 以下項目不包含在 MIT 授權範圍內，建立衍生分支（Fork）時請自行替換：
 
-- `assets/icons/` 目錄下的 69 個和 `assets/editor-icons/` 目錄下的 24 個 Nucleo 圖示受商業 Nucleo 授權保護，請勿單獨抽離或重新散佈。
+- `assets/icons/` 目錄下的 82 個和 `assets/editor-icons/` 目錄下的 24 個 Nucleo 圖示受商業 Nucleo 授權保護，請勿單獨抽離或重新散佈。
 - 「Quiet.md」名稱與應用程式圖示。

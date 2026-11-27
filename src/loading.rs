@@ -124,7 +124,7 @@ pub fn begin(store: &mut crate::shared_store::SharedStore, cx: &mut App) -> Opti
     start(store, keys, false, cx)
 }
 
-/// Top-level folder `key`, just added (打开文件夹…), listed the same way: here when
+/// Top-level folder `key`, just added (添加文件夹…), listed the same way: here when
 /// quick enough, else in the background with the layer over the page once it takes a while.
 #[cfg(not(target_family = "wasm"))]
 pub fn begin_added(store: &mut crate::shared_store::SharedStore, key: &str, cx: &mut App) -> Option<Vec<Entry>> {

@@ -299,7 +299,7 @@ fn imports_files_but_not_from_scripts() {
 #[test]
 fn every_command_has_help() {
     let lib = library(&[]);
-    for c in ["ls", "find", "outline", "read", "blocks", "links", "check", "new", "mkdir", "insert", "replace", "delete", "move", "set", "rename", "mv", "rm", "table", "board", "history", "restore", "trash", "untrash", "import", "run", "call", "mcp", "skill", "telemetry"] {
+    for c in ["ls", "find", "outline", "read", "blocks", "links", "check", "new", "mkdir", "insert", "replace", "delete", "move", "set", "rename", "mv", "rm", "table", "board", "history", "restore", "trash", "untrash", "import", "run", "call", "mcp", "guide", "telemetry"] {
         let out = ok(&lib, &["help", c]);
         assert!(out.starts_with(&format!("quiet {c}")), "{c}: {out}");
     }
@@ -443,20 +443,13 @@ fn titles_may_hold_a_hash() {
 }
 
 #[test]
-fn installs_the_agent_skill() {
+fn the_guide_is_the_skills_reference() {
     let lib = library(&[]);
-    let dir = lib.with_extension("skills");
-    let out = ok(&lib, &["skill", "install", "--dir", dir.to_str().unwrap()]);
-    assert!(out.contains("installed"), "{out}");
-    let skill = std::fs::read_to_string(dir.join("quiet/SKILL.md")).unwrap();
-    assert!(skill.starts_with("---\nname: quiet\ndescription: "), "the frontmatter comes first");
-    assert!(std::fs::read_to_string(dir.join("quiet/references/guide.md")).unwrap().starts_with("# quiet"));
-    // Again (after an update) replaces it; someone else's skill called quiet is left alone.
-    ok(&lib, &["skill", "install", "--dir", dir.to_str().unwrap()]);
-    std::fs::write(dir.join("quiet/SKILL.md"), "---\nname: quiet\n---\nmine").unwrap();
-    let o = quiet(&lib, &["skill", "install", "--dir", dir.to_str().unwrap()]);
-    assert!(String::from_utf8_lossy(&o.stderr).starts_with("error[exists]"));
-    assert_eq!(std::fs::read_to_string(dir.join("quiet/SKILL.md")).unwrap(), "---\nname: quiet\n---\nmine");
+    let repo = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills/quiet-md/references/guide.md")).unwrap();
+    assert_eq!(ok(&lib, &["guide"]).replace("\r\n", "\n"), repo.replace("\r\n", "\n"));
+    assert!(!quiet(&lib, &["skill", "install"]).stdout.is_empty(), "quiet skill is the guide too; nothing installs");
+    let skill = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills/quiet-md/SKILL.md")).unwrap().replace("\r\n", "\n");
+    assert!(skill.starts_with("---\nname: quiet-md\ndescription: "), "the frontmatter comes first");
 }
 
 /// `quiet` counting into `usage` (a file of the test's own), nothing in the environment turning it off.
@@ -491,6 +484,14 @@ fn usage_is_counted_by_command_name_only() {
     std::fs::write(lib.join(".quiet/preferences.json"), r#"{"auto_update": false}"#).unwrap();
     counted(&lib, &other, &["ls"], None);
     assert!(!other.exists());
+    // 匿名使用统计, once touched, decides on its own.
+    std::fs::write(lib.join(".quiet/preferences.json"), r#"{"auto_update": false, "usage_stats": true}"#).unwrap();
+    counted(&lib, &other, &["ls"], None);
+    assert!(other.exists());
+    let third = lib.with_extension("usage3.json");
+    std::fs::write(lib.join(".quiet/preferences.json"), r#"{"auto_update": true, "usage_stats": false}"#).unwrap();
+    counted(&lib, &third, &["ls"], None);
+    assert!(!third.exists());
 }
 
 #[test]

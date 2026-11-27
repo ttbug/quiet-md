@@ -78,7 +78,7 @@ Documents store text, background and callout colors by name. The theme supplies 
 
 ### Other document details (`--token-*`)
 
-Override `--token-<name>` in `:root` for block hover and selection colors, table toolbars, the size picker and other details. The final section of each built-in theme lists the tokens and their current values.
+Override `--token-<name>` in `:root` for block hover and selection colors, table toolbars, the size picker and other details. The final section of each built-in theme lists the tokens and their current values. `--token-scrollbar-thumb` is gone: scrollbars follow the interface, not the theme. Older files that still set it load without a warning.
 
 ## Scope
 

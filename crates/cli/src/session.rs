@@ -511,6 +511,18 @@ impl Session {
             "table_add" => self.table_add(a),
             "table_update" => self.table_update(a),
             "table_delete" => self.table_delete(a),
+            "table_field_add" => self.table_field_add(a),
+            "table_field_change" => self.table_field_change(a),
+            "table_field_delete" => self.table_field_delete(a),
+            "table_views" => self.table_views(a),
+            "table_view_add" => self.table_view_add(a),
+            "table_view_set" => self.table_view_set(a),
+            "table_view_rename" => self.table_view_rename(a),
+            "table_view_delete" => self.table_view_delete(a),
+            "table_new" => self.table_new(a),
+            "table_rename" => self.table_rename(a),
+            "table_remove" => self.table_remove(a),
+            "table_import" => self.table_import(a),
             "board" => self.board(a),
             "board_add" => self.board_add(a),
             "board_remove" => self.board_remove(a),
@@ -550,7 +562,6 @@ impl Session {
         let mut list = tops;
         list.extend(out.iter().map(|e| {
             let mut v = json!({ "path": self.label(e), "id": e.id, "title": e.title, "kind": kind_of(e), "modified": date(e.meta.modified) });
-            if e.meta.starred > 0 { v["starred"] = json!(true); }
             if e.meta.pinned { v["pinned"] = json!(true); }
             v
         }));

@@ -54,8 +54,9 @@ pub struct Meta {
     /// back to `created`.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub order: u64,
-    /// 收藏时间 (0: not starred).
-    #[serde(default, skip_serializing_if = "is_zero")]
+    /// 收藏时间 of older builds (0: none), read but never written: `take_star`
+    /// turns it into `pinned` as it is read, 收藏 being 置顶 now.
+    #[serde(default, skip_serializing)]
     pub starred: u64,
     /// 阅读模式, remembered per document like the page width.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -95,6 +96,9 @@ impl Meta {
     /// Titled by its file name, not by a title inside it: Markdown and
     /// everything that is not a document.
     pub fn named_by_file(&self) -> bool { self.markdown || !self.kind.is_doc() }
+    /// An older build's 收藏 is 置顶 (the maintainer, 2026-11-26): the next
+    /// write says `pinned` and drops `starred`, so taking it again changes nothing.
+    pub(crate) fn take_star(&mut self) { if self.starred > 0 { self.pinned = true; self.starred = 0; } }
 }
 
 /// What a library file holds. Whatever is not a document still lives in the
@@ -277,11 +281,17 @@ pub struct Settings {
     /// 版本历史: snapshots kept per document (1–30). None is the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_limit: Option<u32>,
+    /// 回收站's 自动删除: days a deleted page waits (1–`TRASH_DAYS`). None is `TRASH_DAYS`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trash_days: Option<u32>,
 }
 
 impl Settings {
     pub fn history_limit(&self) -> u32 { crate::versions::clamp_limit(self.history_limit.unwrap_or(crate::versions::DEFAULT_LIMIT)) }
     pub fn set_history_limit(&mut self, n: u32) { self.history_limit = Some(crate::versions::clamp_limit(n)); }
+    /// No longer than `TRASH_DAYS`: devices forget a purged page's record after that many days (meta.rs).
+    pub fn trash_days(&self) -> u64 { self.trash_days.map_or(TRASH_DAYS, |d| (d as u64).clamp(1, TRASH_DAYS)) }
+    pub fn set_trash_days(&mut self, n: u64) { self.trash_days = (n.clamp(1, TRASH_DAYS) != TRASH_DAYS).then_some(n.clamp(1, TRASH_DAYS) as u32); }
 }
 
 /// A document in the 回收站, as kept in `.quiet/trash/index.json`.
@@ -547,6 +557,9 @@ pub const ASSETS: &str = ".assets";
 mod folders;
 #[path = "subdocs.rs"]
 mod subdocs;
+#[path = "across.rs"]
+mod across;
+pub use across::Place;
 
 #[derive(Serialize, Deserialize)]
 struct FormatMarker {
@@ -592,11 +605,12 @@ type DiskIndex = BTreeMap<String, Attached>;
 
 impl Attached {
     fn of(id: &str, m: &Meta) -> Self {
-        Attached { id: id.to_string(), created: m.created, modified: m.modified, pinned: m.pinned, starred: m.starred, order: m.order, top_order: m.top_order,
+        Attached { id: id.to_string(), created: m.created, modified: m.modified, pinned: m.pinned, starred: 0, order: m.order, top_order: m.top_order,
             width: m.width, catalogue_closed: m.catalogue_closed, reading: m.reading, info: m.info, refs_hidden: m.refs_hidden }
     }
+    /// `starred` is read (`take_star`), and `of` writes it no more: saving drops it from the disk.
     fn meta(&self) -> Meta {
-        Meta { created: self.created, modified: self.modified, pinned: self.pinned, starred: self.starred, order: self.order, top_order: self.top_order,
+        Meta { created: self.created, modified: self.modified, pinned: self.pinned || self.starred > 0, order: self.order, top_order: self.top_order,
             width: self.width, catalogue_closed: self.catalogue_closed, reading: self.reading, info: self.info, refs_hidden: self.refs_hidden, ..Default::default() }
     }
 }
@@ -620,6 +634,11 @@ struct Local {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     window_display: Option<String>,
 }
+
+/// The default library's folder, in the user's Documents (`Store::default_in`).
+pub const DEFAULT_NAME: &str = "Quiet Notes";
+/// What builds before 2026-11-26 named it; a library by that name stays the default.
+pub const OLD_DEFAULT_NAME: &str = "Quiet.md";
 
 /// `library.json`: where the library is when it isn't the default.
 #[derive(Serialize, Deserialize)]
@@ -934,14 +953,34 @@ impl Store {
     /// own in the user's Documents, where they can see and back it up.
     pub fn legacy_dir() -> PathBuf {
         std::env::var_os("QUIET_MD_HOME").map(PathBuf::from)
-            .or_else(|| crate::vfs::read(Self::location_file()).ok().and_then(|b| serde_json::from_slice::<Location>(&b).ok()).map(|l| l.path).filter(|p| p.fs_is_absolute()))
-            .unwrap_or_else(Self::default_dir)
+            .unwrap_or_else(|| Self::chosen(crate::vfs::read(Self::location_file()).ok().and_then(|b| serde_json::from_slice::<Location>(&b).ok()).map(|l| l.path), Self::default_dir))
+    }
+
+    /// Whether `root` is where every build, earlier ones too, finds the library without
+    /// `library.json`: `Quiet.md` in `docs`.
+    fn needs_no_pointer(root: &Path, docs: &Path) -> bool { root == docs.join(OLD_DEFAULT_NAME) }
+
+    /// The library `library.json` names (`remembered`) when it names one, else the default.
+    fn chosen(remembered: Option<PathBuf>, default: impl FnOnce() -> PathBuf) -> PathBuf {
+        remembered.filter(|p| p.fs_is_absolute()).unwrap_or_else(default)
     }
 
     pub fn default_dir() -> PathBuf {
         // The web build's library lives in memory (vfs).
-        if cfg!(target_family = "wasm") { return PathBuf::from("/Quiet.md") }
-        dirs::document_dir().or_else(|| dirs::home_dir().map(|h| h.join("Documents"))).unwrap_or_else(|| PathBuf::from(".")).join("Quiet.md")
+        if cfg!(target_family = "wasm") { return PathBuf::from("/").join(DEFAULT_NAME) }
+        Self::default_in(&Self::documents())
+    }
+
+    /// The user's Documents, where the default library lives.
+    fn documents() -> PathBuf { dirs::document_dir().or_else(|| dirs::home_dir().map(|h| h.join("Documents"))).unwrap_or_else(|| PathBuf::from(".")) }
+
+    /// The default library in `docs` (the user's Documents): `Quiet Notes` for someone new
+    /// ("Quiet.md" read like a Markdown file in Finder, 2026-11-26), the `Quiet.md` builds
+    /// before that made wherever it is there, even beside a `Quiet Notes`: nobody's library
+    /// is renamed, moved or doubled.
+    pub fn default_in(docs: &Path) -> PathBuf {
+        let old = docs.join(OLD_DEFAULT_NAME);
+        if old.fs_is_dir() { old } else { docs.join(DEFAULT_NAME) }
     }
 
     /// 应用级设置: preferences, shortcuts, themes, emoji and the window's
@@ -1224,12 +1263,15 @@ impl Store {
     }
 
     /// Use `root` for the rest of this run, and from now on unless
-    /// `QUIET_MD_HOME` says otherwise. The default location needs no pointer.
+    /// `QUIET_MD_HOME` says otherwise. Only `~/Documents/Quiet.md` needs no pointer: every
+    /// build looks there without one, and every other place is written down, `Quiet Notes`
+    /// too, so an installed earlier build (which reads only this file) follows a rename
+    /// rather than starting an empty library where the old one was.
     pub fn remember_dir(root: PathBuf) -> Result<()> {
         let file = Self::location_file();
         // Test runs (`QUIET_MD_HOME`) never move the real library.
         if std::env::var_os("QUIET_MD_HOME").is_some() {}
-        else if root == Self::default_dir() { let _ = crate::vfs::remove_file(&file); }
+        else if Self::needs_no_pointer(&root, &Self::documents()) { let _ = crate::vfs::remove_file(&file); }
         else {
             crate::vfs::create_dir_all(file.parent().unwrap())?;
             write_atomic(&file, &serde_json::to_vec_pretty(&Location { path: root.clone() })?)?;
@@ -1420,6 +1462,7 @@ impl Store {
             v5, me, clock: Default::default(), seen: Default::default(), merged: Default::default(), key: key.to_string(), place_by_hand: true, v6, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
         if flat {
             store.index = load_json(&base.join("index.json"), "文档索引", &mut store.warnings);
+            store.index.values_mut().for_each(Meta::take_star);
             store.flat_folders()?;
         } else if v5 {
             let mut warnings = vec![];
@@ -1797,6 +1840,7 @@ impl Store {
             // Folders opened in place before top-level folders are top-level folders of their own now.
             if index.contains_key(id) || m.path.is_none() || m.folder.is_some() || m.parent.is_some() { continue; }
             let mut m = m.clone();
+            m.take_star();
             m.opened = local.opened.get(id).copied().unwrap_or(m.opened);
             index.insert(id.clone(), m);
         }
@@ -2055,7 +2099,7 @@ impl Store {
                 self.reclaim_open(before);
             }
         } else if self.flat {
-            if let Some(index) = reread(&self.index_file()) { self.index = index; }
+            if let Some(index) = reread::<HashMap<String, Meta>>(&self.index_file()) { self.index = index; self.index.values_mut().for_each(Meta::take_star); }
         } else if let Some(disk) = reread::<DiskIndex>(&self.index_file()) {
             let before = std::mem::take(&mut self.index);
             let local = self.read_local();
@@ -2528,8 +2572,8 @@ impl Store {
         keys.extend(found.docs.iter().cloned());
         keys.extend(found.pending.iter().cloned());
         // A folder with nothing listed in it shows only when the user made it here (or
-        // pinned, starred or renamed it): a found one has the id its path gives.
-        let users = |k: &str, a: &Attached| !self.v5 || a.id != meta::path_id(k) || a.pinned || a.starred > 0;
+        // pinned or renamed it): a found one has the id its path gives.
+        let users = |k: &str, a: &Attached| !self.v5 || a.id != meta::path_id(k) || a.pinned;
         for d in &found.empty {
             let k = format!("{d}/");
             if !disk.get(&k).is_some_and(|a| users(&k, a)) { continue }
@@ -3066,19 +3110,23 @@ impl Store {
         Ok(id)
     }
 
-    /// 创建副本 of a 数据表: its file copied under `title`, beside nothing in particular (the caller places it).
+    /// 创建副本 of a 数据表 (`duplicate`): its file copied under `title` into folder `parent`.
     #[cfg(not(target_family = "wasm"))]
-    pub fn copy_table(&mut self, src: &str, title: &str) -> Result<String> {
+    pub(super) fn copy_table_in(&mut self, src: &str, title: &str, parent: Option<&str>) -> Result<String> {
         anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据表");
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
+        self.validate_folder(None, parent)?;
         let t = now();
-        let rel = self.free_name("", &file_name_for(title), Some(DocKind::Table.ext(false)), None);
+        let dir = self.folder_rel(parent);
+        let rel = join_rel(&dir, &self.free_name(&dir, &file_name_for(title), Some(DocKind::Table.ext(false)), None));
         let from = self.path(src);
         self.index.insert(id.clone(), Meta { created: t, modified: t, opened: t, rel, ..Default::default() });
         derive_tree(&mut self.index);
         if let Err(e) = crate::vfs::copy(&from, self.path(&id)).map_err(anyhow::Error::from).and_then(|_| self.save_index()) { self.index.remove(&id); return Err(e); }
+        self.record_file_change(&id, None);
         drop(lock);
+        self.place_new(&id, parent)?;
         Ok(id)
     }
 
@@ -3326,7 +3374,7 @@ impl Store {
 
     /// The 回收站, newest first: one row per deleted page (its child pages
     /// ride along). Files trashed by older versions are adopted, and pages
-    /// past 30 days are removed for good.
+    /// past the 自动删除 days (`Settings::trash_days`) are removed for good.
     pub fn list_trash(&mut self) -> Vec<TrashEntry> {
         let _lock = match self.begin_write() {
             Ok(lock) => Some(lock),
@@ -3380,7 +3428,7 @@ impl Store {
             self.trash.retain(|id, t| t.meta.folder.is_some() || on_disk.contains(id));
             dirty |= self.trash.len() != before;
         }
-        let cutoff = now().saturating_sub(TRASH_DAYS * 86_400);
+        let cutoff = now().saturating_sub(self.settings().trash_days() * 86_400);
         let expired: Vec<String> = self.trash.iter().filter(|(_, t)| t.deleted <= cutoff).map(|(k, _)| k.clone()).collect();
         for id in expired.into_iter().filter(|_| _lock.is_some()) {
             let p = self.trash_path(&id);
@@ -3673,6 +3721,7 @@ impl Store {
             // The top-level folder's own (D5): in the devices' files, the latest of each.
             let m = self.merged.borrow();
             s.history_limit = m.get(meta::FOLDER_ITEM, "history_limit").and_then(|v| v.as_u64()).map(|n| n as u32);
+            s.trash_days = m.get(meta::FOLDER_ITEM, "trash_days").and_then(|v| v.as_u64()).map(|n| n as u32);
             s.scroll_top = m.items.keys().filter_map(|id| Some((id.clone(), serde_json::from_value(m.get(id, "scroll")?.clone()).ok()?))).collect();
         }
         s
@@ -3689,6 +3738,7 @@ impl Store {
             let was = self.settings();
             let mut changes = vec![];
             if was.history_limit != s.history_limit { changes.push((meta::FOLDER_ITEM.to_string(), "history_limit".to_string(), serde_json::to_value(s.history_limit)?)); }
+            if was.trash_days != s.trash_days { changes.push((meta::FOLDER_ITEM.to_string(), "trash_days".to_string(), serde_json::to_value(s.trash_days)?)); }
             for (id, v) in &s.scroll_top { if was.scroll_top.get(id) != Some(v) { changes.push((id.clone(), "scroll".into(), serde_json::to_value(v)?)); } }
             for id in was.scroll_top.keys() { if !s.scroll_top.contains_key(id) { changes.push((id.clone(), "scroll".into(), serde_json::Value::Null)); } }
             if changes.is_empty() { return Ok(()) }
@@ -3759,17 +3809,6 @@ impl Store {
         Ok(self.index[id].clone())
     }
 
-    /// 收藏 / 取消收藏; returns the new 收藏时间 (0: not starred).
-    pub fn set_starred(&mut self, id: &str, on: bool) -> Result<u64> {
-        let _lock = self.begin_write()?;
-        let t = if on { now() } else { 0 };
-        if let Some(m) = self.index.get_mut(id) {
-            m.starred = t;
-        }
-        self.save_index()?;
-        Ok(t)
-    }
-
     pub fn set_pinned(&mut self, id: &str, pinned: bool) -> Result<()> {
         let _lock = self.begin_write()?;
         if let Some(m) = self.index.get_mut(id) {
@@ -3807,6 +3846,24 @@ mod tests {
     thread_local!(pub static STAY_4: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
     // … and FORMAT 5.
     thread_local!(pub static STAY_5: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+
+    #[test]
+    fn someone_new_gets_quiet_notes_and_an_old_library_stays_the_default() {
+        let docs = crate::vfs::temp_dir().join(format!("fdl-test-docs-{}", uuid::Uuid::new_v4()));
+        crate::vfs::create_dir_all(&docs).unwrap();
+        assert_eq!(Store::default_in(&docs), docs.join("Quiet Notes"), "a new install");
+        crate::vfs::create_dir_all(docs.join("Quiet.md")).unwrap();
+        assert_eq!(Store::default_in(&docs), docs.join("Quiet.md"), "a library builds before made, at the default place");
+        crate::vfs::create_dir_all(docs.join("Quiet Notes").join(INTERNAL)).unwrap();
+        assert_eq!(Store::default_in(&docs), docs.join("Quiet.md"), "both there: the old one, nothing doubled");
+        let elsewhere = docs.join("Elsewhere");
+        assert_eq!(Store::chosen(Some(elsewhere.clone()), || Store::default_in(&docs)), elsewhere, "library.json's place, whatever is in Documents");
+        assert_eq!(Store::chosen(Some("relative".into()), || Store::default_in(&docs)), docs.join("Quiet.md"), "a pointer that isn't a place: the default");
+        // Earlier builds read only library.json and look in Quiet.md without it: anywhere else is written down.
+        assert!(Store::needs_no_pointer(&docs.join("Quiet.md"), &docs));
+        assert!(!Store::needs_no_pointer(&docs.join("Quiet Notes"), &docs) && !Store::needs_no_pointer(&elsewhere, &docs));
+        let _ = crate::vfs::remove_dir_all(&docs);
+    }
 
     /// A library in a fresh temporary folder, removed on drop.
     struct Lib(PathBuf);
@@ -4745,12 +4802,12 @@ mod tests {
         // Another device writes its file: the next write here sees it.
         meta::commit(&lib.0, &dev("bbbb"), &Default::default(), vec![(x.clone(), "pinned".into(), true.into())], &mut vec![]).unwrap();
         assert_eq!(meta::cached(&lib.0, "aaaa", &first, &mut vec![]).get(&x, "pinned"), Some(&serde_json::Value::Bool(true)));
-        a.set_starred(&x, true).unwrap();
+        a.set_width(&x, PageWidth::Wide).unwrap();
         let m = a.list().into_iter().find(|e| e.id == x).unwrap().meta;
-        assert!(m.pinned && m.starred > 0);
+        assert!(m.pinned && m.width == PageWidth::Wide);
         // Its own write keeps the view current, and a later one by another device still shows.
         meta::commit(&lib.0, &dev("bbbb"), &Default::default(), vec![(x.clone(), "pinned".into(), false.into())], &mut vec![]).unwrap();
-        a.set_starred(&x, false).unwrap();
+        a.set_width(&x, PageWidth::Standard).unwrap();
         assert!(!a.list().into_iter().find(|e| e.id == x).unwrap().meta.pinned);
     }
 
@@ -4771,8 +4828,8 @@ mod tests {
         a.list();
         assert_eq!(loads(), n, "nothing changed: nothing read again");
         // This device's own writes keep memory and the disk together.
-        a.set_starred(&x, true).unwrap();
-        assert!(a.list().into_iter().find(|e| e.id == x).unwrap().meta.starred > 0);
+        a.set_width(&x, PageWidth::Wide).unwrap();
+        assert!(a.list().into_iter().find(|e| e.id == x).unwrap().meta.width == PageWidth::Wide);
         assert_eq!(loads(), n, "its own write: nothing read again");
         // Another device writes: the next look reads again, and only that once.
         other_pins(&lib, "bbbb", &x, true);
@@ -4861,7 +4918,7 @@ mod tests {
         a.list();
         assert_eq!(loads(), n, "only its file is missing: nothing read again");
         // This device's writes keep it out of memory and leave its entry on disk.
-        a.set_starred(&x, true).unwrap();
+        a.set_width(&x, PageWidth::Wide).unwrap();
         a.list();
         assert_eq!(loads(), n);
         assert_eq!(meta::load(&lib.0, "aaaa", &mut vec![]).get("far", "pinned"), Some(&serde_json::Value::Bool(true)));
@@ -4885,12 +4942,12 @@ mod tests {
         // Written there while this device saves without listing first: the save
         // takes it in and does not put the old value back.
         other_pins(&lib, "bbbb", &x, false);
-        a.set_starred(&x, true).unwrap();
+        a.set_width(&x, PageWidth::Wide).unwrap();
         let merged = meta::load(&lib.0, "aaaa", &mut vec![]);
         assert_eq!(merged.get(&x, "pinned"), Some(&serde_json::Value::Bool(false)));
-        assert!(merged.get(&x, "starred").is_some());
+        assert!(merged.get(&x, "width").is_some());
         let m = a.list().into_iter().find(|e| e.id == x).unwrap().meta;
-        assert!(!m.pinned && m.starred > 0);
+        assert!(!m.pinned && m.width == PageWidth::Wide);
         // And a change by this device afterwards still goes on top of it.
         a.set_pinned(&x, true).unwrap();
         assert_eq!(meta::load(&lib.0, "aaaa", &mut vec![]).get(&x, "pinned"), Some(&serde_json::Value::Bool(true)));
@@ -4986,14 +5043,14 @@ mod tests {
         let x = a.create_from(&doc("甲")).unwrap();
         let y = a.create_from(&doc("乙")).unwrap();
         let file = |d: &str| meta::dir(&lib.0).join(format!("{d}.json"));
-        // "eeee": wins x's pinned and y's width, loses x's starred to a later write here,
+        // "eeee": wins x's pinned and y's width, loses x's width to a later write here,
         // and ties "dddd" on y's width (it wins that tie by its id).
         let t = crate::time::now_ms();
         crate::vfs::write(file("eeee"), serde_json::to_vec(&serde_json::json!({ "v": 1, "device": { "id": "eeee", "name": "旧电脑", "platform": "windows" },
-            "items": { (x.clone()): { "pinned": [true, t], "starred": [5, 1] }, (y.clone()): { "width": ["wide", t] } } })).unwrap()).unwrap();
+            "items": { (x.clone()): { "pinned": [true, t], "width": ["full", 1] }, (y.clone()): { "width": ["wide", t] } } })).unwrap()).unwrap();
         crate::vfs::write(file("dddd"), serde_json::to_vec(&serde_json::json!({ "v": 1, "device": { "id": "dddd" },
             "items": { (y.clone()): { "width": ["full", t] } } })).unwrap()).unwrap();
-        a.set_starred(&x, true).unwrap();
+        a.set_width(&x, PageWidth::Wide).unwrap();
         let view = || {
             let m = meta::load(&lib.0, "aaaa", &mut vec![]);
             m.items.into_iter().map(|(i, f)| (i, f.into_iter().map(|(k, w)| (k, w.v)).collect::<BTreeMap<_, _>>())).collect::<BTreeMap<_, _>>()
@@ -5009,7 +5066,7 @@ mod tests {
         assert!(!file("eeee").fs_exists() && file("dddd").fs_exists());
         assert!(!a.devices().iter().any(|d| d.device.id == "eeee"));
         let m = a.list().into_iter().find(|e| e.id == x).unwrap().meta;
-        assert!(m.pinned && m.starred > 5);
+        assert!(m.pinned && m.width == PageWidth::Wide);
     }
 
     #[test]
@@ -5036,7 +5093,7 @@ mod tests {
         let f = s.create_folder("夹", None).unwrap();
         let b = s.create_from_in(&doc("乙"), Some(&f)).unwrap();
         s.set_pinned(&a, true).unwrap();
-        s.set_starred(&b, true).unwrap();
+        s.set_width(&b, PageWidth::Wide).unwrap();
         let mut st = s.settings();
         st.set_history_limit(7);
         st.scroll_top.insert(a.clone(), [3., 12.5]);
@@ -5051,7 +5108,7 @@ mod tests {
         assert!(meta::dir(&lib.0).join(device().id).fs_is_dir() && lib.0.join(".quiet/index.json.v4").fs_is_file() && !lib.0.join(".quiet/index.json").fs_exists());
         let list = s.list();
         let by = |id: &str| list.iter().find(|e| e.id == id).unwrap().meta.clone();
-        assert!(by(&a).pinned && by(&b).starred > 0 && by(&b).parent.as_deref() == Some(f.as_str()));
+        assert!(by(&a).pinned && by(&b).width == PageWidth::Wide && by(&b).parent.as_deref() == Some(f.as_str()));
         assert_eq!(s.settings().history_limit(), 7);
         assert_eq!(s.scroll_top(&a), Some((3, 12.5)));
         assert_eq!(Store::look_at(&lib.0).theme.as_deref(), Some("墨"));
@@ -5201,7 +5258,7 @@ mod tests {
         a.set_pinned(&p[1], true).unwrap();
         let mut b = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("bbbb")).unwrap();
         b.list();
-        b.set_starred(&p[2], true).unwrap();
+        b.set_width(&p[2], PageWidth::Wide).unwrap();
         b.move_in_tree(&p[5], Some(&f), Some(&p[1])).unwrap();
         b.set_pinned(&p[1], false).unwrap();
         a.delete(&p[3], None).unwrap();
@@ -5218,7 +5275,7 @@ mod tests {
         let lib = Lib::new("to-shards");
         let (f, p) = whole_file_library(&lib);
         let before = view(&lib);
-        assert!(before[&p[4]].contains_key("purged") && before[&p[3]].contains_key("trashed") && before[&p[2]].contains_key("starred"));
+        assert!(before[&p[4]].contains_key("purged") && before[&p[3]].contains_key("trashed") && before[&p[2]].contains_key("width"));
         // What a third device lists, before and after.
         let listed = |lib: &Lib| {
             let mut c = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("cccc")).unwrap();
@@ -5479,7 +5536,7 @@ mod tests {
         let v = clean();
         assert!(v["items"].get("gone-1").is_some() && v["items"].get("empty").is_some(), "bbbb has not seen them: {v}");
         // Once bbbb writes again, it has.
-        write(0, "bbbb", vec![("b", "starred", 1.into())]);
+        write(0, "bbbb", vec![("b", "reading", true.into())]);
         meta::CLOCK.with(|c| c.set(None));
         let v = clean();
         assert!(v["items"].get("gone-1").is_none() && v["items"].get("empty").is_none(), "{v}");
@@ -5501,7 +5558,7 @@ mod tests {
         write(40, "bbbb", "x", "pinned", true.into());
         write(35, "aaaa", "x", "pinned", serde_json::Value::Null);
         let other = (0..).map(|n| format!("别片-{n}")).find(|z| meta::shard_of(z) != meta::shard_of("x")).unwrap();
-        write(1, "bbbb", &other, "starred", 1.into());
+        write(1, "bbbb", &other, "reading", true.into());
         meta::CLOCK.with(|c| c.set(None));
         meta::clean_all(&lib.0, &dev("aaaa"), &mut vec![]).unwrap();
         assert!(lib.dev_items("aaaa")["items"]["x"]["pinned"].is_array(), "the null keeps bbbb's true down");
@@ -5572,6 +5629,112 @@ mod tests {
         assert_eq!(i < j, start[0] < other);
     }
 
+    /// An older build's 收藏 (`starred`) by device `by`.
+    fn old_star(lib: &Lib, by: &str, id: &str) {
+        meta::commit(&lib.0, &dev(by), &Default::default(), vec![(id.to_string(), "starred".into(), 1_700_000_000_000u64.into())], &mut vec![]).unwrap();
+    }
+    /// What the device files say of `id`'s `pinned` and `starred`.
+    fn pin_star(lib: &Lib, id: &str) -> (Option<serde_json::Value>, Option<serde_json::Value>) {
+        let m = meta::load(&lib.0, "", &mut vec![]);
+        (m.get(id, "pinned").cloned(), m.get(id, "starred").cloned())
+    }
+
+    /// 收藏 is 置顶 now (the maintainer, 2026-11-26): an older build's star
+    /// reads as a pin, the next write says so and drops the star, and the
+    /// star is not taken again: an unpin afterwards stays.
+    #[test]
+    fn an_older_builds_star_is_a_pin() {
+        let lib = Lib::new("star-pin");
+        let mut a = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("aaaa")).unwrap();
+        let [x, y, z] = ["只收藏", "置顶又收藏", "别的"].map(|t| a.create_from(&doc(t)).unwrap());
+        a.set_pinned(&y, true).unwrap();
+        old_star(&lib, "bbbb", &x);
+        old_star(&lib, "bbbb", &y);
+        assert!(pinned(&mut a, &x) && pinned(&mut a, &y) && !pinned(&mut a, &z));
+        assert!(a.list().iter().all(|e| e.meta.starred == 0));
+        // Any write by this device writes it down.
+        a.set_width(&z, PageWidth::Wide).unwrap();
+        for id in [&x, &y] { assert_eq!(pin_star(&lib, id), (Some(true.into()), None), "{id}"); }
+        let fresh = |lib: &Lib| Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("cccc")).unwrap();
+        assert!(pinned(&mut fresh(&lib), &x) && pinned(&mut fresh(&lib), &y));
+        // Unpinned here, it stays unpinned: on reopening and for another device.
+        a.set_pinned(&x, false).unwrap();
+        drop(a);
+        let mut a = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("aaaa")).unwrap();
+        assert!(!pinned(&mut a, &x) && !pinned(&mut fresh(&lib), &x));
+        // Taken again, it changes nothing.
+        let before = view(&lib);
+        a.set_width(&z, PageWidth::Full).unwrap();
+        let after = view(&lib);
+        assert_eq!(before.iter().filter(|(k, _)| **k != z).collect::<Vec<_>>(), after.iter().filter(|(k, _)| **k != z).collect::<Vec<_>>());
+        // An older build starring it again pins it again.
+        old_star(&lib, "bbbb", &x);
+        assert!(pinned(&mut a, &x));
+    }
+
+    /// Two older builds star a page each, two newer ones take the stars in
+    /// and write: they write the same, and every device reads both pinned.
+    #[test]
+    fn stars_from_two_devices_are_taken_in_by_two() {
+        let lib = Lib::new("star-two");
+        let mut a = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("aaaa")).unwrap();
+        let [x, y, z] = ["甲", "乙", "丙"].map(|t| a.create_from(&doc(t)).unwrap());
+        old_star(&lib, "bbbb", &x);
+        old_star(&lib, "cccc", &y);
+        let mut d = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("dddd")).unwrap();
+        assert!(pinned(&mut a, &x) && pinned(&mut a, &y) && pinned(&mut d, &x) && pinned(&mut d, &y));
+        a.set_width(&z, PageWidth::Wide).unwrap();
+        d.set_width(&z, PageWidth::Full).unwrap();
+        for id in [&x, &y] { assert_eq!(pin_star(&lib, id), (Some(true.into()), None), "{id}"); }
+        let mut e = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("eeee")).unwrap();
+        assert!(pinned(&mut e, &x) && pinned(&mut e, &y) && !pinned(&mut e, &z));
+        // Once each has written, neither has anything more to write.
+        let before = view(&lib);
+        a.set_pinned(&x, true).unwrap();
+        d.set_pinned(&y, true).unwrap();
+        assert_eq!(view(&lib), before);
+    }
+
+    /// FORMAT 4's `index.json` (one file, no device stamps): the same.
+    #[test]
+    fn a_format_4_star_is_a_pin() {
+        let lib = Lib::new("star-v4");
+        STAY_4.with(|k| k.set(true));
+        let mut s = lib.open();
+        let [x, z] = ["甲", "乙"].map(|t| s.create_from(&doc(t)).unwrap());
+        drop(s);
+        let file = lib.0.join(".quiet/index.json");
+        let mut disk: serde_json::Value = reread(&file).unwrap();
+        for (_, e) in disk.as_object_mut().unwrap() { if e["id"] == x.as_str() { e["starred"] = 5.into(); } }
+        crate::vfs::write(&file, serde_json::to_vec(&disk).unwrap()).unwrap();
+        let mut s = lib.open();
+        assert!(pinned(&mut s, &x) && !pinned(&mut s, &z));
+        s.set_width(&z, PageWidth::Wide).unwrap();
+        let text = String::from_utf8(crate::vfs::read(&file).unwrap()).unwrap();
+        assert!(!text.contains("starred") && text.contains("pinned"), "{text}");
+        STAY_4.with(|k| k.set(false));
+    }
+
+    /// The old layout's `index.json` (FORMAT 3), moved to real folders: the same.
+    #[test]
+    fn a_format_3_star_is_a_pin() {
+        let lib = Lib::new("star-v3");
+        let mut old = Old::new(&lib, 3);
+        let [x, y, z] = ["甲", "乙", "丙"].map(|t| old.doc(t, Meta::default()));
+        old.index.get_mut(&y).unwrap().pinned = true;
+        old.write();
+        // `Meta` writes no `starred` any more: put it in as an older build had it.
+        let file = lib.0.join("index.json");
+        let mut index: serde_json::Value = reread(&file).unwrap();
+        for id in [&x, &y] { index[id.as_str()]["starred"] = 5.into(); }
+        crate::vfs::write(&file, serde_json::to_vec(&index).unwrap()).unwrap();
+        let mut s = lib.migrated();
+        let list = s.list();
+        let by = |t: &str| list.iter().find(|e| e.title == t).unwrap().meta.pinned;
+        assert!(by("甲") && by("乙") && !by("丙"));
+        let _ = z;
+    }
+
     #[test]
     fn devices_merge_field_by_field() {
         let lib = Lib::new("devices");
@@ -5581,29 +5744,34 @@ mod tests {
         assert!(b.list().iter().any(|e| e.id == x));
         // Different fields of one document: both stay.
         a.set_pinned(&x, true).unwrap();
-        b.set_starred(&x, true).unwrap();
+        b.set_width(&x, PageWidth::Wide).unwrap();
         let mut c = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("cccc")).unwrap();
         let m = c.list().into_iter().find(|e| e.id == x).unwrap().meta;
-        assert!(m.pinned && m.starred > 0);
+        assert!(m.pinned && m.width == PageWidth::Wide);
         // One field: the later write wins, and the earlier device's file drops it on its next write.
         b.set_pinned(&x, false).unwrap();
         assert!(!c.list().into_iter().find(|e| e.id == x).unwrap().meta.pinned);
-        a.set_starred(&x, false).unwrap();
+        a.set_width(&x, PageWidth::Standard).unwrap();
         let file = |d: &str| lib.dev_text(d);
         assert!(!file("aaaa").contains("pinned") && file("bbbb").contains("pinned"));
         // A store that read before another device wrote does not undo it with what it read.
         let y = a.create_from(&doc("另一篇")).unwrap();
         b.list();
         a.set_pinned(&y, true).unwrap();
-        b.set_starred(&y, true).unwrap();
+        b.set_width(&y, PageWidth::Wide).unwrap();
         let m = c.list().into_iter().find(|e| e.id == y).unwrap().meta;
-        assert!(m.pinned && m.starred > 0);
+        assert!(m.pinned && m.width == PageWidth::Wide);
         // The top-level folder's own settings, each field on its own.
         let mut st = a.settings();
         st.set_history_limit(9);
         a.save_settings(&st).unwrap();
         b.list();
         assert_eq!(b.settings().history_limit(), 9);
+        let mut st = a.settings();
+        st.set_trash_days(7);
+        a.save_settings(&st).unwrap();
+        b.list();
+        assert_eq!((b.settings().trash_days(), b.settings().history_limit()), (7, 9));
         // Renamed on one device, the others follow.
         a.rename(&x, "改名").unwrap();
         assert_eq!(c.list().into_iter().find(|e| e.id == x).unwrap().meta.rel, "改名.xml");
@@ -5672,7 +5840,7 @@ mod tests {
         s.set_pinned(&id, true).unwrap();
         // The second write left the first (pinned: false) as the backup;
         // one more makes the backup pinned too.
-        s.set_starred(&id, true).unwrap();
+        s.set_width(&id, PageWidth::Wide).unwrap();
         let shard = lib.dev_file(&device().id, &id);
         crate::vfs::write(&shard, b"{ not json").unwrap();
         let mut s = lib.open();
@@ -5752,6 +5920,30 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list.iter().find(|e| e.id == b).unwrap().meta.parent.as_deref(), Some(a.as_str()));
         assert!(s.list_trash().is_empty());
+    }
+
+    /// 自动删除 after the chosen days, never past `TRASH_DAYS`.
+    #[test]
+    fn trash_keeps_pages_the_chosen_days() {
+        let lib = Lib::new("trash-days");
+        let mut s = lib.open();
+        let (a, b) = (s.create_from(&doc("八天前")).unwrap(), s.create_from(&doc("六天前")).unwrap());
+        s.delete(&a, None).unwrap();
+        s.delete(&b, None).unwrap();
+        s.trash.get_mut(&a).unwrap().deleted -= 8 * 86_400;
+        s.trash.get_mut(&b).unwrap().deleted -= 6 * 86_400;
+        s.save_trash().unwrap();
+        assert_eq!(s.list_trash().len(), 2, "30 days by default");
+        let mut st = s.settings();
+        st.set_trash_days(7);
+        s.save_settings(&st).unwrap();
+        let t = s.list_trash();
+        assert_eq!(t.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), [b.as_str()]);
+        let mut st = s.settings();
+        st.set_trash_days(90);
+        assert_eq!((st.trash_days(), st.trash_days), (TRASH_DAYS, None));
+        st.set_trash_days(0);
+        assert_eq!(st.trash_days(), 1);
     }
 
     /// A page a tree writer deleted is in this copy's 回收站 too, and comes back.
@@ -5923,12 +6115,12 @@ mod tests {
         let one = a.create_from(&doc("一")).unwrap();
         let two = b.create_from(&doc("二")).unwrap();
         a.set_pinned(&one, true).unwrap();
-        b.set_starred(&two, true).unwrap();
+        b.set_width(&two, PageWidth::Wide).unwrap();
         let mut c = lib.open();
         let list = c.list();
         assert_eq!(list.len(), 2);
         assert!(list.iter().find(|e| e.id == one).unwrap().meta.pinned, "b kept a's entry");
-        assert!(list.iter().find(|e| e.id == two).unwrap().meta.starred > 0, "a kept b's entry");
+        assert!(list.iter().find(|e| e.id == two).unwrap().meta.width == PageWidth::Wide, "a kept b's entry");
     }
 
     #[test]
@@ -7842,4 +8034,102 @@ mod tests {
         assert!(scanned >= 10 && mds >= 12, "{scanned} {mds}");
         let _ = crate::vfs::remove_dir_all(&outside);
     }
+
+    /// 创建副本 of a folder (批量管理): the folder with everything in it, each
+    /// page as its kind, links still pointing where they did; one undo takes
+    /// the whole copy away and leaves the original as it was.
+    #[test]
+    fn duplicating_a_folder_copies_everything_in_it() {
+        let lib = Lib::new("dup-folder");
+        let mut s = lib.open();
+        let other = s.create_from(&doc("其他")).unwrap();
+        let f = s.create_folder("资料", None).unwrap();
+        let a = s.create_from_in(&linking("甲", &[(&other, "其他")]), Some(&f)).unwrap();
+        s.set_width(&a, PageWidth::Wide).unwrap();
+        s.create_markdown_in(&doc("笔记"), "---\ntags: [x]\n---\n", Some(&f)).unwrap();
+        s.create_board_in("草图", &crate::whiteboard::Board::default(), Some(&f)).unwrap();
+        s.create_table_in("书单", &crate::table::Base::blank(0), Some(&f)).unwrap();
+        let sub = s.create_folder("子夹", Some(&f)).unwrap();
+        s.create_from_in(&doc("乙"), Some(&sub)).unwrap();
+        let journal = s.track_file_changes();
+        let copy = s.duplicate(&f, "资料 副本").unwrap();
+        let changes = journal.take();
+        for rel in ["资料 副本/甲.xml", "资料 副本/笔记.md", "资料 副本/草图.excalidraw", "资料 副本/书单.sqlite", "资料 副本/子夹/乙.xml"] { assert!(s.abs(rel).fs_is_file(), "{rel}"); }
+        assert!(crate::vfs::read_to_string(s.abs("资料 副本/甲.xml")).unwrap().contains("href=\"../其他.xml\""));
+        assert!(crate::vfs::read_to_string(s.abs("资料 副本/笔记.md")).unwrap().starts_with("---\ntags: [x]"));
+        let list = s.list();
+        let inside = |p: &str| list.iter().filter(|e| e.meta.parent.as_deref() == Some(p)).count();
+        assert_eq!((inside(&copy), inside(&f)), (5, 5));
+        assert!(list.iter().any(|e| e.meta.parent.as_deref() == Some(&copy) && e.title == "甲" && e.meta.width == PageWidth::Wide));
+        assert_eq!(s.index[&copy].parent, None, "beside the original");
+        // 撤销: one step, the copy goes; the original stays.
+        s.apply_file_history(&changes, false).unwrap();
+        assert!(!s.abs("资料 副本").fs_exists() && !s.index.contains_key(&copy));
+        assert!(s.abs("资料/子夹/乙.xml").fs_is_file() && s.abs("资料/书单.sqlite").fs_is_file());
+        s.apply_file_history(&changes, true).unwrap();
+        assert!(s.abs("资料 副本/子夹/乙.xml").fs_is_file() && s.abs("资料 副本/书单.sqlite").fs_is_file());
+    }
+
+    /// A folder's 正文 follows the copy's name, so the copy is a document with
+    /// child pages too; the 正文 copied alone goes beside its folder.
+    #[test]
+    fn duplicating_a_page_with_children_keeps_its_shape() {
+        let lib = Lib::new("dup-note");
+        let mut s = lib.open();
+        let outer = s.create_folder("外", None).unwrap();
+        let plan = s.create_from_in(&doc("方案"), Some(&outer)).unwrap();
+        s.create_child(&plan, &doc("子页")).unwrap();
+        let folder = s.folder_of_note(&plan).unwrap();
+        let copy = s.duplicate(&folder, "方案 副本").unwrap();
+        assert!(s.abs("外/方案 副本/方案 副本.xml").fs_is_file() && s.abs("外/方案 副本/子页.xml").fs_is_file());
+        assert!(s.note_of(&copy).is_some());
+        let alone = s.duplicate(&plan, "方案 副本 2").unwrap();
+        assert_eq!(s.index[&alone].parent.as_deref(), Some(outer.as_str()), "beside its folder, not a child page of it");
+        assert!(s.abs("外/方案 副本 2.xml").fs_is_file());
+    }
+
+    /// 创建副本 runs on a background writer (`tree_writer`), as 删除 does: the
+    /// window's library reads the copies back, and its 撤销 takes them away.
+    #[test]
+    fn duplicating_runs_on_a_background_writer() {
+        let lib = Lib::new("dup-background");
+        let mut s = lib.open();
+        let f = s.create_folder("夹", None).unwrap();
+        for t in ["一", "二", "三"] { s.create_from_in(&doc(t), Some(&f)).unwrap(); }
+        let lone = s.create_from(&doc("单篇")).unwrap();
+        let mut writer = s.tree_writer();
+        let (made, changes) = std::thread::spawn(move || {
+            let journal = writer.track_file_changes();
+            let made: Vec<String> = [(&f, "夹 副本"), (&lone, "单篇 副本")].iter().map(|(id, t)| writer.duplicate(id, t).unwrap()).collect();
+            (made, journal.take())
+        }).join().unwrap();
+        let list = s.list();
+        assert!(made.iter().all(|id| list.iter().any(|e| &e.id == id)));
+        assert_eq!(list.iter().filter(|e| e.meta.parent.as_deref() == Some(made[0].as_str())).count(), 3);
+        assert_eq!(changes.len(), 5, "the folder, its three pages and the document");
+        s.apply_file_history(&changes, false).unwrap();
+        assert!(!s.abs("夹 副本").fs_exists() && !s.abs("单篇 副本.xml").fs_exists() && s.abs("夹/三.xml").fs_is_file());
+    }
+
+    /// 批量管理's 移动到 with folders: a folder never goes into itself or below
+    /// it; one moved carries its pages and their links along, and 撤销 puts it
+    /// all back.
+    #[test]
+    fn moving_folders_together_and_back() {
+        let lib = Lib::new("move-folders");
+        let mut s = lib.open();
+        let other = s.create_from(&doc("其他")).unwrap();
+        let (a, b) = (s.create_folder("甲", None).unwrap(), s.create_folder("乙", None).unwrap());
+        let inner = s.create_folder("内", Some(&a)).unwrap();
+        s.create_from_in(&linking("页", &[(&other, "其他")]), Some(&inner)).unwrap();
+        assert!(s.move_in_tree(&a, Some(&inner), None).is_err() && s.move_in_tree(&a, Some(&a), None).is_err());
+        let journal = s.track_file_changes();
+        s.move_in_tree(&a, Some(&b), None).unwrap();
+        let changes = journal.take();
+        assert!(crate::vfs::read_to_string(s.abs("乙/甲/内/页.xml")).unwrap().contains("href=\"../../../其他.xml\""));
+        s.apply_file_history(&changes, false).unwrap();
+        assert!(crate::vfs::read_to_string(s.abs("甲/内/页.xml")).unwrap().contains("href=\"../../其他.xml\""));
+        assert!(!s.abs("乙/甲").fs_exists());
+    }
+
 }

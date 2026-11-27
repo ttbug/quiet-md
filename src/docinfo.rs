@@ -51,21 +51,6 @@ pub fn word_count(s: &str) -> usize {
     n
 }
 
-/// `word_count` over blocks (children and table cells included) without
-/// joining their text; block boundaries separate words anyway.
-pub fn blocks_word_count(blocks: &[crate::model::Block]) -> usize {
-    blocks
-        .iter()
-        .map(|b| {
-            let cells = match &b.kind {
-                crate::model::BlockKind::Table(t) => t.rows.iter().flatten().map(|c| blocks_word_count(&c.blocks)).sum(),
-                _ => 0,
-            };
-            word_count(&b.text.text) + blocks_word_count(&b.children) + cells
-        })
-        .sum()
-}
-
 /// 字符数: every visible character (letters, digits, CJK, punctuation); no spaces.
 pub fn char_count(s: &str) -> usize {
     s.chars().filter(|c| !c.is_whitespace() && *c != '\u{fffc}').count()

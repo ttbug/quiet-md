@@ -47,6 +47,11 @@ pub(crate) const ROW_R: f32 = 9.;
 pub(crate) const ROW_GAP: f32 = crate::design::G.sidebar_gap;
 pub(crate) const ROW_ICON: f32 = 18.;
 pub(crate) const GROUP_GAP: f32 = 16.;
+/// Room above each top-level folder's heading after the first: the groups stand apart.
+pub(crate) const TOP_GAP: f32 = 12.;
+/// How far the list tucks up under the window's header, its first heading that much nearer the
+/// traffic lights (a centre 35pt below theirs, as in macOS 26's Notes).
+pub(crate) const LIST_LIFT: f32 = 4.;
 pub(crate) const SECTION_H: f32 = 34.;
 pub(crate) const SECTION_TOP: f32 = 6.;
 /// 我的文档's heading is a row like the others: a `ROW_H` wash, `ROW_GAP` above the first row.
@@ -102,32 +107,40 @@ impl Workspace {
         self.sidebar_width.clamp(theme::SIDEBAR_MIN, max)
     }
 
+    /// The window's header over the sidebar (macOS Notes): clear of the traffic lights, then
+    /// room to drag the window by, and at the sidebar's right end `first` (添加文件夹; 设置's and
+    /// 回收站's 返回) and the toggle that hides the sidebar, HEADER_ACTIONS_GAP apart like a folder
+    /// page's header buttons. The toggle sits in the same spot in every sidebar; hidden, it waits
+    /// by the traffic lights.
+    pub(crate) fn sidebar_header(&self, first: impl IntoElement, cx: &mut Context<Self>) -> Div {
+        div()
+            .h(px(crate::app::HEADER_H))
+            .mb(px(-LIST_LIFT))
+            .flex_none()
+            .flex()
+            .items_center()
+            .pl(px(theme::TRAFFIC_LIGHTS_W))
+            .pr(px(SB_X + 4.))
+            .title_bar()
+            .child(div().flex_1())
+            .children(crate::settings::update_pill(cx))
+            .child(div().flex_none().flex().items_center().gap(px(crate::app::HEADER_ACTIONS_GAP))
+                .child(first)
+                .child(crate::ui::header_icon("collapse-sidebar", "sidebar")
+                    .tip(crate::settings::tr("收起侧栏", "Hide sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
+                    .on_click(cx.listener(|w, _, _, cx| {
+                        w.sidebar_open = false;
+                        cx.notify();
+                    }))))
+    }
+
     pub(crate) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.more_bounds.borrow_mut().clear();
         self.settle_sidebar_drop(cx);
         crate::devtools::rows_begin(window);
 
-        let header = div()
-            .h(px(crate::app::HEADER_H))
-            .flex_none()
-            .flex()
-            .items_center()
-            .pl(px(theme::TRAFFIC_LIGHTS_W))
-            .pr(px(12.))
-            .title_bar()
-            .child(
-                Button::ghost("collapse-sidebar")
-                    .no_drag()
-                    .ml(px(4.))
-                    .icon("panel-left-close")
-                    .tip(crate::settings::tr("收起侧栏", "Hide sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
-                    .on_click(cx.listener(|w, _, _, cx| {
-                        w.sidebar_open = false;
-                        cx.notify();
-                    })),
-            )
-            .child(div().flex_1())
-            .children(crate::settings::update_pill(cx));
+        let header = self.sidebar_header(crate::ui::header_icon("section-add", "folder-plus").tip(crate::settings::tr("添加文件夹", "Add Folder"), Some(crate::shortcuts::hint("workspace::OpenFolder", "⌘ + ⇧ + O")))
+            .on_click(cx.listener(|w, _: &ClickEvent, window, cx| w.open_folder_dialog(window, cx))), cx);
 
         let nav = div().flex_none();
 
@@ -156,9 +169,11 @@ impl Workspace {
         if tops.is_empty() {
             list = list.child(self.empty_home(cx));
         } else {
-            // One top-level folder or several, the heading is 我的文档 (#421); it never folds.
-            // First under the window's header (no 置顶 above it), it sits up against it.
-            fixed = fixed.child(div().when(self.entries.iter().all(|e| !e.meta.pinned), |d| d.mt(px(-SECTION_TOP))).child(self.section(1, crate::settings::text("我的文档"), cx)));
+            // No 我的文档 heading: the first folder's heading is the sidebar's first row, right under
+            // the window's header where 我的文档's was. 批量操作's 已选 N 项 takes the top.
+            let first = self.entries.iter().all(|e| !e.meta.pinned);
+            let in_batch = self.batch.is_some();
+            if in_batch { fixed = fixed.child(div().when(first, |d| d.mt(px(-SECTION_TOP))).child(self.section(1, crate::settings::text("我的文档"), cx))); }
             list = list.child(self.render_folder_rows(window, cx));
         }
         // The first listing still running: grey rows in place of the tree, fading out over it once it is here.
@@ -166,26 +181,6 @@ impl Workspace {
         if load.loading() { list = div().flex().flex_col().px(px(SB_X)).pb(px(8.)).child(crate::loading::sidebar_rows(load, crate::loading::t(cx))); }
         // The sidebar sits on the window's glass: nothing can cover the rows, so they fade in as the grey ones fade out.
         else if load.moving() { list = div().relative().child(list.opacity(1. - load.cover())).child(crate::loading::sidebar_rows(load, crate::loading::t(cx)).absolute().top_0().left(px(SB_X)).right(px(SB_X))); }
-        // 本机文件: Markdown files and folders edited where they are, outside the
-        // library. Files or folders from the Finder let go here open the same way.
-        let local = self.local_rows();
-        if !local.is_empty() {
-            let mut section = div().id("local-section").flex().flex_col().rounded(px(ROW_R))
-                .drag_over::<ExternalPaths>(|s, _, _, _| s.bg(Theme::sidebar_hover()))
-                .on_drop(cx.listener(|w, paths: &ExternalPaths, window, cx| {
-                    cx.stop_propagation();
-                    w.sidebar_drop = None;
-                    w.open_paths(paths.paths(), window, cx);
-                }))
-                .child(self.section(2, crate::settings::tr("本机文件", "Files on this computer"), cx));
-            if !self.folded[2] {
-                for (e, depth) in local {
-                    section = section.child(self.doc_row(e, "local", depth, false, cx));
-                }
-            }
-            list = list.child(div().h(px(GROUP_GAP - SECTION_TOP))).child(section);
-        }
-
         // The footer holds one row: 设置 (存储管理 and 回收站 live in 设置).
         // The 批量操作 toolbar: ghost icon buttons.
         let footer_btn = |id: &'static str, name: &'static str, tip: &'static str, enabled: bool, on: bool| {
@@ -207,7 +202,7 @@ impl Workspace {
             .when(self.batch.is_some(), |d| {
                 d.child(
                     div().h(px(46.)).mx(px(SB_X + 6. + 10. - 18.)).flex().items_center().gap(px(4.))
-                        .child(footer_btn("bt-copy", "copy", crate::settings::text("创建副本"), some, false).on_click(cx.listener(|w, _, _, cx| w.batch_copy(cx))))
+                        .child(footer_btn("bt-copy", "copy", crate::settings::text("创建副本"), some, false).on_click(cx.listener(|w, _, window, cx| w.batch_copy(window, cx))))
                         .child(footer_btn("bt-move", "folder-input", crate::settings::text("移动到"), some, false).on_click(cx.listener(|w, _, window, cx| w.batch_move(window, cx))))
                         .child(footer_btn("bt-delete", "bin", crate::settings::text("删除"), some, false).on_click(cx.listener(|w, _, _, cx| w.ask_batch_delete(cx)))),
                 )
@@ -312,11 +307,12 @@ impl Workspace {
         let group = SharedString::from(format!("section-{idx}"));
         let folded = self.folded[idx];
         let trigger = |id: &'static str, name: &'static str| Button::ghost(id).sized(ButtonSize::Xs).on_wash().icon(name);
-        let create_open = matches!(self.create_menu, Some((None, _)));
         let row = div().h(px(if idx == 1 { LIBRARY_H } else { SECTION_H })).pl(px(4.)).pt(px(SECTION_TOP)).flex().items_center().group(group.clone());
         if let (1, Some(sel)) = (idx, self.batch.as_ref()) {
             let n = sel.len();
-            let all = n > 0 && n >= self.entries.len().min(BATCH_LIMIT);
+            // the tree's rows, in its order: a folder's 正文 is its row, a 本机文件 is not in it
+            let scope: Vec<String> = crate::tree::Tree::new(&self.entries).rows(|_| true).into_iter().filter(|(e, _)| self.in_batch_scope(&e.id)).take(BATCH_LIMIT).map(|(e, _)| e.id.clone()).collect();
+            let all = n > 0 && n >= scope.len();
             return row
                 .child(
                     div()
@@ -330,48 +326,21 @@ impl Workspace {
                         .group("batch-all")
                         .child(checkbox(if all { Check::On } else if n > 0 { Check::Partial } else { Check::Off }, false))
                         .on_click(cx.listener(move |w, _, _, cx| {
-                            let ids = if all { vec![] } else { w.entries.iter().take(BATCH_LIMIT).map(|e| e.id.clone()).collect() };
+                            let ids = if all { vec![] } else { scope.clone() };
                             w.batch = Some(ids);
                             cx.notify();
                         })),
                 )
                 .child(div().flex_1().min_w_0().ml(px(8.)).text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).text_color(Theme::text()).child(crate::localized_format!("已选 {n} 项", "Selected: {n}")))
                 .child(
-                    trigger("batch-exit", "x").ml(px(8.))
+                    trigger("batch-exit", "x").ml(px(8.)).mr(px(4.))
                         .tip(crate::settings::text("退出批量操作"), None)
                         .on_click(cx.listener(|w, _, _, cx| {
                             w.batch = None;
                             w.row_menu = None;
                             cx.notify();
                         })),
-                )
-                .child(trigger("section-add", "plus").ml(px(2.)).mr(px(4.)).child(self.home.track("create-sidebar")).selected(create_open).tip(crate::settings::tr("新建", "New"), None)
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(|w, _: &ClickEvent, _, cx| { let Some(b) = w.home.anchor("create-sidebar") else { return }; let pos = crate::design::hang(b, crate::design::Align::Start, None).0; w.create_menu = if w.create_menu.is_some() { None } else { Some((None, pos)) }; cx.notify(); })));
-        }
-        // 我的文档 (#421) does not fold: the heading over the top-level folders, its 批量操作 and
-        // "+" (打开文件夹…) at its end; it opens nothing itself. Its wash stops `ROW_GAP` above
-        // the first row, as rows do.
-        if idx == 1 {
-            return div().h(px(LIBRARY_H)).pt(px(SECTION_TOP)).flex().child(
-                div().id("section-library").flex_1().h(px(ROW_H)).pl(px(8.)).flex().items_center().rounded(px(ROW_R))
-                    .relative().children(crate::devtools::row_probe(title.clone()))
-                    .when(self.sidebar_drop_top(), |d| d.bg(Theme::sidebar_selected()))
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.))
-                        .font_weight(FontWeight::SEMIBOLD).text_color(Theme::sidebar_section()).child(title))
-                    .child(trigger("section-batch", "batch").tip(crate::settings::text("批量操作"), None)
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(cx.listener(|w, _, _, cx| {
-                            cx.stop_propagation();
-                            w.batch = Some(vec![]);
-                            w.row_menu = None;
-                            cx.notify();
-                        })))
-                    .child(trigger("section-add", "plus").ml(px(2.)).mr(px(4.)).child(self.home.track("create-sidebar")).selected(create_open).tip(crate::settings::tr("新建", "New"), None)
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(cx.listener(|w, _: &ClickEvent, _, cx| { cx.stop_propagation(); let Some(b) = w.home.anchor("create-sidebar") else { return }; let pos = crate::design::hang(b, crate::design::Align::Start, None).0; w.create_menu = if w.create_menu.is_some() { None } else { Some((None, pos)) }; cx.notify(); })))
-                    ,
-            );
+                );
         }
         row.child(
             div()
@@ -401,8 +370,16 @@ impl Workspace {
 
     /// Check or uncheck a 我的文档 row (entering 批量操作 if needed); false
     /// when the 50-page limit blocks it.
+    /// A row 批量管理 can check: not a heading, and in the top-level folder it was entered from.
+    pub(crate) fn in_batch_scope(&self, id: &str) -> bool {
+        if crate::shared_store::top_of_row(id).is_some() { return false; }
+        if self.batch.is_none() { return true; }
+        self.batch_top.as_ref().is_none_or(|k| self.entries.iter().any(|e| e.id == id && &e.top == k))
+    }
+
     pub(crate) fn toggle_check(&mut self, id: &str) -> bool {
         if crate::shared_store::top_of_row(id).is_some() { return false; }
+        if self.batch.is_none() { self.batch_top = None; }
         let sel = self.batch.get_or_insert_with(Vec::new);
         if let Some(i) = sel.iter().position(|x| x == id) {
             sel.remove(i);
@@ -414,28 +391,16 @@ impl Workspace {
         true
     }
 
-    /// The checked docs, in list order.
+    /// The checked rows, in list order.
     fn checked(&self) -> Vec<String> {
         let Some(sel) = &self.batch else { return vec![] };
         self.entries.iter().filter(|e| sel.contains(&e.id)).map(|e| e.id.clone()).collect()
     }
 
-    /// 批量创建副本: a "… 副本" of each checked doc; leaves 批量操作.
-    pub(crate) fn batch_copy(&mut self, cx: &mut Context<Self>) {
-        let file_before = self.store.track_file_changes();
+    /// 批量创建副本: a "… 副本" of each checked row, folders with everything in them; leaves 批量操作.
+    pub(crate) fn batch_copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let ids = self.checked();
-        if ids.is_empty() {
-            return;
-        }
-        for id in &ids {
-            self.copy_doc(id, cx);
-        }
-        self.entries.set(self.store.list());
-        self.sort();
-        self.batch = None;
-        self.row_menu = None;
-        self.remember_files(file_before, crate::settings::tr("批量创建副本", "Duplicate selection"));
-        cx.notify();
+        if !ids.is_empty() { self.copy_docs(&ids, false, crate::settings::tr("批量创建副本", "Duplicate selection"), window, cx); }
     }
 
     pub(crate) fn batch_move(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -472,22 +437,16 @@ impl Workspace {
                     }
                     w.row_menu = None;
                     // In 批量操作 a click checks the row; Shift-click enters it.
-                    if in_lib && (w.batch.is_some() || ev.modifiers.shift) {
+                    if in_lib && (w.batch.is_some() || ev.modifiers.shift) && w.in_batch_scope(&id) {
                         w.toggle_check(&id);
                         cx.notify();
                         return;
                     }
                     if in_lib { w.arm_folder_drag(&id, ev.position, cx); }
-                    // A 置顶 row opens on press, as it did before 本机文件 rows moved to click (#272).
+                    // A 置顶 row opens on press.
                     else if pinned { w.open(&id, window, cx); }
                 }),
             )
-            // A 本机文件 row opens on click, and can be carried up into the tree to import it.
-            .when(key == "local", |d| {
-                let (open, drag) = (e.id.clone(), crate::sidebar_drop::LocalRowDrag { id: e.id.clone(), title: crate::settings::display_title(&e.title), folder: e.meta.folder.is_some() });
-                d.on_click(cx.listener(move |w, _, window, cx| w.open(&open, window, cx)))
-                    .on_drag(drag, |d, _, _, cx| cx.new(|_| d.clone()))
-            })
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
@@ -592,7 +551,8 @@ impl Workspace {
                 let a = self.folder_drag.rename_in(&e.id);
                 let r = ROW_R - 2.;
                 div()
-                    .ml(px(2.))
+                    // a heading's name starts 8 in, with no icon before it
+                    .ml(px(if heading { -4. } else { 2. }))
                     .mr(px(4.))
                     .flex_1()
                     .min_w_0()
@@ -630,9 +590,27 @@ impl Workspace {
                 .child(ui_text(display_title(&e.title)))
                 .into_any_element(),
         };
+        // A group heading stands out to the left of its rows (Codex's Projects): its name starts
+        // where 我的文档's does, left of every row's icon, with a small chevron right after it
+        // that only folds (the name opens the folder's page).
+        let title = if heading && self.rename.as_ref().is_none_or(|r| r.id != e.id) {
+            let open = self.expanded.contains(&e.id);
+            div().flex_1().min_w_0().mr(px(give)).flex().items_center()
+                .child(div().pl(px(2.)).min_w_0().flex_shrink(1.).text_size(px(theme::ui_font())).line_height(px(DOC_ROW_H))
+                    .overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(Theme::sidebar_section()).font_weight(FontWeight::SEMIBOLD)
+                    .child(ui_text(display_title(&e.title))))
+                .child(div().id(SharedString::from(format!("fold-{}", e.id))).ml(px(2.)).size(px(18.)).flex_none().flex().items_center().justify_center()
+                    .rounded(px(5.)).hover(|s| s.bg(Theme::sidebar_hover()))
+                    .on_mouse_down(MouseButton::Left, cx.listener(|w, ev: &MouseDownEvent, _, _| {
+                        w.folder_drag.icon_press = true;
+                        w.folder_drag.icon_alt = ev.modifiers.alt;
+                    }))
+                    .child(icon(if open { "chevron-down" } else { "chevron-right" }, 12., Theme::text_caption())))
+                .into_any_element()
+        } else { title };
         let renaming = self.rename.as_ref().is_some_and(|r| r.id == e.id);
         // 批量操作: 我的文档 rows get a checkbox and lose "…"; checked rows are tinted.
-        let batch = self.batch.as_ref().filter(|_| key == "doc");
+        let batch = self.batch.as_ref().filter(|_| key == "doc" && self.in_batch_scope(&e.id));
         let checked = batch.is_some_and(|b| b.contains(&e.id));
         let blocked = batch.is_some_and(|b| !checked && b.len() >= BATCH_LIMIT);
         self.row_base(e, key, cx)
@@ -660,7 +638,7 @@ impl Workspace {
                         .child(checkbox(if checked { Check::On } else { Check::Off }, blocked)),
                 )
             })
-            .child({
+            .when(!heading, |d| d.child({
                 // A folder with something in it folds from its icon, the way Notion's
                 // pages do: hovering the row turns the icon into a chevron (pointing
                 // down when open), and a press on it folds instead of opening the page.
@@ -674,9 +652,6 @@ impl Workspace {
                             w.folder_drag.icon_alt = ev.modifiers.alt;
                         })))
                     .map(|d| match &e.icon {
-                    // a group heading's chevron: the large one (Nucleo's ChevronDown / Right at 16, as an
-                    // icon button's), so it reads apart from the folders' small disclosure
-                    _ if heading => d.child(icon(if open { "chevron-down" } else { "chevron-right" }, 16., Theme::icon())),
                     _ if folder => {
                         let s = if key == "doc" { self.folder_drag.pop(&e.id) } else { 1. };
                         d.child(div().absolute().inset_0().flex().items_center().justify_center().opacity(1. - chevron)
@@ -701,7 +676,7 @@ impl Workspace {
                     Some(em) => d.text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).child(em.clone()),
                     None => d.child(icon("doc", ROW_ICON, Theme::icon())),
                 })
-            })
+            }))
             .child(title)
             // A folder's "…" and "+" sit in the same columns as the header's 批量操作
             // and 新建: "…" manages the folder, "+" makes things in it (文件夹 is the
@@ -718,12 +693,11 @@ impl Workspace {
         let Some(m) = self.row_menu.clone() else { return vec![] };
         if let Some(key) = crate::shared_store::top_of_row(&m.id).map(str::to_string) { return self.top_row_menu(&key, m, cx); }
         if !m.batch && self.entries.iter().any(|e| e.id == m.id && e.meta.folder.is_some() && e.note.is_none()) { return self.folder_row_menu(m, cx); }
-        if !m.batch && self.entries.iter().any(|e| e.id == m.id && e.meta.local()) { return self.local_row_menu(m, cx); }
         // A document with children (a folder with a 正文, #357): the document's menu, its
         // file for what concerns the page, the folder for 移动到, 重命名 and 删除.
         let doc = self.note_or(&m.id);
         let child = !m.batch && self.takes_children(&m.id);
-        let Some((pinned, starred)) = self.entries.iter().find(|e| e.id == doc).map(|e| (e.meta.pinned, e.meta.starred > 0)) else { return vec![] };
+        let Some(pinned) = self.entries.iter().find(|e| e.id == doc).map(|e| e.meta.pinned) else { return vec![] };
         let item = |id: &'static str, ic: &'static str, label: &'static str| MenuItem::new(id).icon(ic).label(crate::settings::label(label));
         let divider = MenuSeparator::new;
         if m.batch {
@@ -737,7 +711,7 @@ impl Workspace {
                     cx.notify();
                 }))
                 .child(MenuLabel::new(crate::localized_format!("已选 {n} 项", "Selected: {n}")))
-                .child(item("bm-copy", "copy", crate::settings::text("创建副本")).on_click(cx.listener(|w, _, _, cx| w.batch_copy(cx))))
+                .child(item("bm-copy", "copy", crate::settings::text("创建副本")).on_click(cx.listener(|w, _, window, cx| w.batch_copy(window, cx))))
                 .child(item("bm-move", "folder-input", crate::settings::text("移动到")).on_click(cx.listener(|w, _, window, cx| w.batch_move(window, cx))))
                 .child(item("bm-delete", "bin", crate::settings::text("删除")).on_click(cx.listener(|w, _, _, cx| w.ask_batch_delete(cx))));
             return vec![
@@ -748,14 +722,14 @@ impl Workspace {
         }
         // Hovering 下载 opens its submenu; hovering any other item closes it.
         let set_sub = |open: bool| {
-            cx.listener(move |w: &mut Workspace, hovered: &bool, _, cx| {
+            crate::design::sub_hover(cx.listener(move |w: &mut Workspace, hovered: &bool, _, cx| {
                 if let Some(m) = w.row_menu.as_mut().filter(|m| *hovered && m.sub != open) {
                     m.sub = open;
                     cx.notify();
                 }
-            })
+            }))
         };
-        let (dup, mv, path, pin, star, dl, ren, del) = (doc.clone(), m.id.clone(), doc.clone(), doc.clone(), doc.clone(), doc.clone(), m.id.clone(), m.id.clone());
+        let (dup, mv, path, pin, dl, ren, del) = (doc.clone(), m.id.clone(), doc.clone(), doc.clone(), doc.clone(), m.id.clone(), m.id.clone());
         let pdf = doc.clone();
         let new_window = doc.clone();
         let sub_doc = m.id.clone();
@@ -811,11 +785,6 @@ impl Workspace {
                     .on_hover(set_sub(false))
                     .on_click(cx.listener(move |w, _, _, cx| w.toggle_pin(&pin, cx))),
             )
-            .child(
-                item("rm-star", if starred { "star-off" } else { "star" }, if starred { crate::settings::text("取消收藏") } else { crate::settings::tr("收藏", "Add to favorites") })
-                    .on_hover(set_sub(false))
-                    .on_click(cx.listener(move |w, _, _, cx| w.toggle_star(&star, cx))),
-            )
             .child(divider())
             .child(
                 item("rm-download", "export", crate::settings::text("下载"))
@@ -824,7 +793,7 @@ impl Workspace {
                     .on_hover(set_sub(true)),
             )
             .child(
-                item("rm-rename", "square-pen", crate::settings::text("重命名"))
+                item("rm-rename", "pen-line", crate::settings::text("重命名"))
                     .on_hover(set_sub(false))
                     .on_click(cx.listener(move |w, _, window, cx| w.start_rename(&ren, window, cx))),
             )
@@ -868,6 +837,7 @@ impl Workspace {
                     anchored().anchor(Anchor::TopLeft).position(point(x, px(top))).snap_to_window_with_margin(px(8.)).child(
                         Popover::new("rm-download-menu")
                             .menu()
+                            .submenu()
                             .w(px(crate::design::menu_w::SM))
                             .child(canvas(move |b, _, _| record.set(Some(b)), |_, _, _, _| {}).absolute().inset_0())
                             .when(crate::printing::SUPPORTED, |d| d.child(crate::docmenu::sub_item("rm-pdf", "PDF").on_click(cx.listener(move |w, _, window, cx| w.export_pdf(&pdf, window, cx)))))

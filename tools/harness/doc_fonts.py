@@ -140,7 +140,7 @@ def with_prefs(lib, name, **kv):
 # fold otherwise); its row and its delete button, by name
 OPEN_LIST = "key cmd-,\nwait 600\nrow 外观\nwait 600\nanchor doc-font-picker\nwait 600\ncommit 霞鹜\nwait 400\n"
 WENKAI_ROW, WENKAI_TRASH = "row 霞鹜文楷", "anchor font-del-lxgw-wenkai"
-BACK = "key escape\nwait 300\nrow 返回\nwait 800\n"
+BACK = "key escape\nwait 300\nanchor settings-back\nwait 800\n"
 
 
 def flow(url):

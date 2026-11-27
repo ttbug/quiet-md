@@ -393,8 +393,9 @@ impl Workspace {
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |w, _, window, cx| { cx.stop_propagation(); w.new_child(&new_id, window, cx); })))
                 .child(self.home_more(e, format!("home-fmore-{id}"), cx).variant(crate::design::ButtonVariant::Outline).sized(crate::design::ButtonSize::Tool).rounded_full().opacity(reveal)));
+        // 批量管理: checked like a document card, its box where a card's is (12 into the folder's body).
+        let check = self.home_check(e).map(|c| div().absolute().left(px(12.)).top(px(TAB * h + 12. + lift)).child(c));
         div().id(SharedString::from(format!("home-folder-{id}"))).relative().w_full().min_w_0().h(px(h)).cursor_pointer()
-            .when(self.batch.is_some(), |d| d.opacity(0.45))
             .on_hover(cx.listener(move |w, on: &bool, _, cx| {
                 if *on { w.home.folders.hovered = Some(hover_id.clone()); }
                 else if w.home.folders.hovered.as_ref() == Some(&hover_id) { w.home.folders.hovered = None; }
@@ -405,13 +406,14 @@ impl Workspace {
                 if let Some(f) = w.home.folders.fx.get_mut(&id) { f.dip.v += 2.2; }
                 cx.notify();
             }}))
+            .on_click(cx.listener(move |w, _, window, cx| if w.batch.is_some() { w.home_click(&open_id, window, cx) } else { w.try_open(&open_id, window, cx); }))
             .when(self.batch.is_none(), |d| d
-                .on_click(cx.listener(move |w, _, window, cx| { w.try_open(&open_id, window, cx); }))
                 .on_mouse_down(MouseButton::Right, cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                     w.row_menu = Some(RowMenu { id: menu_id.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch: false, from: None });
                     cx.notify();
                 })))
-            .child(back).children(title).child(front_glass).child(label)
+            .child(back).children(title).child(front_glass).child(label).children(check)
+            .children(crate::devtools::anchor_probe(format!("card:{}", display_title(&e.title))))
             .into_any_element()
     }
 

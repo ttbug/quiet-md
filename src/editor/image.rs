@@ -1864,7 +1864,8 @@ impl Editor {
         let close = div()
             .id("lb-close")
             .absolute()
-            .top(px(20.))
+            // Windows and Linux draw their caption buttons in the header's top right: clear the row
+            .top(px(if cfg!(any(target_os = "windows", target_os = "linux")) { crate::app::HEADER_H + 12. } else { 20. }))
             .right(px(20.))
             .size(px(40.))
             .rounded_full()

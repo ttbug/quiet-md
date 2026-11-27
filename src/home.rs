@@ -23,6 +23,9 @@ use std::cell::RefCell;
 use std::collections::{HashMap};
 use std::rc::Rc;
 
+/// A card's title steps this far right in 批量管理, past its checkbox (`geo.checkbox` and a gap).
+const CHECK_ROOM: f32 = 24.;
+
 /// The optional list columns (标题 is always shown).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Col {
@@ -530,8 +533,9 @@ fn entry_icon(e: &Entry) -> AnyElement {
 
 impl Workspace {
     /// In 批量管理 a click checks or unchecks; otherwise it opens.
-    fn home_click(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn home_click(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.batch.is_none() { return self.open(id, window, cx) }
+        if !self.in_batch_scope(id) { return }
         if !self.toggle_check(id) {
             self.show_toast_kind(crate::ui::ToastKind::Error, &crate::localized_format!("一次最多选择 {} 项", "Select up to {} items at a time", crate::sidebar::BATCH_LIMIT), cx);
         }
@@ -539,9 +543,9 @@ impl Workspace {
     }
 
     /// The row's / card's checkbox while 批量管理 is on.
-    fn home_check(&self, e: &Entry) -> Option<crate::design::Checkbox> {
+    pub(crate) fn home_check(&self, e: &Entry) -> Option<crate::design::Checkbox> {
         use crate::sidebar::{BATCH_LIMIT, Check, checkbox};
-        let sel = self.batch.as_ref()?;
+        let sel = self.batch.as_ref().filter(|_| self.in_batch_scope(&e.id))?;
         let on = sel.contains(&e.id);
         Some(checkbox(if on { Check::On } else { Check::Off }, !on && sel.len() >= BATCH_LIMIT))
     }
@@ -772,9 +776,10 @@ impl Workspace {
             self.home.list_hover.as_ref().is_some_and(|h| *h == format!("home-row-{}", e.id))
                 || self.row_menu.as_ref().is_some_and(|m| m.id == e.id)
         });
+        // its top where the grid's first row starts, 64pt down the window
         let mut header = div()
             .h(px(33.))
-            .mt(px(10.))
+            .mt(px(8.))
             .flex_none()
             .flex()
             .items_center()
@@ -805,6 +810,7 @@ impl Workspace {
             let key = SharedString::from(format!("home-row-{}", e.id));
             let mut row = div()
                 .id(key.clone())
+                .relative().children(crate::devtools::anchor_probe(format!("list:{}", display_title(&e.title))))
                 .h(px(56.))
                 .flex()
                 .items_center()
@@ -881,9 +887,10 @@ impl Workspace {
         // rise above the first row without being cut off — and that clip line is
         // where a row scrolling out of sight stops. It used to sit 4pt higher,
         // the list lifted into the tab row above it, so a scrolling row drew over
-        // 我的文档 / 收藏 and the buttons beside them (#238). 28 under that lift is
-        // 24 without it: the cards stay exactly where they were.
-        .flex_1().min_h_0().pt(px(24.)).pb(px(32.)).track_scroll(grid_scroll);
+        // the tabs and the buttons beside them (#238). 16 under the header (the
+        // maintainer, 2026-11-26): the first row's top 64pt down the window, the list
+        // view's header where it starts; rows scroll right up to the header.
+        .flex_1().min_h_0().pt(px(16.)).pb(px(32.)).track_scroll(grid_scroll);
         let scroll = grid_scroll.0.borrow().base_handle.clone();
         div().relative().flex_1().min_h_0().flex().flex_col()
             .on_mouse_move(cx.listener(|w, ev: &MouseMoveEvent, _, cx| w.track_home_press(ev, cx)))
@@ -894,10 +901,11 @@ impl Workspace {
     /// in a folder that show one (`home_folder.rs`). `pad`: its margin.
     pub(crate) fn thumb_page(&self, e: &Entry, pad: f32) -> Div {
         let thumb = self.thumb(e);
-        self.thumb_page_with(e, &thumb, pad)
+        self.thumb_page_with(e, &thumb, pad, 0.)
     }
 
-    fn thumb_page_with(&self, e: &Entry, thumb: &Thumb, pad: f32) -> Div {
+    /// `indent`: room before the title for 批量管理's checkbox.
+    fn thumb_page_with(&self, e: &Entry, thumb: &Thumb, pad: f32, indent: f32) -> Div {
         if thumb.blocks.is_empty() && e.title.trim().is_empty() {
                 div()
                     .size_full()
@@ -909,7 +917,7 @@ impl Workspace {
                     .child(div().mt(px(4.)).text_size(px(14.)).line_height(px(22.)).text_color(Theme::text_placeholder()).child(crate::settings::text("空白文档")))
             } else {
                 let mut p = div().size_full().p(px(pad)).overflow_hidden().flex().flex_col();
-                p = p.child(div().flex_none().flex().items_start().gap(px(6.)).mb(px(8.))
+                p = p.child(div().flex_none().flex().items_start().gap(px(6.)).mb(px(8.)).pl(px(indent))
                     .when_some(e.icon.as_ref(), |d, emoji| d.child(div().flex_none().text_size(px(14.)).line_height(px(20.)).child(emoji.clone())))
                     .child(div().min_w_0().text_size(px(14.)).line_height(px(20.)).font_weight(FontWeight::BOLD).child(e.title.clone())));
                 // A 画板: its board, drawn to fit the rest of the card.
@@ -931,10 +939,11 @@ impl Workspace {
             let id = e.id.clone();
             let id2 = e.id.clone();
             let thumb = self.thumb(e);
-            let page = self.thumb_page_with(e, &thumb, 18.);
             let radius = 32.;
             let menu_on = self.row_menu.as_ref().is_some_and(|m| m.id == e.id);
             let check = self.home_check(e);
+            // 批量管理: the title steps aside for the checkbox, which sits on its first line.
+            let page = self.thumb_page_with(e, &thumb, 18., if check.is_some() { CHECK_ROOM } else { 0. });
             let arm = e.id.clone();
             // Carried away as a paper: its place stays as an empty slot of the
             // card's shape (no page, no cover), so nothing half-shows through.
@@ -947,7 +956,7 @@ impl Workspace {
                 div()
                     .id(SharedString::from(format!("home-card-{}", e.id)))
                     .when(check.is_none(), |d| d.on_mouse_down(MouseButton::Left, cx.listener(move |w, ev: &MouseDownEvent, _, cx| w.arm_home_drag(&arm, ev.position, cx))))
-                    .child(self.record_home_card(&e.id))
+                    .child(self.record_home_card(&e.id)).children(crate::devtools::anchor_probe(format!("card:{}", display_title(&e.title))))
                     .w_full().min_w_0().h(px(card_h)).relative().group("home-card")
                     .flex_none()
                     // A loose sheet on the home page: squircle corners, a 0.5pt
@@ -969,7 +978,7 @@ impl Workspace {
                     .child(div().absolute().left(px(-RING)).right(px(-RING)).top(px(-RING)).bottom(px(-RING))
                         .when(!menu_on, |d| d.opacity(0.).group_hover("home-card", |s| s.opacity(1.)))
                         .child(crate::ui::squircle_outline(radius + RING, RING, Theme::ring_sheet())))
-                    .when_some(check, |d, c| d.child(div().absolute().top(px(12.)).left(px(12.)).child(c)))
+                    .when_some(check, |d, c| d.child(div().absolute().top(px(18.)).left(px(18.)).h(px(20.)).flex().items_center().child(c)))
                     .when(self.batch.is_none(), |d| d.child(
                         div().absolute().top(px(8.)).right(px(8.))
                             .when(!menu_on, |d| d.opacity(0.).group_hover("home-card", |s| s.opacity(1.)))

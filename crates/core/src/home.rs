@@ -281,24 +281,40 @@ impl Home {
             _ => RenameError::Other(e.to_string()),
         })?;
         store.moved_to(to.clone());
+        // The default folder (the library's location): launches and new libraries follow it.
+        let was_default = follows_default(&r.path, &Store::legacy_dir());
         r.path = to.clone();
+        if was_default && std::env::var_os("QUIET_MD_HOME").is_none() { let _ = Store::remember_dir(to.clone()); }
         let _ = self.save();
         Ok(to)
     }
 
-    /// Whether top-level folder `key` may be renamed from the sidebar: open, not a test
-    /// run's one top-level folder (`QUIET_MD_HOME`), and not a folder the system names
-    /// (home, Desktop, Documents, Downloads …).
+    /// Whether top-level folder `key` may be renamed from the sidebar: open, not the folder a
+    /// test run or preview was started on (`QUIET_MD_HOME`), and not a folder the system names
+    /// (home, Desktop, Documents, Downloads …). Folders added in such a run rename as usual.
     pub fn can_rename(&self, key: &str) -> bool {
-        // A test run's one top-level folder stays where the run put it (a scripted
-        // launch's environment: unit tests are not that run, whatever their shell sets).
-        let pinned = cfg!(target_family = "wasm") || (!cfg!(test) && std::env::var_os("QUIET_MD_HOME").is_some() && std::env::var_os("QUIET_MD_FOLDERS").is_none());
-        let Some(r) = self.folder(key).filter(|r| r.store.is_some() && !pinned) else { return false };
+        // A scripted launch's environment: unit tests are not that run, whatever their shell sets.
+        // With `QUIET_MD_FOLDERS` the run keeps its own list, which follows a rename.
+        let started_on = if cfg!(test) || std::env::var_os("QUIET_MD_FOLDERS").is_some() { None } else { std::env::var_os("QUIET_MD_HOME").map(PathBuf::from) };
+        self.can_rename_beside(key, started_on.as_deref())
+    }
+
+    /// `can_rename`, `started_on` the folder the run's launch named, which stays where it put it:
+    /// it is where the run's library lives (a preview's is the real one), and renaming it would
+    /// move that.
+    fn can_rename_beside(&self, key: &str, started_on: Option<&Path>) -> bool {
+        if cfg!(target_family = "wasm") { return false; }
+        let Some(r) = self.folder(key).filter(|r| r.store.is_some()) else { return false };
+        if started_on.is_some_and(|h| canonical(h) == canonical(&r.path)) { return false; }
         let system = [dirs::home_dir(), dirs::desktop_dir(), dirs::document_dir(), dirs::download_dir(), dirs::picture_dir(), dirs::audio_dir(), dirs::video_dir(), dirs::public_dir()];
         r.path.parent().is_some() && !system.into_iter().flatten().any(|d| canonical(&d) == canonical(&r.path))
     }
 
     pub fn folder(&self, key: &str) -> Option<&TopFolder> { self.folders.iter().find(|r| r.key == key) }
+
+    /// Why top-level folder `key` keeps its name, for the menu: the folder a test run or preview
+    /// was started on (`QUIET_MD_HOME`), or a folder the system names. None: it may be renamed (or is not open).
+    pub fn keeps_name(&self, key: &str) -> bool { self.folder(key).is_some_and(|r| r.store.is_some()) && !self.can_rename(key) }
 
     /// The first top-level folder that opened: where things go when nothing says otherwise.
     pub fn first(&self) -> Option<&TopFolder> { self.folders.iter().find(|r| r.store.is_some()) }
@@ -324,6 +340,18 @@ impl Home {
     }
 
     pub fn store(&mut self, key: &str) -> Option<&mut Store> { self.folders.iter_mut().find(|r| r.key == key)?.store.as_mut() }
+
+    /// Top-level folders `a` and `b` (two different ones) at once, for a move from one to the other.
+    pub fn pair(&mut self, a: &str, b: &str) -> Option<(&mut Store, &mut Store)> {
+        let (mut x, mut y) = (None, None);
+        for r in self.folders.iter_mut() {
+            if r.key == a { x = r.store.as_mut(); } else if r.key == b { y = r.store.as_mut(); }
+        }
+        Some((x?, y?))
+    }
+
+    /// Pages moved from one top-level folder to another: who holds what is looked up again.
+    pub fn forget_owners(&mut self) { self.owner.clear(); }
 
     /// The top-level folder holding `path`, if one does.
     pub fn folder_of_path(&self, path: &Path) -> Option<&TopFolder> {
@@ -356,6 +384,9 @@ impl Home {
 }
 
 fn new_key() -> String { uuid::Uuid::new_v4().to_string() }
+
+/// Whether folder `path` is the library's location `legacy`, the default folder.
+fn follows_default(path: &Path, legacy: &Path) -> bool { path == legacy || canonical(path) == canonical(legacy) }
 
 #[cfg(test)]
 mod tests {
@@ -464,6 +495,27 @@ mod tests {
         ws.folders[1].store = None;
         assert_eq!(at(&ws, &kb), None, "none open: the empty state");
         assert!(Home::default().quick_note_folder("").is_none());
+    }
+
+    #[test]
+    fn renaming_the_default_folder_moves_the_default() {
+        let d = dir("follows-default");
+        let lib = d.join("Quiet.md");
+        crate::vfs::create_dir_all(&lib).unwrap();
+        assert!(follows_default(&lib, &lib) && follows_default(&lib.join("."), &lib), "the same folder, however written");
+        assert!(!follows_default(&d.join("Other"), &lib));
+    }
+
+    #[test]
+    fn a_run_keeps_the_folder_it_was_started_on_and_renames_the_others() {
+        let (home, other) = (dir("started-on").join("lib"), dir("added").join("vault"));
+        crate::vfs::create_dir_all(&home).unwrap();
+        crate::vfs::create_dir_all(&other).unwrap();
+        let mut ws = Home { fixed: true, ..Default::default() };
+        let (kh, ko) = (ws.add(&home).unwrap(), ws.add(&other).unwrap());
+        assert!(!ws.can_rename_beside(&kh, Some(&home)) && !ws.can_rename_beside(&kh, Some(&home.join("."))), "the run's own folder, however written");
+        assert!(ws.can_rename_beside(&ko, Some(&home)), "a folder added in the run renames");
+        assert!(ws.can_rename_beside(&kh, None) && ws.can_rename_beside(&ko, None), "an ordinary launch renames both");
     }
 
     #[test]

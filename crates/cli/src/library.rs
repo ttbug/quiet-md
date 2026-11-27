@@ -70,7 +70,8 @@ impl Session {
 
     pub(crate) fn trash_list(&mut self) -> R<Value> {
         let list: Vec<Value> = self.all_trash().iter().map(|(k, t)| json!({ "id": t.id, "title": t.title, "folder": self.top_name(k), "deleted": date_ms(t.deleted * 1000) })).collect();
-        Ok(json!({ "days": fdl_core::store::TRASH_DAYS, "items": list }))
+        let days = self.ws.folders.iter().find_map(|r| r.store.as_ref()).map_or(fdl_core::store::TRASH_DAYS, |s| s.settings().trash_days());
+        Ok(json!({ "days": days, "items": list }))
     }
 
     /// Bring a document back from the 回收站 (by title or id), when the command or script ends.

@@ -16,6 +16,8 @@ while it is on its way, and then checks the rows and the files on disk:
   move_dialog   移动到 puts a folder into another: there at once, a page in it opens once it has
                 landed, links into it follow, ⌘Z brings it back
   move_fails    移动到 a folder that cannot be written to: the row is back where it was
+  top_open      a top-level folder renamed with a page inside open: typed into, the page is saved in
+                the renamed folder, and folders.json lists the new path
   top_taken     a top-level folder renamed to a taken name: back in its field with what was
                 typed; typed on to a free name, it is renamed
 
@@ -167,7 +169,7 @@ MOVE = "rrow Project\nwait 300\nrow Move to\nwait 500\nclick 534 217\nwait 400\n
 def move_dialog():
     # A page inside clicked right after OK opens once the folder is there; typed into, it is saved there.
     # Project opened first (its icon turns into the arrow under the pointer), so Alpha has a row to click.
-    code, lib, log = run("move_dialog", "hoverrow Project\nwait 400\nclick 30 156\nwait 500\n" + MOVE + "shot ahead\nrow Alpha\nwait 3000\nshowing Alpha\nclick 700 400\nkey cmd-down\ntype  typed\nwait 2500\nshot landed\n", moving(work / "src-move"))
+    code, lib, log = run("move_dialog", "hoverrow Project\nwait 400\nclick 30 133\nwait 500\n" + MOVE + "shot ahead\nrow Alpha\nwait 3000\nshowing Alpha\nclick 700 400\nkey cmd-down\ntype  typed\nwait 2500\nshot landed\n", moving(work / "src-move"))
     assert code == 0, log[-600:]
     assert "Could not open" not in log
     alpha = (lib / "Target" / "Project" / "Alpha.xml").read_text()
@@ -203,7 +205,23 @@ def top_taken():
     assert (lib / "Two2" / "In One.xml").is_file() and (lib / "Two" / "In Two.xml").is_file() and not (lib / "One").exists(), sorted(p.name for p in lib.iterdir())
 
 
-CASES = {"normal": normal, "open_inside": open_inside, "rename_twice": rename_twice, "edit_during": edit_during, "field_open": field_open, "title_typed": title_typed, "fails": fails, "move_dialog": move_dialog, "move_fails": move_fails, "top_taken": top_taken}
+def top_open():
+    src = work / "src-top-open"
+    for name in ("One", "Two"):
+        (src / name / ".quiet").mkdir(parents=True)
+        (src / name / ".quiet" / "preferences.json").write_text(PREFS)
+        (src / name / f"In {name}.xml").write_text(f"<title>In {name}</title>\n<p>x</p>\n")
+    lib = work / "top_open" / "lib"
+    folders = work / "folders-open.json"
+    folders.write_text(json.dumps({"v": 1, "folders": [{"key": "k-one", "path": str(lib / "One"), "added": 1}, {"key": "k-two", "path": str(lib / "Two"), "added": 2}]}))
+    script = "row In One\nwait 800\n" + RENAME.format("One", "Uno") + "wait 1500\nshowing In One\nclick 900 400\nkey cmd-down\ntype  typed\nwait 2500\nshot renamed\n"
+    code, lib, log = run("top_open", script, src, {"QUIET_MD_FOLDERS": str(folders)})
+    assert code == 0, log[-600:]
+    assert not (lib / "One").exists() and "typed" in (lib / "Uno" / "In One.xml").read_text(), sorted(p.name for p in lib.iterdir())
+    assert str(lib / "Uno") in folders.read_text(), folders.read_text()
+
+
+CASES = {"normal": normal, "open_inside": open_inside, "rename_twice": rename_twice, "edit_during": edit_during, "field_open": field_open, "title_typed": title_typed, "fails": fails, "move_dialog": move_dialog, "move_fails": move_fails, "top_open": top_open, "top_taken": top_taken}
 failed = []
 for name in sys.argv[1:] or CASES:
     try:

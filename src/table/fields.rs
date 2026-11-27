@@ -227,15 +227,15 @@ fn switch_row(id: &'static str, name: &str, on: bool, enabled: bool, cx: &Contex
         .when(enabled, |d| d.cursor_pointer().on_click(cx.listener(move |v, _, _, cx| with(v, cx, |f| set(f, !on))))))
 }
 
-/// A select box whose choices drop down under the pointer, the form's width.
+/// A select box whose choices drop down from it, as wide as it is.
 fn select(id: &'static str, cur: impl Into<SharedString>, items: Vec<(String, Option<&'static str>)>, on: Option<usize>, cx: &Context<TableView>, pick: impl Fn(&mut FieldForm, usize) + 'static) -> crate::design::Field {
     let pick: Rc<dyn Fn(&mut FieldForm, usize)> = Rc::new(pick);
-    select_box(id, cur).on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| {
-        let Some(f) = form(v) else { return };
-        let pos = point(f.bounds.get().left() + px(PAD), ev.position().y + px(20.));
+    let (marker, at) = TableView::mark();
+    select_box(id, cur).child(marker).on_click(cx.listener(move |v, _: &ClickEvent, _, cx| {
+        if form(v).is_none() { return };
         let list = items.iter().enumerate().map(|(i, (name, glyph))| { let it = DropItem::new(name.clone()).on(on == Some(i)); match glyph { Some(g) => it.glyph(g), None => it } }).collect();
         let pick = pick.clone();
-        v.open_dropdown(pos, W - 2. * PAD, list, move |v, i, _, cx| with(v, cx, |f| pick(f, i)), cx);
+        v.open_dropdown(at.get(), W - 2. * PAD, list, move |v, i, _, cx| with(v, cx, |f| pick(f, i)), cx);
     }))
 }
 

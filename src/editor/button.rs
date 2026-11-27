@@ -64,9 +64,12 @@ pub fn palette(name: &str) -> Palette {
     }
     // A 100 tint with the 600 label, a shade deeper per state; the light
     // hues (orange, wathet) darken their label on hover and press.
+    // In the dark the 600 label keeps its lightness while the tint mirrors a step above the page
+    // (3.9:1 on its own chip): each label is raised until it reads 4.5:1 on the fill under it.
+    let on = |fg: Hsla, bg: Hsla| if crate::theme::dark() { crate::theme::lift_on(fg, bg, 4.5) } else { fg };
     let text = c(v[5]);
     let deeper = if matches!(h, "orange" | "wathet") { c(v[6]) } else { text };
-    Palette { text, bg: c(v[0]), hover_text: deeper, hover_bg: c(v[1]), active_text: deeper, active_bg: c(v[2]), disabled_bg: c(v[0]) }
+    Palette { text: on(text, c(v[0])), bg: c(v[0]), hover_text: on(deeper, c(v[1])), hover_bg: c(v[1]), active_text: on(deeper, c(v[2])), active_bg: c(v[2]), disabled_bg: c(v[0]) }
 }
 
 /// The button at rest: a white-button drop (1px, soft).

@@ -221,6 +221,7 @@ pub(crate) enum Popup {
 /// A plain list of choices on top of a popup (a form's select boxes).
 pub(crate) struct Dropdown {
     pub pos: Point<Pixels>,
+    pub corner: Anchor,
     pub width: f32,
     pub items: Vec<DropItem>,
     pub pick: Rc<dyn Fn(&mut TableView, usize, &mut Window, &mut Context<TableView>)>,
@@ -304,8 +305,8 @@ pub struct TableView {
     /// point when it hangs from one (`hang_popup`); a popup opened at the pointer has none.
     pub(crate) anchors: Rc<std::cell::RefCell<HashMap<SharedString, Bounds<Pixels>>>>,
     pub(crate) popup_corner: Option<Anchor>,
-    /// The grid's scroll thumbs' fades, down and across (`design::scroll::Fade`).
-    pub(crate) bar_fades: Rc<[crate::design::scroll::Fade; 2]>,
+    /// The grid's scroll thumbs, down and across (`design::scroll::Thumb`).
+    pub(crate) bar_thumbs: [Rc<crate::design::scroll::Thumb>; 2],
     _refresh: Task<()>,
     _subs: Vec<Subscription>,
 }
@@ -366,7 +367,7 @@ impl TableView {
             sel: None, rows_sel: HashSet::new(), col_sel: vec![], editing: None, input, aux, scroll: point(0., 0.),
             body: Rc::new(Cell::new(Bounds::default())), lanes: Cell::new((0., 0.)), drag: None, popup: None, dropdown: None, rename: None,
             expanded: None, record: Default::default(), notes: Default::default(), find: None, find_input,
-            grip_hover: None, slide: Default::default(), fit_lines: HashMap::new(), anchors: Default::default(), popup_corner: None, bar_fades: Default::default(), _refresh: refresh, _subs: subs,
+            grip_hover: None, slide: Default::default(), fit_lines: HashMap::new(), anchors: Default::default(), popup_corner: None, bar_thumbs: Default::default(), _refresh: refresh, _subs: subs,
         }
     }
 
@@ -455,6 +456,13 @@ impl TableView {
 
     /// A button's menu or panel, hung from the button as last laid out (`design::hang`), never the
     /// pointer; a button not laid out yet opens nothing. `open` opens it at the point given.
+    /// A popup in the place of the one open, hanging the same way (a menu's row opening a form there).
+    pub(crate) fn swap_popup(&mut self, pos: Point<Pixels>, popup: Popup, cx: &mut Context<Self>) {
+        let corner = self.popup_corner;
+        self.open_popup(pos, popup, cx);
+        self.popup_corner = corner;
+    }
+
     pub(crate) fn hang_popup(&mut self, key: &str, align: crate::design::Align, open: impl FnOnce(&mut Self, Point<Pixels>)) {
         let Some(b) = self.anchors.borrow().get(key).copied() else { return };
         let (pos, corner) = crate::design::hang(b, align, None);
@@ -465,6 +473,13 @@ impl TableView {
     /// The open popup's room to the window's edge, for its `Popover::fit` (`design::room`).
     pub(crate) fn popup_room(&self) -> f32 {
         self.popup.as_ref().map_or(600., |(pos, _)| crate::design::room(*pos, self.popup_corner.unwrap_or(Anchor::TopLeft)))
+    }
+
+    /// Records where the box it is laid over is, for a list it opens (`open_dropdown`).
+    pub(crate) fn mark() -> (AnyElement, Rc<Cell<Bounds<Pixels>>>) {
+        let b = Rc::new(Cell::new(Bounds::default()));
+        let set = b.clone();
+        (canvas(move |bounds, _, _| set.set(bounds), |_, _, _, _| {}).absolute().inset_0().into_any_element(), b)
     }
 
     /// Records where the button it is laid over is, for `hang_popup` (`key` its id).
@@ -481,8 +496,11 @@ impl TableView {
         }
     }
 
-    pub(crate) fn open_dropdown(&mut self, pos: Point<Pixels>, width: f32, items: Vec<DropItem>, pick: impl Fn(&mut TableView, usize, &mut Window, &mut Context<TableView>) + 'static, cx: &mut Context<Self>) {
-        self.dropdown = Some(Dropdown { pos, width, items, pick: Rc::new(pick) });
+    /// A list of choices hung from the box that opens it (`from`, as `mark` records it), as wide as
+    /// the box or `width`, whichever is more (the shared `hang`: under it, or over it when there is no room).
+    pub(crate) fn open_dropdown(&mut self, from: Bounds<Pixels>, width: f32, items: Vec<DropItem>, pick: impl Fn(&mut TableView, usize, &mut Window, &mut Context<TableView>) + 'static, cx: &mut Context<Self>) {
+        let (pos, corner) = crate::design::hang(from, crate::design::Align::Start, None);
+        self.dropdown = Some(Dropdown { pos, corner, width: width.max(f32::from(from.size.width)), items, pick: Rc::new(pick) });
         cx.notify();
     }
 
@@ -670,7 +688,7 @@ impl Render for TableView {
             // a sheet of its own under the page's header: squircle corners and a 0.5pt hairline
             // (as Home's cards), set in from the pane's edges by the header's own margin round
             // its buttons (8pt): below them on top, so the sheet starts at the header's foot
-            const GAP: f32 = (crate::app::HEADER_H - crate::app::HEADER_ACTIONS_H) / 2.;
+            const GAP: f32 = crate::design::PAGE_INSET;
             const RADIUS: f32 = SHEET_R;
             // Home's document cards' shadow (`theme::shadow_sheet`), not cast down but all round
             let around: Vec<BoxShadow> = crate::theme::shadow_sheet().into_iter().map(|mut s| { s.offset = point(px(0.), px(0.)); s }).collect();

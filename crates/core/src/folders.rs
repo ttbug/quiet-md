@@ -12,16 +12,7 @@ impl Store {
     pub fn take_warnings(&mut self) -> Vec<String> { std::mem::take(&mut self.warnings) }
 
     /// Where `id` would go in folder `parent`: its name there, numbered when taken.
-    pub(super) fn rel_in(&self, id: &str, parent: Option<&str>) -> String {
-        let m = &self.index[id];
-        let dir = parent.and_then(|p| self.index.get(p)).map(|p| p.rel.clone()).unwrap_or_default();
-        let name = base_name(&m.rel);
-        let ext = m.folder.is_none().then(|| ext_of(m));
-        let stem = if ext.is_some() { stem_of(name) } else { name };
-        // A folder's or Markdown file's name is its title: 「报告 (2).md」 stays that.
-        let base = if m.folder.is_some() || m.named_by_file() { stem } else { layout::unnumbered(stem) };
-        join_rel(&dir, &self.free_name(&dir, base, ext, None))
-    }
+    pub(super) fn rel_in(&self, id: &str, parent: Option<&str>) -> String { self.rel_for(&self.index[id], parent) }
 
     pub(super) fn validate_folder(&self, id: Option<&str>, parent: Option<&str>) -> Result<()> {
         let mut seen = std::collections::HashSet::new();
@@ -54,6 +45,48 @@ impl Store {
         if let Err(e) = self.save_index() { self.index.remove(&id); let _ = crate::vfs::remove_dir(self.abs(&rel)); return Err(e); }
         self.record_file_change(&id, None);
         Ok(id)
+    }
+
+    /// 创建副本 of `id`, named `title`, beside it: a document of any kind, or a
+    /// folder with everything in it (its 正文 named after the copy, so it stays
+    /// its 正文). A 正文 alone goes beside its folder, not into it as a child
+    /// page; a 本机文件 into the library's top level. Links inside the copies
+    /// still point at the pages they pointed at. Returns the copy's id.
+    pub fn duplicate(&mut self, id: &str, title: &str) -> Result<String> {
+        let m = self.index.get(id).ok_or_else(|| anyhow::anyhow!("文档或文件夹不存在"))?;
+        let parent = if m.local() { None } else if let Some(f) = self.folder_of_note(id) { self.index.get(&f).and_then(|f| f.parent.clone()) } else { m.parent.clone() };
+        self.copy_into(id, Some(title), parent.as_deref())
+    }
+
+    /// `duplicate` into folder `parent`; `title`: None keeps the page's own.
+    fn copy_into(&mut self, id: &str, title: Option<&str>, parent: Option<&str>) -> Result<String> {
+        let m = self.index.get(id).cloned().ok_or_else(|| anyhow::anyhow!("文档或文件夹不存在"))?;
+        if let Some(name) = &m.folder {
+            let title = title.unwrap_or(name);
+            let (note, new) = (self.note_of(id), self.create_folder(title, parent)?);
+            // In the sidebar's order, each the new folder's last child.
+            let mut kids: Vec<String> = self.index.iter().filter(|(_, k)| k.parent.as_deref() == Some(id)).map(|(k, _)| k.clone()).collect();
+            kids.sort_by(|a, b| (self.index[a].place(), a).cmp(&(self.index[b].place(), b)));
+            for k in kids { self.copy_into(&k, (note.as_deref() == Some(&k)).then_some(title), Some(&new))?; }
+            return Ok(new);
+        }
+        #[cfg(not(target_family = "wasm"))]
+        if m.kind == DocKind::Table {
+            let own = title.map_or_else(|| stem_of(base_name(&m.rel)).to_string(), str::to_string);
+            return self.copy_table_in(id, &own, parent);
+        }
+        let mut doc = self.load(id)?;
+        if let Some(t) = title { doc.title = crate::model::RichText::plain(t); }
+        let new = if m.kind == DocKind::Board {
+            let board = doc.blocks.iter().find_map(|b| match &b.kind { crate::model::BlockKind::Board(bd) => Some(bd.clone()), _ => None }).unwrap_or_default();
+            self.create_board_in(&doc.title.text, &board, parent)?
+        } else if m.markdown {
+            // A Markdown file copies as Markdown, into the library even from a 本机文件.
+            let front = self.front_matter_of(id);
+            self.create_markdown_in(&doc, &front, parent)?
+        } else { self.create_from_in(&doc, parent)? };
+        if !m.width.is_standard() { self.set_width(&new, m.width)?; }
+        Ok(new)
     }
 
     /// True when it numbered something (else nothing was written).

@@ -159,7 +159,6 @@ impl Theme {
     pub fn block_bg_area() -> Hsla { ta(100, 106, 115, 0.05) }
     /// Done to-do text: text-caption at the 0.7 opacity used on done spans.
     pub fn todo_done() -> Hsla { ta(100, 106, 115, 0.7) }
-    pub fn scrollbar_thumb() -> Hsla { ta(31, 35, 41, 0.3) }
     pub fn shadow() -> Hsla { ta(31, 35, 41, 0.10) }
     /// `--B200`: ring of a code block / callout whose handle menu is open.
     pub fn code_hover_ring() -> Hsla { c(ud::B200) }

@@ -1,7 +1,7 @@
 //! 专注模式: the open document alone in its window. The sidebar folds away and the header's
 //! crumbs and buttons go; on macOS the traffic lights go too (Windows: the caption buttons).
-//! A strip along the window's top brings them back while the pointer is on it, with 退出专注模式
-//! beside them. That button, ⌘. (Ctrl+Shift+Enter on Windows) or Esc leave it, and the
+//! A strip along the window's top brings them back while the pointer is on it, with 退出 where
+//! the header's buttons were. That button, ⌘. (Ctrl+Shift+Enter on Windows) or Esc leave it, and the
 //! sidebar comes back as it was. Page width, size and 阅读模式 are the document's, untouched.
 //! Not remembered, like 窗口保持在最前 and iA Writer's or Typora's own: a reopened window shows
 //! everything. See docs/design/FOCUS_MODE.md.
@@ -29,7 +29,9 @@ pub const ICON: &str = "expand";
 /// way to the menu bar, or overshooting the button, leaves them.
 const LINGER: Duration = Duration::from_millis(400);
 const FADE_IN: f32 = 0.15;
-const FADE_OUT: f32 = 0.25;
+const FADE_OUT: f32 = 0.15;
+/// The 「…」 menu's switch slides on (`design::Switch`, 150ms) before the window empties.
+const SLIDE: Duration = Duration::from_millis(150);
 
 /// What the window showed before, to put back on leaving.
 struct Saved { sidebar_open: bool, sidebar_auto_hidden: bool }
@@ -37,6 +39,8 @@ struct Saved { sidebar_open: bool, sidebar_auto_hidden: bool }
 /// A window's 专注模式 and its top strip's fade.
 pub struct Focus {
     saved: Option<Saved>,
+    /// The menu's switch was clicked and is sliding on; 专注模式 starts when it is there.
+    pending: bool,
     reveal: bool,
     /// The strip's opacity when `reveal` last changed, and when its fade starts.
     from: f32,
@@ -45,10 +49,12 @@ pub struct Focus {
     lights: std::cell::Cell<f32>,
 }
 impl Default for Focus {
-    fn default() -> Self { Focus { saved: None, reveal: false, from: 0., since: Instant::now(), lights: std::cell::Cell::new(1.) } }
+    fn default() -> Self { Focus { saved: None, pending: false, reveal: false, from: 0., since: Instant::now(), lights: std::cell::Cell::new(1.) } }
 }
 impl Focus {
     pub fn on(&self) -> bool { self.saved.is_some() }
+    /// What the 「…」 menu's switch shows: on, or sliding there.
+    pub fn switch(&self) -> bool { self.on() || self.pending }
     /// The strip's controls, 0 (gone) to 1. 动画 › 丰富 fades them; 克制 shows and hides at once.
     pub fn opacity(&self) -> f32 {
         let target = if self.reveal { 1. } else { 0. };
@@ -71,8 +77,12 @@ impl Focus {
     }
 }
 
+/// Where the traffic lights sit: the middle of the header row (`HEADER_H`), 20pt in.
+pub fn lights_at() -> Point<Pixels> { point(px(20.), px(HEADER_H / 2. - 7.)) }
+
 /// Give the traffic lights `alpha` (macOS; elsewhere the app draws its own controls). At 0
-/// they are hidden as well, so an unseen 关闭 takes no click.
+/// they are hidden as well, so an unseen 关闭 takes no click. Showing or hiding them has AppKit
+/// lay out its title bar again, at its own height: they are put back on the header's middle.
 fn lights(window: &Window, alpha: f32) {
     #[cfg(target_os = "macos")]
     unsafe {
@@ -89,14 +99,16 @@ fn lights(window: &Window, alpha: f32) {
             let _: () = msg_send![b, setHidden: if alpha <= 0. { YES } else { NO }];
             let _: () = msg_send![b, setAlphaValue: alpha as f64];
         }
+        window.set_traffic_light_position(lights_at());
     }
     #[cfg(not(target_os = "macos"))]
     let _ = (window, alpha);
 }
 
-/// 退出专注模式: the button the strip shows beside the traffic lights.
+/// ✕ 退出: the button the strip shows at the right, on the header row's line (a ghost, as the
+/// header's buttons).
 pub fn exit_button(id: impl Into<ElementId>) -> crate::design::Button {
-    crate::design::Button::ghost(id).sized(crate::design::ButtonSize::Sm).icon(ICON).label(crate::settings::tr("退出专注模式", "Exit Focus Mode"))
+    crate::design::Button::ghost(id).sized(crate::design::ButtonSize::Sm).optical().icon("x").label(crate::settings::text("退出"))
 }
 
 impl Workspace {
@@ -107,10 +119,23 @@ impl Workspace {
     }
 
     pub fn toggle_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.focus_mode.on() { self.leave_focus(window, cx) } else { self.enter_focus(window, cx) }
+        if self.focus_mode.on() { self.leave_focus(window, cx) } else { self.enter_focus(cx) }
     }
 
-    pub fn enter_focus(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    /// The 「…」 menu's switch: on, it slides over in the open menu, then the menu closes with
+    /// the rest of the window. There is no menu to turn it off from; leaving is the strip's 退出,
+    /// the shortcut or Esc, and the switch reads off again next time.
+    pub fn focus_switch(&mut self, cx: &mut Context<Self>) {
+        if self.focus_mode.switch() { return }
+        self.focus_mode.pending = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SLIDE).await;
+            let _ = this.update(cx, |w, cx| { w.focus_mode.pending = false; w.enter_focus(cx); });
+        }).detach();
+    }
+
+    pub fn enter_focus(&mut self, cx: &mut Context<Self>) {
         if self.focus_mode.on() || !self.can_focus(cx) { return }
         self.doc_menu = false;
         self.doc_sub = None;
@@ -120,7 +145,6 @@ impl Workspace {
         self.sidebar_open = false;
         self.sidebar_auto_hidden = false;
         if let Some(ed) = &self.editor { ed.update(cx, |e, cx| { e.focus_mode = true; cx.notify(); }); }
-        self.show_toast_kind(crate::ui::ToastKind::Info, crate::settings::tr("按 Esc 退出专注模式", "Press Esc to exit Focus Mode"), cx);
         cx.notify();
     }
 
@@ -152,11 +176,11 @@ impl Workspace {
     }
 
     /// The header in 专注模式: an empty strip that drags the window like a title bar and, while
-    /// the pointer is on it, shows 退出专注模式 where the crumbs began.
+    /// the pointer is on it, shows 退出 where the header's buttons end, as far from the edge.
     pub(crate) fn focus_bar(&self, cx: &mut Context<Self>) -> AnyElement {
         let o = self.focus_mode.opacity();
-        div().id("focus-bar").h(px(HEADER_H)).flex_none().flex().items_center()
-            .pl(px(if cfg!(target_os = "macos") { crate::theme::TRAFFIC_LIGHTS_W + 4. } else { 18. }))
+        div().id("focus-bar").h(px(HEADER_H)).flex_none().flex().items_center().justify_end()
+            .pr(px(crate::ui::header_right_inset()))
             .title_bar()
             .on_hover(cx.listener(|w, on: &bool, _, cx| { w.focus_mode.set_reveal(*on); cx.notify(); }))
             .when(o > 0., |d| d.child(

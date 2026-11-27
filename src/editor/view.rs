@@ -227,6 +227,18 @@ pub struct Editor {
     pub(super) glide: Option<(web_time::Instant, Pixels, u8)>,
     /// The space below the last block this frame (`below_height`).
     pub(super) below_h: f32,
+    /// 放大 / 缩小's percentage and when it was shown (`zoom_badge_el`).
+    pub(super) zoom_badge: Option<(u32, web_time::Instant)>,
+    /// 段落聚焦: the rows kept clear this frame, and the ones before with when
+    /// that changed while the fade runs (`sync_lit`).
+    pub(super) lit: Option<(usize, usize)>,
+    pub(super) lit_fade: Option<((usize, usize), web_time::Instant)>,
+    /// 打字机模式: the caret's line was last brought to the middle (a wheel or a
+    /// click puts it elsewhere); the page's size last frame; a resize asks for
+    /// the line back without a glide.
+    pub(super) tw_centred: bool,
+    pub(super) tw_size: Option<Size<Pixels>>,
+    pub(super) tw_snap: bool,
     /// Last applied (text color, background) from the color panel.
     pub last_color: (Option<ColorName>, Option<ColorName>),
     pub last_lang: String,
@@ -266,6 +278,8 @@ pub struct Editor {
     /// Heading just clicked in the catalogue.
     pub(super) cat_jump: Option<BlockId>,
     pub(super) cat_scroll: UniformListScrollHandle,
+    /// The outline's scrollbar (the shared one).
+    pub(super) cat_bar: Rc<crate::design::ScrollBar>,
     pub(super) scrollbar: Rc<super::scrollbar::Scrollbar>,
     /// Column-gap hover: (grid, gap index, over the 新增分栏 circle).
     pub(super) gap_hover: Option<(BlockId, usize, bool)>,
@@ -276,8 +290,6 @@ pub struct Editor {
     pub(super) drag_fx: RefCell<super::drag::DragFx>,
     /// The first and last top-level blocks the page drew rows of this frame.
     pub(super) rendered_top: Cell<Option<(usize, usize)>>,
-    /// The selected blocks' word count, for the document version and selection.
-    pub(super) sel_words: Cell<Option<((u64, super::core::BlockSel), usize)>>,
     /// Blocks just dropped, flashing since.
     pub(super) drop_flash: Option<(Vec<BlockId>, web_time::Instant)>,
     /// The fold arrow turning after a click: block → start.
@@ -489,6 +501,12 @@ impl Editor {
             autoscroll: false,
             glide: None,
             below_h: 200.,
+            zoom_badge: None,
+            lit: None,
+            lit_fade: None,
+            tw_centred: false,
+            tw_size: None,
+            tw_snap: false,
             last_color: (None, Some(ColorName("light-yellow".into()))),
             last_lang: "Plain Text".into(),
             link_field,
@@ -519,13 +537,13 @@ impl Editor {
             cat_seen: ((usize::MAX, 0), TITLE),
             cat_jump: None,
             cat_scroll: UniformListScrollHandle::new(),
+            cat_bar: Default::default(),
             scrollbar: Rc::default(),
             gap_hover: None,
             col_drag: None,
             block_drag: None,
             drag_fx: Default::default(),
             rendered_top: Cell::new(None),
-            sel_words: Cell::new(None),
             drop_flash: None,
             fold_anim: None,
             col_anim: HashMap::default(),
@@ -690,6 +708,7 @@ impl Editor {
     /// The wheel takes over from a glide under way: the page stays where the
     /// user scrolled it until the caret moves again.
     pub(super) fn wheel_stops_glide(&mut self) {
+        self.tw_centred = false;
         if self.glide.take().is_some() && matches!(self.reveal, Some((super::render::Reveal::Caret, _))) {
             self.reveal = None;
         }
@@ -2022,8 +2041,8 @@ impl Editor {
             }
             self.core.selected_text()
         };
-        let xml = docxml::serialize(&Document { blocks, ..Default::default() });
-        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(text, xml));
+        let doc = Document { blocks, ..Default::default() };
+        cx.write_to_clipboard(crate::clipboard::copied(text, docxml::serialize(&doc), &doc.blocks));
         true
     }
 
@@ -2038,7 +2057,7 @@ impl Editor {
             *f = crate::clipboard::FakeClipboard { text: xml, ..Default::default() };
             return true;
         }
-        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(text, xml));
+        cx.write_to_clipboard(crate::clipboard::copied(text, xml, &doc.blocks));
         true
     }
 
@@ -2146,7 +2165,7 @@ impl Editor {
         let html = match &fake {
             Some(f) => f.html.clone(),
             None if !plain && internal.is_none() && rich_target && !text.as_deref().is_some_and(crate::paste::has_math) => {
-                crate::clipboard::clipboard_html()
+                crate::clipboard::clipboard_html(item.as_ref())
             }
             None => None,
         };
@@ -2558,6 +2577,8 @@ impl Editor {
         self.link_ui.click = None;
         self.btn_press_reset();
         self.gap_press = None;
+        // A click puts the caret where it lands, off the middle.
+        self.tw_centred = false;
         if !ev.modifiers.shift && self.button_press(ev.position) {
             // The caret stays; the action runs on release.
             window.prevent_default();

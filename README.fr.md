@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/readme-home.webp" width="100%" alt="Quiet.md sur une prairie en pixel art : la barre latérale liste les dossiers, et l'accueil montre chaque dossier comme une pile de cartes de notes illustrées.">
+  <img src="docs/images/readme-home.webp" width="100%" alt="Quiet.md sur une prairie en pixel art : la barre latérale liste les dossiers, et la page du dossier principal montre chaque dossier comme une pile de cartes de notes illustrées.">
 </p>
 
 > [!NOTE]
@@ -69,12 +69,12 @@ Les tableaux sont un tableau blanc porté d'Excalidraw : formes, flèches qui re
 
 ### Ranger dans de vrais dossiers
 
-L'accueil montre chaque dossier comme une pile de ses pages. Maintenez une note au-dessus d'un dossier et il s'ouvre tout seul ; les dossiers s'imbriquent, et les déplacements s'annulent. Épinglez des notes, ajoutez-les aux favoris, cherchez dans tous les titres et toutes les lignes avec `⌘ J`, et faites des rechercher-remplacer dans une note, expressions régulières comprises. Les notes supprimées attendent dans la corbeille. Les fichiers et dossiers Markdown situés ailleurs sur votre ordinateur s'ouvrent sous **Fichiers de cet ordinateur** et se modifient sur place.
+L'accueil montre chaque dossier comme une pile de ses pages. Maintenez une note au-dessus d'un dossier et il s'ouvre tout seul ; les dossiers s'imbriquent, et les déplacements s'annulent. Épinglez des notes dans la barre latérale, cherchez dans tous les titres et toutes les lignes avec `⌘ J`, et faites des rechercher-remplacer dans une note, expressions régulières comprises. Les notes supprimées attendent dans la corbeille. Les fichiers et dossiers Markdown situés ailleurs sur votre ordinateur s'ouvrent sous **Fichiers de cet ordinateur** et se modifient sur place.
 
 ### Apporter vos notes
 
 <p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="L'écran du premier lancement de Quiet.md, qui propose d'importer un coffre Obsidian trouvé sur l'ordinateur.">
+  <img src="docs/images/readme-import.webp" width="100%" alt="L'écran du premier lancement de Quiet.md, qui propose d'ouvrir sur place un coffre Obsidian trouvé sur l'ordinateur.">
 </p>
 
 Au premier lancement, Quiet.md cherche vos bibliothèques Obsidian, Logseq, iA Writer et Typora et les copie, sans toucher aux originaux. Les `[[liens wiki]]` d'Obsidian continuent de fonctionner : cliquez sur l'un d'eux pour ouvrir la note visée. Ensuite, glissez des fichiers et dossiers Markdown sur l'accueil ou directement dans un dossier de la barre latérale. Les notes repartent en Markdown ou en PDF, ou directement vers l'imprimante.
@@ -171,5 +171,5 @@ Le code est sous licence [MIT](LICENSE). Le code, les polices et les ressources 
 
 Les éléments suivants ne sont pas couverts par la licence MIT et doivent être remplacés dans les forks :
 
-- Les icônes Nucleo de `assets/icons/` (69) et de `assets/editor-icons/` (24) sont sous une licence Nucleo commerciale. Ne les extrayez pas et ne les redistribuez pas seules.
+- Les icônes Nucleo de `assets/icons/` (82) et de `assets/editor-icons/` (24) sont sous une licence Nucleo commerciale. Ne les extrayez pas et ne les redistribuez pas seules.
 - Le nom « Quiet.md » et l'icône de l'app.

@@ -244,10 +244,13 @@ pub(crate) fn short_path(p: &Path) -> String {
 
 /// A picked folder as a library, used as it is: its Markdown and DocxXML
 /// files show up as documents (#282). Only the home folder and a disk's
-/// top-level folder get a Quiet.md folder inside; scanning all of either is never meant.
+/// top-level folder get a Quiet Notes folder inside; scanning all of either is never meant.
 pub(crate) fn library_in(dir: PathBuf) -> PathBuf {
     let broad = dir.parent().is_none() || dirs::home_dir().is_some_and(|h| h == dir);
-    if broad && !crate::store::Store::is_library(&dir) { dir.join("Quiet.md") } else { dir }
+    if !broad || crate::store::Store::is_library(&dir) { return dir }
+    // one builds before 2026-11-26 made there (`Quiet.md`) is the one
+    let old = dir.join(fdl_core::store::OLD_DEFAULT_NAME);
+    if crate::store::Store::is_library(&old) { old } else { dir.join(fdl_core::store::DEFAULT_NAME) }
 }
 
 // ---- the view
@@ -271,7 +274,7 @@ pub struct Onboarding {
     page: Page,
     /// 新建文件夹: where a new, empty top-level folder would go.
     root: PathBuf,
-    /// 打开文件夹: folders already on this computer, opened where they are
+    /// 添加文件夹: folders already on this computer, opened where they are
     /// (W12, the main choice); none means the new folder above.
     open: Vec<PathBuf>,
     /// The found and picked folders go in as copies (导入副本), not opened.
@@ -547,8 +550,8 @@ impl Onboarding {
             else { tr("用电脑上已有的文件夹，比如 Obsidian 库或 git 仓库，文件就地编辑", "Use a folder you already have, such as an Obsidian vault or a git repository; files are edited where they are").into() };
         let open_card = card("onb-open-card")
             .child(card_icon("folder-input"))
-            .child(card_text(tr("打开文件夹", "Open a folder").into(), open_desc, false))
-            .child(soft_button("onb-open", if opening { tr("再选…", "Add…") } else { tr("打开…", "Open…") }).on_click(cx.listener(|w, _, window, cx| w.pick_folder(Pick::Open, window, cx))))
+            .child(card_text(tr("添加文件夹", "Add a folder").into(), open_desc, false))
+            .child(soft_button("onb-open", if opening { tr("再选…", "Add…") } else { tr("添加…", "Add…") }).on_click(cx.listener(|w, _, window, cx| w.pick_folder(Pick::Open, window, cx))))
             .when(opening, |d| d.child(soft_button("onb-open-clear", tr("清除", "Clear")).on_click(cx.listener(|w, _, _, cx| { w.open.clear(); cx.notify(); }))));
         let lib = card("onb-lib-card")
             .when(opening, |d| d.opacity(0.55))
@@ -572,7 +575,10 @@ impl Onboarding {
         });
         // Top to bottom: the app's icon, its name, one line, then the settings.
         let over = self.film.is_some();
-        div().size_full().flex().flex_col().items_center().justify_center().px(px(48.)).pb(px(40.))
+        // Centred while it fits (48 above, 88 below: where `pb(40)` alone put it); taller, it starts at the
+        // top and scrolls, as the import page does.
+        div().id("onb-setup-scroll").size_full().overflow_y_scroll().track_scroll(&crate::design::scroll::handle("onb-setup-scroll")).flex().flex_col().items_center().px(px(48.)).pt(px(48.)).pb(px(88.))
+            .child(div().my_auto().flex_none().w_full().flex().flex_col().items_center()
             .child(div().flex().flex_col().items_center().gap(px(12.))
                 .child(div().size(px(64.)).rounded(px(15.)).overflow_hidden().shadow(theme::shadow_card()).child(img(crate::settings::about_icon()).size_full()))
                 .child(lifted(over, 56., 64., true, false, "Quiet.md"))
@@ -582,8 +588,10 @@ impl Onboarding {
                 .child(open_card)
                 .child(lib)
                 .children(hotkey)
-                .children(self.error.clone().map(|e| note_owned(e, true))))
+                .children(self.error.clone().map(|e| note_owned(e, true)))))
             .children(self.lang_menu(cx))
+            // the shared scrollbar, clear of the window's corners at both ends (48 of room beside the column)
+            .child({ crate::design::scroll::solid("onb-setup-scroll"); crate::design::scroll::bar_corners("onb-setup-scroll", &crate::design::scroll::handle("onb-setup-scroll"), crate::design::scroll::WINDOW_R, crate::design::scroll::WINDOW_R) })
             .into_any_element()
     }
 
@@ -649,7 +657,7 @@ impl Onboarding {
             (head, rows)
         });
         // Auto margins centre it while it fits; taller, it starts at the top and scrolls.
-        div().id("onb-scroll").size_full().overflow_y_scroll().flex().flex_col().items_center().px(px(48.)).pt(px(56.)).pb(px(88.))
+        div().id("onb-scroll").size_full().overflow_y_scroll().track_scroll(&crate::design::scroll::handle("onb-scroll")).flex().flex_col().items_center().px(px(48.)).pt(px(56.)).pb(px(88.))
             .child(div().my_auto().flex_none().w_full().max_w(px(560.)).flex().flex_col().gap(px(24.))
                 .child(heading(over, tr("带上已有的笔记", "Bring your notes"), if self.copy { tr("导入的是副本，原来的文件不会被改动。也可以跳过，以后从菜单导入。", "Imports are copies; your files stay as they are. You can skip this and import later.") }
                     else { tr("选中的文件夹会直接打开，文件留在原处。也可以跳过，以后从菜单打开。", "The folders you pick open where they are; the files stay put. You can skip this and open them later.") }))
@@ -662,6 +670,8 @@ impl Onboarding {
                     .with_animation("onb-copy-in", Animation::new(std::time::Duration::from_millis(180)), |el, k| el.opacity(k))))
                 .children(found.map(|(head, rows)| sheet("onb-found-sheet", Some(head.into_any_element()), rows)))
                 .children(self.error.clone().map(|e| note_owned(e, true))))
+            // the shared scrollbar, clear of the window's corners at both ends (48 of room beside the column)
+            .child({ crate::design::scroll::solid("onb-scroll"); crate::design::scroll::bar_corners("onb-scroll", &crate::design::scroll::handle("onb-scroll"), crate::design::scroll::WINDOW_R, crate::design::scroll::WINDOW_R) })
             .into_any_element()
     }
 
@@ -861,9 +871,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("notes.md"), "# Notes").unwrap();
         assert_eq!(super::library_in(dir.clone()), dir);
-        assert_eq!(super::library_in("/".into()), Path::new("/Quiet.md"));
+        assert_eq!(super::library_in("/".into()), Path::new("/Quiet Notes"));
         let home = dirs::home_dir().unwrap();
-        assert_eq!(super::library_in(home.clone()), home.join("Quiet.md"));
+        assert_eq!(super::library_in(home.clone()), home.join("Quiet Notes"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -34,6 +34,8 @@ SolidCompression=yes
 CloseApplications=yes
 RestartApplications=no
 ChangesAssociations=yes
+; The quiet command on the user's PATH (task addtopath): running programs hear of it.
+ChangesEnvironment=yes
 SetupLogging=yes
 #ifdef Signed
 SignTool=quietmd
@@ -51,10 +53,11 @@ FinishedLabel=Quiet.md is ready. A quiet place for your notes.
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
+Name: "addtopath"; Description: "Add the quiet command to PATH (for the terminal and AI agents)"
 
 [Files]
 Source: "{#AppSource}\quiet_md.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#AppSource}\quiet.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#AppSource}\quiet.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#AppSource}\vcruntime140.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"
 Source: "..\..\THIRD_PARTY.md"; DestDir: "{app}"
@@ -86,6 +89,46 @@ Filename: "{app}\quiet_md.exe"; Flags: nowait; Check: IsUpdate
 function IsUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;
+
+// The install folder on the current user's PATH (HKCU\Environment), once however
+// often it is installed; taken off again on uninstall, or when the task is unticked.
+const EnvKey = 'Environment';
+
+function PathPos(Paths, Dir: String): Integer;
+begin
+  Result := Pos(';' + Uppercase(Dir) + ';', ';' + Uppercase(Paths) + ';');
+end;
+
+procedure AddToPath(Dir: String);
+var Paths: String;
+begin
+  if not RegQueryStringValue(HKCU, EnvKey, 'Path', Paths) then Paths := '';
+  if PathPos(Paths, Dir) > 0 then exit;
+  if (Paths <> '') and (Paths[Length(Paths)] <> ';') then Paths := Paths + ';';
+  RegWriteExpandStringValue(HKCU, EnvKey, 'Path', Paths + Dir);
+end;
+
+procedure RemoveFromPath(Dir: String);
+var Paths: String; At: Integer;
+begin
+  if not RegQueryStringValue(HKCU, EnvKey, 'Path', Paths) then exit;
+  At := PathPos(Paths, Dir);
+  if At = 0 then exit;
+  Paths := ';' + Paths + ';';
+  Delete(Paths, At, Length(Dir) + 1);
+  RegWriteExpandStringValue(HKCU, EnvKey, 'Path', Copy(Paths, 2, Length(Paths) - 2));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    if WizardIsTaskSelected('addtopath') then AddToPath(ExpandConstant('{app}')) else RemoveFromPath(ExpandConstant('{app}'));
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then RemoveFromPath(ExpandConstant('{app}'));
 end;
 
 procedure InitializeWizard;

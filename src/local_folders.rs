@@ -1,4 +1,4 @@
-//! The top-level folders from the window's side: 打开文件夹… (or the Finder's Open
+//! The top-level folders from the window's side: 添加文件夹… (or the Finder's Open
 //! With, or a folder dropped on the window) adds a top-level folder to the
 //! sidebar, edited where it is (a new one is made in the system's open panel); 从侧栏移除
 //! forgets one and leaves every file alone. See docs/design/workspaces.md.
@@ -30,7 +30,7 @@ fn pick(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<PathBuf>>>
 }
 
 impl Workspace {
-    /// 打开文件夹…: pick folders and add them to the sidebar where they are.
+    /// 添加文件夹…: pick folders and add them to the sidebar where they are.
     pub fn open_folder_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.row_menu = None;
         if self.still_loading(cx) { return }
@@ -111,7 +111,7 @@ impl Workspace {
                 let name = self.store.top_folders().into_iter().find(|r| r.0 == key).map(|r| r.1).unwrap_or_default();
                 self.show_toast_kind(ToastKind::Error, &crate::localized_format!("这个文件夹里有已经打开的「{}」，先把它从侧栏移除再打开", "This folder holds “{}”, which is already open; remove it from the sidebar first", name), cx);
             }
-            AddError::Other(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法打开文件夹：{}", "Could not open folder: {}", crate::settings::diagnostic(&e)), cx),
+            AddError::Other(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法添加文件夹：{}", "Could not add folder: {}", crate::settings::diagnostic(&e)), cx),
         }
     }
 
@@ -199,7 +199,9 @@ impl Workspace {
         let pos = m.pos;
         let open = self.store.top_folders().into_iter().find(|r| r.0 == key);
         let (name, path, missing) = open.map(|r| (r.1, r.2, r.3.is_some())).unwrap_or_default();
-        let (doc, folder, rename, k1, k2) = (m.id.clone(), m.id.clone(), m.id.clone(), key.to_string(), key.to_string());
+        let (doc, folder, rename, k1, k2, k3, top_row) = (m.id.clone(), m.id.clone(), m.id.clone(), key.to_string(), key.to_string(), key.to_string(), m.id.clone());
+        // from its page's header "…": 批量管理 over that page, as its header's own button did
+        let page = m.from.as_deref() == Some(crate::home::header::TB_MORE);
         let mut menu = crate::design::Popover::new("top-row-menu").menu().w(px(crate::design::menu_w::SM))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.row_menu = None; cx.notify(); }));
         if missing {
@@ -217,8 +219,19 @@ impl Workspace {
             menu = menu.when(create, |menu| menu
                 .child(row("rr-new-doc", "doc", tr("新建文档", "New document")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.create_doc(false, Some(doc.clone()), window, cx); })))
                 .child(row("rr-new-folder", "folder", tr("新建文件夹", "New folder")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.new_folder(Some(folder.clone()), window, cx); }))))
-                .when(self.store.can_rename_folder_top(key), |m| m.child(row("rr-rename", "square-pen", tr("重命名", "Rename")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.start_rename(&rename.clone(), window, cx); }))))
-                .child(row("rr-reveal", "folder", show_in_files()).on_click(cx.listener(move |w, _, _, cx| { w.row_menu = None; cx.reveal_path(&path); cx.notify(); })));
+                // 批量管理 lives here, one top-level folder at a time: its rows check, the others don't.
+                .child(row("rr-batch", "batch", crate::settings::text("批量管理")).on_click(cx.listener(move |w, _, _, cx| {
+                    w.row_menu = None;
+                    w.batch = Some(vec![]);
+                    w.home.view_menu = false;
+                    if page { w.batch_top = None } else { w.batch_top = Some(k3.clone()); w.expanded.insert(top_row.clone()); }
+                    cx.notify();
+                })))
+                .when(self.store.can_rename_folder_top(key), |m| m.child(row("rr-rename", "pen-line", tr("重命名", "Rename")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.start_rename(&rename.clone(), window, cx); }))))
+                // A folder the system names, or a preview's own: in sight, greyed, saying why.
+                .when(self.store.folder_top_keeps_name(key), |m| m.child(row("rr-rename", "pen-line", tr("重命名", "Rename")).disabled(true).description(tr("这个文件夹保持原名", "This folder keeps its name"))))
+                .child(row("rr-reveal", "folder", show_in_files()).on_click(cx.listener(move |w, _, _, cx| { w.row_menu = None; cx.reveal_path(&path); cx.notify(); })))
+                .child(crate::design::MenuSeparator::new());
         }
         menu = menu.child(row("rr-remove", "x", tr("从侧栏移除", "Remove from sidebar")).on_click(cx.listener(move |w, _, _, cx| {
             w.row_menu = None;
@@ -234,7 +247,7 @@ impl Workspace {
         div().flex().flex_col().gap(px(2.)).px(px(4.)).pt(px(12.))
             .child(div().px(px(8.)).pb(px(6.)).text_size(px(crate::theme::ui_font())).line_height(px(crate::theme::ui_font() + 7.)).text_color(Theme::text_caption())
                 .child(tr("还没有打开任何文件夹。笔记就是文件夹里的文件。", "No folder is open yet. Your notes are the files in a folder.")))
-            .child(button("empty-open", tr("打开文件夹…", "Open folder…")).on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx))))
+            .child(button("empty-open", tr("添加文件夹…", "Add folder…")).on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx))))
     }
 
     /// The main area with no top-level folder open (2.8), centred: what to do first.
@@ -243,7 +256,7 @@ impl Workspace {
             .child(img(crate::trash::illus_for("illus/empty-list.svg")).size(px(120.)))
             .child(div().mt(px(16.)).text_size(px(13.)).line_height(px(20.)).text_color(Theme::text_caption()).child(tr("还没有打开任何文件夹。笔记就是文件夹里的文件。", "No folder is open yet. Your notes are the files in a folder.")))
             .child(div().mt(px(20.)).flex().gap(px(8.))
-                .child(crate::design::Button::primary("empty-main-open").label(tr("打开文件夹…", "Open folder…")).on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx)))))
+                .child(crate::design::Button::primary("empty-main-open").label(tr("添加文件夹…", "Add folder…")).on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx)))))
     }
 
     /// What the top of the tree is called where nothing names a top-level folder: the
@@ -259,10 +272,6 @@ impl Workspace {
         self.store.top_folders().into_iter().find(|r| r.0 == key).map(|r| r.1).unwrap_or_default()
     }
 
-    /// The rows of 本机文件: single files opened where they are, last opened first.
-    pub(crate) fn local_rows(&self) -> Vec<(&crate::store::Entry, usize)> {
-        self.local_entries().into_iter().filter(|e| e.meta.folder.is_none()).map(|e| (e, 0)).collect()
-    }
 }
 
 #[cfg(test)]

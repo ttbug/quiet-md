@@ -132,6 +132,43 @@ pub fn lift(c: Hsla, min: f32) -> Hsla {
     srgb(0.98, oa, ob, a)
 }
 
+/// WCAG contrast of two opaque colours.
+fn contrast(a: Hsla, b: Hsla) -> f32 {
+    let (x, y) = (luminance(a), luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// `fg` raised in OKLab lightness (hue and chroma kept) until it reads `min` times against `bg`,
+/// with `lift`'s margin for antialiasing: coloured labels on their own tinted chip in the dark.
+pub fn lift_on(fg: Hsla, bg: Hsla, min: f32) -> Hsla {
+    if contrast(fg, bg) >= min { return fg }
+    let Rgba { r, g, b, a } = Rgba::from(fg);
+    let [l, oa, ob] = oklab(r, g, b);
+    let mut up = l;
+    while up < 0.98 {
+        up = (up + 0.01).min(0.98);
+        let x = srgb(up, oa, ob, a);
+        if contrast(x, bg) >= min * 1.15 { return x }
+    }
+    srgb(0.98, oa, ob, a)
+}
+
+/// A literal fill lowered in OKLab lightness until white on it reads `min` times: a vivid swatch
+/// that carries white figures (the countdown's tiles) without being mirrored light in the dark.
+pub fn under_white(fill: Hsla, min: f32) -> Hsla {
+    let w: Hsla = gpui::white();
+    if contrast(fill, w) >= min { return fill }
+    let Rgba { r, g, b, a } = Rgba::from(fill);
+    let [l, oa, ob] = oklab(r, g, b);
+    let mut down = l;
+    while down > 0.2 {
+        down -= 0.01;
+        let x = srgb(down, oa, ob, a);
+        if contrast(x, w) >= min * 1.1 { return x }
+    }
+    srgb(0.2, oa, ob, a)
+}
+
 /// The text highlight to draw for light-look highlight `c` (a marker colour at its strength, 35% or
 /// 65%): in dark mode a deep tint of the same hue laid into the page, opaque, so the highlight reads
 /// as a highlight without lighting up like a lamp (it used to be the light page's pale colour, a
@@ -346,11 +383,10 @@ pub fn shadow_button() -> Vec<BoxShadow> {
 }
 
 /// The platform's sans: the interface's family unless 外观 › 界面字体 says
-/// otherwise, and the document's when its theme names no family.
-#[cfg(any(target_vendor = "apple", target_os = "windows"))]
+/// otherwise, and the document's when its theme names no family. On Linux
+/// fontconfig's sans-serif (`gpui_linux::system_ui_font_family`, #452).
+#[cfg(not(target_family = "wasm"))]
 pub const SYSTEM_FONT: &str = ".SystemUIFont";
-#[cfg(not(any(target_vendor = "apple", target_os = "windows", target_family = "wasm")))]
-pub const SYSTEM_FONT: &str = "Noto Sans";
 /// The web build brings its own fonts (src/web.rs).
 #[cfg(target_family = "wasm")]
 pub const SYSTEM_FONT: &str = "Inter";
@@ -416,7 +452,6 @@ impl Theme {
     pub fn block_bg_area() -> Hsla { ca(craft::N1000, 0.03) }
     /// Done to-do text: faded to alpha 0.5.
     pub fn todo_done() -> Hsla { ca(craft::N900, 0.5) }
-    pub fn scrollbar_thumb() -> Hsla { ca(craft::N1000, 0.22) }
     pub fn shadow() -> Hsla { ca(craft::N1000, 0.08) }
     /// Ring of a code block / callout whose handle menu is open.
     pub fn code_hover_ring() -> Hsla { ca(craft::B500, 0.35) }
@@ -654,3 +689,20 @@ pub fn heading_weight(level: u8) -> gpui::FontWeight {
 /// reference `.pageTitle`, to match preview typography; the larger title is
 /// an intentional deviation, not a measurement.
 pub const TITLE: BlockMetrics = BlockMetrics { size: 34.0, line_height: 55.25, mt: 0.0, mb: 0.0 };
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    /// `.SystemUIFont` loads, as the family fontconfig names for sans-serif.
+    #[test]
+    fn system_font_is_fontconfigs_sans() {
+        use gpui::PlatformTextSystem;
+        let family = gpui_linux::system_ui_font_family();
+        let ts = gpui_wgpu::CosmicTextSystem::new(&family);
+        // The two names load the face twice, under separate ids: compare the faces.
+        let face = |name: &str| {
+            let id = ts.font_id(&gpui::font(name.to_string())).unwrap_or_else(|e| panic!("{name} ({family}): {e}"));
+            (format!("{:?}", ts.font_metrics(id)), "Quiet 中".chars().map(|c| ts.glyph_for_char(id, c)).collect::<Vec<_>>())
+        };
+        assert_eq!(face(super::SYSTEM_FONT), face(&family), "{family}");
+    }
+}

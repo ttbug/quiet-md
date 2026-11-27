@@ -209,7 +209,7 @@ pub fn docxml_head(head: &[u8]) -> bool {
 
 // ---------------------------------------------------------------- before adding a folder
 
-/// What 打开文件夹… asks about before adding a folder (`survey`).
+/// What 添加文件夹… asks about before adding a folder (`survey`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Survey {
     /// Nothing to ask.

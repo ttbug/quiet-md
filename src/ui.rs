@@ -237,7 +237,12 @@ pub trait TipExt: Sized {
     fn tip(self, text: &str, keys: Option<&str>) -> Self {
         let text = crate::settings::label(text);
         let label = match keys {
-            Some(k) => format!("{text}（{k}）"),
+            // the language's own brackets: full-width in Chinese and Japanese, close in Korean, spaced elsewhere
+            Some(k) => match crate::settings::lang() {
+                crate::settings::Lang::Zh | crate::settings::Lang::ZhTw | crate::settings::Lang::Ja => format!("{text}（{k}）"),
+                crate::settings::Lang::Ko => format!("{text}({k})"),
+                _ => format!("{text} ({k})"),
+            },
             None => text.to_string(),
         };
         self.tip_label(label, TipSide::Below)
@@ -285,6 +290,10 @@ pub(crate) fn header_right_inset() -> f32 {
 
 pub(crate) fn window_controls(window: &Window) -> Option<Div> {
     if !cfg!(any(target_os = "windows", target_os = "linux")) { return None; }
+    // The header's ghost buttons' ink and fills (`ui::header_icon`), so the caption buttons match
+    // the search / new / more beside them in either look.
+    let (hover, pressed) = crate::design::toolbar::ghost_fills(false);
+    let ink = crate::design::color::foreground();
     // Windows must receive mouse-down to arm its native caption buttons.
     let button = |id: &'static str, area: WindowControlArea, label: &'static str| {
         div().id(id).size(px(crate::app::HEADER_ACTIONS_H)).mx(px(7.)).rounded(px(8.)).flex_none().flex().items_center().justify_center().cursor_pointer()
@@ -296,17 +305,17 @@ pub(crate) fn window_controls(window: &Window) -> Option<Div> {
                 WindowControlArea::Max => window.zoom_window(),
                 WindowControlArea::Close => window.dispatch_action(Box::new(crate::app::CloseWindow), cx),
                 WindowControlArea::Drag => {},
-            })).hover(|s| s.bg(Theme::fill_hover())).active(|s| s.bg(Theme::fill_pressed())).tip(label, None)
+            })).hover(move |s| s.bg(hover)).active(move |s| s.bg(pressed)).tip(label, None)
     };
     let maximized = window.is_maximized();
     // Native hit-test areas preserve Snap Layouts and the normal WM_CLOSE save guard.
     Some(div().absolute().top_0().right_0().h(px(crate::app::HEADER_H)).flex().items_center().title_bar()
         .child(div().mx(px(12.)).w(px(1.)).h(px(18.)).bg(Theme::line_divider()))
         .child(button("window-minimize", WindowControlArea::Min, crate::settings::tr("最小化", "Minimize"))
-            .child(icon("minus", 18., Theme::icon())))
-        .child(button("window-maximize", WindowControlArea::Max, if maximized { crate::settings::tr("还原", "Restore") } else { crate::settings::tr("最大化", "Maximize") }).child(icon(if maximized { "copy" } else { "expand" }, 18., Theme::icon())))
+            .child(icon("minus", 18., ink)))
+        .child(button("window-maximize", WindowControlArea::Max, if maximized { crate::settings::tr("还原", "Restore") } else { crate::settings::tr("最大化", "Maximize") }).child(icon(if maximized { "copy" } else { "expand" }, 18., ink)))
         .child(button("window-close", WindowControlArea::Close, crate::settings::tr("关闭", "Close"))
-            .child(icon("x", 18., Theme::icon()))))
+            .child(icon("x", 18., ink))))
 }
 
 /// "名称 (键 + 键)" plus an optional "Markdown: …" line.
@@ -450,10 +459,11 @@ pub fn cjk_punct_font() -> Option<&'static str> { crate::fonts::cjk_punct_instal
 pub struct UiText {
     text: SharedString,
     hit: Option<(std::ops::Range<usize>, Hsla)>,
+    optical: bool,
 }
 
 pub fn ui_text(text: impl Into<SharedString>) -> UiText {
-    UiText { text: text.into(), hit: None }
+    UiText { text: text.into(), hit: None, optical: false }
 }
 
 pub struct UiTextLayout {
@@ -465,6 +475,12 @@ pub struct UiTextLayout {
 }
 
 impl UiText {
+    /// Centred on its line by what it looks like, not by its font box: GPUI sets the baseline
+    /// half the line's ascent minus descent below the box's middle, and a CJK fallback's tall
+    /// ascent drops the text half a point under its neighbours (the header row, lined up on the
+    /// traffic lights). Lifted so the middle of the capitals sits on the line's middle.
+    pub fn optical(mut self) -> Self { self.optical = true; self }
+
     pub fn hit(mut self, range: Option<std::ops::Range<usize>>, color: Hsla) -> Self {
         self.hit = range.map(|r| (r, color));
         self
@@ -537,6 +553,20 @@ fn truncated(line: &ShapedLine, runs: &[TextRun], suffix: &str, font_size: Pixel
     out.extend(suffix_runs);
     let s: SharedString = format!("{}{}", &text[..cut], suffix).into();
     window.text_system().shape_line(s, font_size, &out, None)
+}
+
+thread_local! {
+    /// `cap_height`'s answers, by font and size (measured once, then read every frame).
+    static CAPS: RefCell<std::collections::HashMap<(FontId, u32), Pixels>> = RefCell::new(std::collections::HashMap::new());
+}
+
+/// The capitals' height from an "H" (the font's own cap height where it has none).
+fn cap_height(ts: &WindowTextSystem, id: FontId, size: Pixels) -> Pixels {
+    let key = (id, f32::from(size).to_bits());
+    if let Some(c) = CAPS.with(|m| m.borrow().get(&key).copied()) { return c }
+    let c = ts.typographic_bounds(id, size, 'H').map(|b| b.size.height.abs()).unwrap_or_else(|_| ts.cap_height(id, size));
+    CAPS.with(|m| m.borrow_mut().insert(key, c));
+    c
 }
 
 impl Element for UiText {
@@ -612,7 +642,18 @@ impl Element for UiText {
         cx: &mut App,
     ) {
         if let Some(line) = line {
-            let _ = line.paint(bounds.origin, layout.line_height, TextAlign::Left, None, window, cx);
+            let mut origin = bounds.origin;
+            if self.optical && let Some(run) = layout.runs.first() {
+                let ts = window.text_system().clone();
+                // the capitals' height from an "H": PingFang's own cap height (0.86 em) is its ideographs',
+                // and taken at its word it pushed Latin text a point down instead of centring it
+                let id = ts.resolve_font(&run.font);
+                let cap = cap_height(&ts, id, layout.font_size);
+                // the capitals' middle sits (ascent - descent - cap) / 2 below the box's; to whole device pixels
+                let sf = window.scale_factor();
+                origin.y -= px((f32::from(line.ascent - line.descent - cap) / 2. * sf).round() / sf);
+            }
+            let _ = line.paint(origin, layout.line_height, TextAlign::Left, None, window, cx);
         }
     }
 }

@@ -69,12 +69,13 @@ pub struct Button {
     disabled: bool,
     on_wash: bool,
     still: bool,
+    optical: bool,
 }
 element!(Button, parent);
 
 impl Button {
     pub fn new(id: impl Into<ElementId>, variant: ButtonVariant) -> Self {
-        Button { base: div().id(id), variant, size: ButtonSize::Default, icon: None, editor: false, icon_end: None, label: None, selected: false, disabled: false, on_wash: false, still: false }
+        Button { base: div().id(id), variant, size: ButtonSize::Default, icon: None, editor: false, icon_end: None, label: None, selected: false, disabled: false, on_wash: false, still: false, optical: false }
     }
     pub fn primary(id: impl Into<ElementId>) -> Self { Self::new(id, ButtonVariant::Primary) }
     pub fn outline(id: impl Into<ElementId>) -> Self { Self::new(id, ButtonVariant::Outline) }
@@ -104,6 +105,9 @@ impl Button {
     /// Keeps its face under the pointer: the editor's block handle, white beside the white card
     /// it lifts (maintainer 2026-11-25: the hover grey read as a different control).
     pub fn still(mut self) -> Self { self.still = true; self }
+    /// The label centred by its look (`UiText::optical`): on the header row, level with the
+    /// traffic lights and the crumbs.
+    pub fn optical(mut self) -> Self { self.optical = true; self }
     /// Not available: the whole button at 50% (`disabled:opacity-50`), no pointer.
     pub fn disabled(mut self, on: bool) -> Self { self.disabled = on; self }
 }
@@ -124,7 +128,7 @@ impl RenderOnce for Button {
         // `rounded-md`; `rounded-[min(var(--radius-md),8px)]` at xs and `…10px` at sm: 8 either way at R = 10
         let r = g.button_r.min(if sz == ButtonSize::Xs { 8. } else { 10. });
         let (icon_l, icon_r, label_s, disabled, selected, editor) = (self.icon, self.icon_end, self.label, self.disabled, self.selected, self.editor);
-        let still = self.still;
+        let (still, optical) = (self.still, self.optical);
         // a ghost's fills: `muted` (`muted/50` under the pointer in the dark); on a raised surface in the dark, a step up
         let (ghost_hover, ghost_on) = if self.on_wash { (color::background(), color::background()) } else { super::toolbar::ghost_fills(false) };
         under(self.base, |d| {
@@ -147,7 +151,7 @@ impl RenderOnce for Button {
             // `active:translate-y-px`, not on a menu's trigger (`aria-haspopup`): those come `selected` while open
             let d = d.when(!disabled && !selected && !placed, |d| d.relative().active(|s| s.top(px(1.))));
             d.when_some(icon_l, |d, n| d.child(if editor { crate::editor_ui::icon(&n, sz.icon(square), fg) } else { icon(&n, sz.icon(square), fg) }))
-                .when_some(label_s, |d, s| d.child(label(s)))
+                .when_some(label_s, |d, s| d.child(if optical { label(s).optical() } else { label(s) }))
                 .when_some(icon_r, |d, n| d.child(icon(&n, sz.icon(square), fg)))
         })
     }

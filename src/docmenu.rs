@@ -1,5 +1,5 @@
 //! The header "…" menu: how the document is seen (page width, then the 阅读模式 and 打字机模式
-//! switches, 专注模式, then 显示引用列表 and 窗口保持在最前), find & replace, move, pin, star, 新建子文档, duplicate,
+//! switches, 专注模式, then 显示引用列表 and 窗口保持在最前), find & replace, move, pin, 新建子文档, duplicate,
 //! 下载为 PDF / Markdown, 复制为 Markdown, 打印, document info, 版本历史, delete, 快捷键.
 
 use crate::app::Workspace;
@@ -30,7 +30,7 @@ thread_local! {
 /// 窗口保持在最前 switches: the user's order, 2026-11-25; 打字机模式 and 专注模式, a document's only, after 阅读模式),
 /// then what is done to it.
 #[derive(Clone, Copy, PartialEq)]
-enum Item { Width, Read, Typewriter, Focus, Refs, OnTop, Find, Move, Pin, Star, Child, Copy, Download, CopyMd, Print, Info, History, Delete, Shortcuts, Rule }
+enum Item { Width, Read, Typewriter, Dim, Focus, Refs, OnTop, Find, Move, Pin, Child, Copy, Download, CopyMd, Print, Info, History, Delete, Shortcuts, Rule }
 
 /// The page open: a document, one with a 画板 opened in its place, a 画板 file, a 数据表 file.
 #[derive(Clone, Copy, PartialEq)]
@@ -43,13 +43,13 @@ fn items(page: Page, child: bool) -> Vec<Item> {
     let top: &[Item] = if crate::on_top::SUPPORTED { &[OnTop] } else { &[] };
     let top_rule: &[Item] = if crate::on_top::SUPPORTED { &[OnTop, Rule] } else { &[] };
     let list: Vec<&[Item]> = match page {
-        Page::Doc => vec![&[Width, Read, Typewriter, Focus, Refs], top, &[Rule, Find, Rule, Move, Pin, Star, Rule], child, &[Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete, Rule, Shortcuts]],
+        Page::Doc => vec![&[Width, Read, Typewriter, Dim, Focus, Refs], top, &[Rule, Find, Rule, Move, Pin, Rule], child, &[Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete, Rule, Shortcuts]],
         // a board isn't the page: no page width, no find in its text, its own shortcut help (`?`)
-        Page::Board => vec![&[Read, Refs], top, &[Rule, Move, Pin, Star, Rule], child, &[Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete]],
+        Page::Board => vec![&[Read, Refs], top, &[Rule, Move, Pin, Rule], child, &[Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete]],
         // a board file: no Markdown, no reading mode or references either
-        Page::BoardFile => vec![top_rule, &[Move, Pin, Star, Rule, Copy, Download, Rule], print, &[Info, History, Rule, Delete]],
+        Page::BoardFile => vec![top_rule, &[Move, Pin, Rule, Copy, Download, Rule], print, &[Info, History, Rule, Delete]],
         // a 数据表 file: the file's own things; finding, exporting and copying are the table's (its bar)
-        Page::Table => vec![top_rule, &[Move, Pin, Star, Rule, Copy, Rule, History, Rule, Delete]],
+        Page::Table => vec![top_rule, &[Move, Pin, Rule, Copy, Rule, History, Rule, Delete]],
     };
     list.concat()
 }
@@ -105,50 +105,82 @@ impl Workspace {
         self.store.load(id).ok()
     }
 
-    /// 创建副本: "<标题> 副本", opened right away.
+    /// 创建副本: "<标题> 副本", opened once it is written.
     pub fn duplicate_doc(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let file_before = self.store.track_file_changes();
         self.close_doc_menu(cx);
         self.row_menu = None;
-        if let Some(new) = self.copy_doc(id, cx) {
-            self.entries.set(self.store.list());
-            self.sort();
-            self.open(&new, window, cx);
-        }
-        self.remember_files(file_before, crate::settings::tr("创建副本", "Duplicate"));
-        cx.notify();
+        self.copy_docs(&[id.to_string()], true, crate::settings::tr("创建副本", "Duplicate"), window, cx);
     }
 
-    /// Write "<标题> 副本" of `id` to the library; the caller refreshes the list.
-    pub(crate) fn copy_doc(&mut self, id: &str, cx: &mut Context<Self>) -> Option<String> {
-        if self.entries.iter().any(|e| e.id == id && e.meta.folder.is_some()) { return self.copy_folder(id, cx); }
-        let mut doc = self.doc_of(id, cx)?;
-        let title = crate::localized_format!("{} 副本", "{} copy", display_title(&doc.title.text));
-        doc.title = crate::model::RichText::plain(title);
-        let width = self.entries.iter().find(|e| e.id == id).map(|e| e.meta.width).unwrap_or_default();
-        // A Markdown file copies as Markdown, into the library even from a 本机文件.
-        // A 画板 copies as a 画板.
-        let board = self.entries.iter().find(|e| e.id == id).filter(|e| e.meta.kind == crate::store::DocKind::Board)
-            .map(|_| doc.blocks.iter().find_map(|b| match &b.kind { crate::model::BlockKind::Board(bd) => Some(bd.clone()), _ => None }).unwrap_or_default());
-        let table = self.entries.iter().any(|e| e.id == id && e.meta.kind == crate::store::DocKind::Table);
-        if table { crate::table::flush_all(cx); }
-        let made = if table { self.store.copy_table(id, &doc.title.text) }
-            else if let Some(board) = board { self.store.create_board_in(&doc.title.text, &board, None) }
-            else if self.store.is_markdown(id) { let front = self.store.front_matter_of(id); self.store.create_markdown(&doc, &front) } else { self.store.create_from(&doc) };
-        match made {
-            Ok(new) => {
-                let _ = self.store.set_width(&new, width);
-                // A document with children is copied alone, beside its folder.
-                let row = self.row_of(id);
-                let parent = self.entries.iter().find(|e| e.id == row).filter(|e| !e.meta.local()).and_then(|e| e.meta.parent.clone());
-                if let Some(parent) = parent { let _ = self.store.set_parent(&new, Some(&parent)); }
-                Some(new)
-            }
-            Err(e) => {
-                self.status = crate::app::SaveStatus::Failed(crate::localized_format!("创建副本失败：{}", "Could not duplicate document: {}", crate::settings::diagnostic(&e.to_string())));
-                None
+    /// 创建副本 of each of `ids` ("<标题> 副本", beside it; a folder with
+    /// everything in it, `Store::duplicate`), written off the window's thread
+    /// as 删除 is: the copies show when they are on disk, from the list read
+    /// back, one step of 撤销 (`label`) for them all. 上层优先: what a picked
+    /// folder holds is copied once, with it. `open`: the copy is opened then.
+    pub(crate) fn copy_docs(&mut self, ids: &[String], open: bool, label: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.store.file_task_busy() || self.file_history.busy { return; }
+        let later = ids.to_vec();
+        if self.after_tree_writes(move |w, window, cx| w.copy_docs(&later, open, label, window, cx)) { return; }
+        // What is copied is what is on disk: the open document and the 数据表 are written first.
+        crate::table::flush_all(cx);
+        let retry = ids.to_vec();
+        if !self.save_before(cx, move |w, window, cx| w.copy_docs(&retry, open, label, window, cx)) { return; }
+        let ids = crate::tree::Tree::new(&self.entries).outermost(ids);
+        let current = self.current.clone().zip(self.editor.as_ref().map(|e| e.read(cx).core.doc.title.text.clone()));
+        let mut writers: Vec<(String, crate::store::Store, Vec<(String, String)>)> = vec![];
+        for id in ids.iter().filter(|id| crate::shared_store::top_of_row(id).is_none()) {
+            // the editor's title for the open document: the list may not have caught up with it
+            let title = match &current { Some((c, t)) if c == id => t.clone(), _ => self.entries.iter().find(|e| &e.id == id).map(|e| e.title.clone()).unwrap_or_default() };
+            let job = (id.clone(), crate::localized_format!("{} 副本", "{} copy", display_title(&title)));
+            let Some(key) = self.store.top_of(id) else { continue };
+            match writers.iter_mut().find(|(k, _, _)| *k == key) {
+                Some((_, _, v)) => v.push(job),
+                None => if let Some(w) = self.store.top_writer(&key) { writers.push((key, w, vec![job])); },
             }
         }
+        if writers.is_empty() { return; }
+        let Some(task_guard) = self.store.begin_file_task() else { return };
+        let task = cx.background_executor().spawn(async move {
+            let (mut made, mut errors, mut changes, mut listed) = (vec![], vec![], vec![], vec![]);
+            for (key, mut writer, jobs) in writers {
+                let journal = writer.track_file_changes();
+                for (id, title) in jobs {
+                    match writer.duplicate(&id, &title) {
+                        Ok(new) => made.push(new),
+                        Err(e) => errors.push(crate::localized_format!("创建副本失败：{}", "Could not duplicate document: {}", crate::settings::diagnostic(&e.to_string()))),
+                    }
+                }
+                errors.extend(writer.take_warnings().iter().map(|s| crate::settings::diagnostic(s)));
+                listed.push((key, writer.list()));
+                changes.extend(journal.take());
+            }
+            (made, errors, changes, listed)
+        });
+        self.batch = None;
+        self.row_menu = None;
+        cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let _task_guard = task_guard;
+            let (made, errors, changes, listed) = task.await;
+            let _ = this.update_in(cx, |w, window, cx| {
+                let mut entries = None;
+                for (key, list) in listed { entries = Some(w.store.merge_entries(&key, list)); }
+                if let Some(entries) = entries {
+                    w.sync_peers(cx, &entries, None);
+                    w.entries.set(entries);
+                    w.sort();
+                }
+                w.remember_file_changes(changes, label);
+                w.sync_sub_pages(cx);
+                if !errors.is_empty() {
+                    let msg = errors.join("；");
+                    w.show_toast_kind(crate::ui::ToastKind::Error, &msg, cx);
+                    w.status = crate::app::SaveStatus::Failed(msg);
+                }
+                if open && let [new] = &made[..] { w.open(new, window, cx); }
+                cx.notify();
+            });
+        }).detach();
     }
 
     /// 查找和替换 (also ⌘F / ⌘⇧H).
@@ -168,25 +200,26 @@ impl Workspace {
         let Some(id) = self.current.clone() else { return vec![] };
         let entry = self.entries.iter().find(|e| e.id == id);
         let pinned = entry.is_some_and(|e| e.meta.pinned);
-        let starred = entry.is_some_and(|e| e.meta.starred > 0);
         let width = entry.map(|e| e.meta.width).unwrap_or_default();
         let refs_shown = !entry.is_some_and(|e| e.meta.refs_hidden);
         // which list the 「…」 shows (`items`)
         let page = self.editor.as_ref().map_or(Page::Doc, |e| { let e = e.read(cx); if e.table_file { Page::Table } else if e.board_file { Page::BoardFile } else if e.board_open() { Page::Board } else { Page::Doc } });
         let reading = self.reading();
         let typewriter = crate::settings::typewriter();
+        let dim = crate::settings::paragraph_focus();
         let on_top = self.on_top;
+        let focus = self.focus_mode.switch();
         let sub = self.doc_sub;
         let hover_sub = |s: Option<DocSub>| {
-            cx.listener(move |w: &mut Workspace, hovered: &bool, _, cx| {
+            crate::design::sub_hover(cx.listener(move |w: &mut Workspace, hovered: &bool, _, cx| {
                 if *hovered && w.doc_sub != s {
                     w.doc_sub = s;
                     cx.notify();
                 }
-            })
+            }))
         };
         let sub_bounds = self.doc_sub_bounds.clone();
-        let (pin_id, star_id, mv_id, del_id, dup_id, print_id) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
+        let (pin_id, mv_id, del_id, dup_id, print_id) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
         // 新建子文档 (#357): under a document of the library.
         let child = matches!(page, Page::Doc | Page::Board) && self.takes_children(&id);
         let list = items(page, child);
@@ -200,7 +233,7 @@ impl Workspace {
                 }
             }));
         for item in &list {
-            let (pin_id, star_id, mv_id, del_id, dup_id, print_id, child_id) = (pin_id.clone(), star_id.clone(), mv_id.clone(), del_id.clone(), dup_id.clone(), print_id.clone(), child_id.clone());
+            let (pin_id, mv_id, del_id, dup_id, print_id, child_id) = (pin_id.clone(), mv_id.clone(), del_id.clone(), dup_id.clone(), print_id.clone(), child_id.clone());
             menu = menu.child(match item {
                 Item::Rule => divider().into_any_element(),
                 Item::Width => menu_item("dm-width", "page-width", crate::settings::text("页宽设置"), true, sub == Some(DocSub::Width))
@@ -216,6 +249,11 @@ impl Workspace {
                     .tip_right(crate::settings::tr("正在写的一行停在窗口中间", "Keeps the line you write in the middle"), Some(crate::shortcuts::hint("workspace::ToggleTypewriter", "⌘ + Shift + T")))
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(move |w, _, _, cx| w.set_typewriter(!typewriter, false, cx))).into_any_element(),
+                Item::Dim => menu_item("dm-dim", crate::typewriter::FOCUS_ICON, crate::settings::tr("段落聚焦", "Paragraph Focus"), false, false)
+                    .switch(dim)
+                    .tip_right(crate::settings::tr("正在写的一段保持清晰，其余变淡", "The paragraph you write stays clear, the rest fade"), Some(crate::shortcuts::hint("workspace::ToggleParagraphFocus", "⌘ + Shift + F")))
+                    .on_hover(hover_sub(None))
+                    .on_click(cx.listener(move |w, _, _, cx| w.set_paragraph_focus(!dim, false, cx))).into_any_element(),
                 Item::Refs => menu_item("dm-refs", "list", crate::settings::text("显示引用列表"), false, false)
                     .switch(refs_shown)
                     .on_hover(hover_sub(None))
@@ -226,9 +264,10 @@ impl Workspace {
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(move |w, _, window, cx| w.set_on_top(!on_top, window, cx))).into_any_element(),
                 Item::Focus => menu_item("dm-focus", crate::focus::ICON, crate::settings::tr("专注模式", "Focus Mode"), false, false)
+                    .switch(focus)
                     .tip_right(crate::settings::tr("只留正文，鼠标移到顶部可退出", "Just the page; point at the top to exit"), Some(crate::focus::hint()))
                     .on_hover(hover_sub(None))
-                    .on_click(cx.listener(|w, _, window, cx| w.enter_focus(window, cx))).into_any_element(),
+                    .on_click(cx.listener(|w, _, _, cx| w.focus_switch(cx))).into_any_element(),
                 Item::Find => menu_item("dm-find", "text-search", crate::settings::text("查找和替换"), false, false)
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(|w, _, window, cx| w.find_in_doc(false, window, cx))).into_any_element(),
@@ -244,9 +283,6 @@ impl Workspace {
                         w.toggle_pin(&pin_id, cx);
                         w.close_doc_menu(cx);
                     })).into_any_element(),
-                Item::Star => menu_item("dm-star", if starred { "star-off" } else { "star" }, if starred { crate::settings::text("取消收藏") } else { crate::settings::text("添加到收藏") }, false, false)
-                    .on_hover(hover_sub(None))
-                    .on_click(cx.listener(move |w, _, _, cx| w.toggle_star(&star_id, cx))).into_any_element(),
                 Item::Child => menu_item("dm-child", "plus", crate::settings::tr("新建子文档", "New child page"), false, false)
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(move |w, _, window, cx| { w.close_doc_menu(cx); w.new_child(&child_id, window, cx); })).into_any_element(),
@@ -308,7 +344,7 @@ impl Workspace {
         };
         let sub_el = match sub {
             // each levels its first item with its row, where the row was last painted
-            Some(DocSub::Width) => row_top("dm-width").map(|top| (top - PAD, self.width_panel(width, cx).child(recorder()).into_any_element())),
+            Some(DocSub::Width) => row_top("dm-width").map(|top| (top - PAD, self.width_panel(width, cx).submenu().child(recorder()).into_any_element())),
             // Level the submenu's first item with 下载为.
             Some(DocSub::Download) => row_top("dm-download").map(|top| (
                 top - PAD,
@@ -316,6 +352,7 @@ impl Workspace {
                     let pdf = id.clone();
                     Popover::new("dm-download-menu")
                         .menu()
+                        .submenu()
                         .w(px(crate::design::menu_w::SM))
                         .child(recorder())
                         .when(crate::printing::SUPPORTED, |d| d.child(sub_item("dm-pdf", "PDF").on_click(cx.listener(move |w, _, window, cx| w.export_pdf(&pdf, window, cx)))))

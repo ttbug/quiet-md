@@ -70,7 +70,7 @@ fn menu_bar(markdown: bool) -> Vec<Menu> {
                 MenuItem::action(tr("新建文档", "New Document"), NewDoc),
                 MenuItem::action(tr("新建笔记窗口", "New Note Window"), crate::quick_note::QuickNew),
                 MenuItem::action(tr("打开 Markdown 文件…", "Open Markdown File…"), OpenFile),
-                MenuItem::action(tr("打开文件夹…", "Open Folder…"), OpenFolder),
+                MenuItem::action(tr("添加文件夹…", "Add Folder…"), OpenFolder),
                 // 打开 uses things where they are; 导入 copies them in: two groups.
                 MenuItem::separator(),
                 MenuItem::action(tr("导入为文档…", "Import as Document…"), ImportDoc),
@@ -166,7 +166,13 @@ fn menu_bar(markdown: bool) -> Vec<Menu> {
                 use crate::settings::Lang as L;
                 match crate::settings::lang() { L::Zh => "显示", L::ZhTw => "顯示", L::En => "View", L::Ja => "表示", L::Ko => "보기", L::Fr => "Présentation", L::Es => "Visualización", L::Ar => "عرض", L::Tr => "Görüntü" }.into()
             },
-            items: vec![MenuItem::action(tr("切换深色 / 浅色", "Toggle Dark Mode"), ToggleDarkMode)],
+            items: vec![
+                MenuItem::action(tr("放大", "Zoom In"), crate::zoom::ZoomInText),
+                MenuItem::action(tr("缩小", "Zoom Out"), crate::zoom::ZoomOutText),
+                MenuItem::action(tr("实际大小", "Actual Size"), crate::zoom::ResetTextZoom),
+                MenuItem::separator(),
+                MenuItem::action(tr("切换深色 / 浅色", "Toggle Dark Mode"), ToggleDarkMode),
+            ],
             disabled: false,
         },
         Menu {
@@ -250,6 +256,7 @@ pub fn bind_keys(cx: &mut App) {
     }));
     crate::modes::bind_keys(cx);
     crate::typewriter::bind_keys(cx);
+    crate::zoom::bind_keys(cx);
     crate::focus::bind_keys(cx);
 }
 
@@ -330,13 +337,13 @@ pub enum Confirm {
     RemoveFolder(String, String),
     /// Dropped on the sidebar from outside: import it into the library there?
     Import { what: DropImport, target: crate::sidebar_drop::SidebarDropAt },
-    /// 打开文件夹… on a code project or a very big folder: add it? The first one is asked about.
+    /// 添加文件夹… on a code project or a very big folder: add it? The first one is asked about.
     AddFolder(Vec<(std::path::PathBuf, fdl_core::shown::Survey)>),
 }
 
-/// What a sidebar drop would import: files and folders from the Finder, or a 本机文件.
+/// What a sidebar drop would import: files and folders from the Finder.
 #[derive(Clone, Debug)]
-pub enum DropImport { Files(Vec<std::path::PathBuf>), Local(String) }
+pub enum DropImport { Files(Vec<std::path::PathBuf>) }
 
 /// What to do once the open document is safely on disk (or its changes given up).
 pub type AfterSave = Box<dyn FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>)>;
@@ -450,6 +457,9 @@ pub struct Workspace {
     pub row_sub_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// 批量操作 mode: the checked docs of 我的文档, in check order.
     pub batch: Option<Vec<String>>,
+    /// The top-level folder 批量管理 was entered from (its heading's "…"): only its rows check.
+    /// None: every row (a folder page's 批量管理, Shift-click outside any).
+    pub batch_top: Option<String>,
     /// The open confirmation dialog.
     pub confirm: Option<Confirm>,
     /// The dialog's focus while it is up, and where focus was before it
@@ -467,16 +477,18 @@ pub struct Workspace {
     pub trash: Vec<crate::store::TrashEntry>,
     /// A 回收站 row's menu: the page and where it opens.
     pub trash_menu: Option<(String, Point<Pixels>, Anchor)>,
+    /// 回收站's 自动删除 dropdown is open.
+    pub trash_days_menu: bool,
     /// The toast and when it appeared.
     pub toast: Option<(ToastKind, SharedString, Instant)>,
     toast_task: Option<Task<()>>,
-    /// Folded sidebar sections: 置顶, (unused: 我的文档 never folds, #421), 本机文件.
+    /// Folded sidebar sections: 置顶, then two unused (我的文档 never folds, #421; 本机文件 is gone).
     pub folded: [bool; 3],
     /// Top-level folder folders folded shut in the sidebar, by key.
     pub folded_tops: std::collections::HashSet<String>,
     /// Expanded pages of the 我的文档 tree.
     pub expanded: HashSet<String>,
-    /// Where a drag from outside the tree (the Finder, 本机文件) would land in the sidebar.
+    /// Where a drag from the Finder would land in the sidebar.
     pub sidebar_drop: Option<crate::sidebar_drop::SidebarDropAt>,
     pub move_dlg: Option<crate::tree::MoveDialog>,
     /// 导出 Markdown 设置.
@@ -597,7 +609,7 @@ impl Workspace {
                     if !this.store.file_task_busy() && !this.store.loading() && !this.tree_writes_pending() { this.entries.set(this.store.list()); this.sort(); this.refresh_external(Some(window.window_handle().window_id()), cx); }
                     // An attachment another program wrote meanwhile: its card says so.
                     if let Some(ed) = this.editor.clone() { ed.update(cx, |e, cx| e.files_changed(cx)); }
-                    crate::update::check_if_stale(cx); cx.notify();
+                    crate::update::check_if_stale(cx); crate::usage::opened(); cx.notify();
                 }
                 else if !this.store.file_task_busy() { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); if !this.tree_writes_pending() { this.flush(cx); } }
             }),
@@ -756,6 +768,7 @@ impl Workspace {
             search_cache: Default::default(),
             row_sub_bounds: Rc::new(Cell::new(None)),
             batch: None,
+            batch_top: None,
             confirm: None,
             confirm_focus: cx.focus_handle(),
             confirm_return: None,
@@ -766,6 +779,7 @@ impl Workspace {
             settings_scroll: ScrollHandle::new(),
             trash: vec![],
             trash_menu: None,
+            trash_days_menu: false,
             toast: None,
             toast_task: None,
             mode_menu: false,
@@ -1162,11 +1176,7 @@ impl Workspace {
         // trashed as one item that carries its subtree.
         let tree = crate::tree::Tree::new(&self.entries);
         let mut all: Vec<(String, Option<String>)> = vec![];
-        for id in ids {
-            let covered = self.ancestors(id).iter().any(|a| ids.contains(&a.id));
-            if covered {
-                continue;
-            }
+        for id in &tree.outermost(ids) {
             for d in tree.subtree(id) {
                 if !all.iter().any(|(x, _)| *x == d) {
                     let root = (d != *id).then(|| id.clone());
@@ -1280,20 +1290,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// 收藏 / 取消收藏.
-    pub fn toggle_star(&mut self, id: &str, cx: &mut Context<Self>) {
-        let Some(e) = self.entries.edit().iter_mut().find(|e| e.id == id) else { return };
-        let on = e.meta.starred == 0;
-        if let Ok(t) = self.store.set_starred(id, on) {
-            e.meta.starred = t;
-        }
-        self.row_menu = None;
-        self.doc_menu = false;
-        self.doc_sub = None;
-        self.show_toast(if on { crate::settings::text("已添加到“收藏”") } else { crate::settings::text("已从“收藏”中移除") }, cx);
-        cx.notify();
-    }
-
     /// 退出 on a standalone 画板: save it, close it, and show the folder it
     /// is in (the default page at the top).
     fn leave_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1323,6 +1319,7 @@ impl Workspace {
         self.view = view;
         self.row_menu = None;
         self.trash_menu = None;
+        self.trash_days_menu = false;
         self.theme_menu = None;
         self.lang_menu = None;
         self.pref_menu = None;
@@ -1859,10 +1856,10 @@ impl Workspace {
             .unwrap_or_default();
         let mut crumbs: Vec<AnyElement> = vec![];
         let sep = || div().mx(px(3.)).flex_none().child(icon("chevron-right", 12., crate::ui::crumb_ink())).into_any_element();
-        // Every path starts at the library, as a folder page's does; a file
-        // under 本机文件 starts there, which has no page of its own.
+        // Every path starts at the library, as a folder page's does; a file opened on its
+        // own starts at the folder holding it on disk, which has no page here.
         let local = self.current.as_ref().and_then(|id| self.entries.iter().find(|e| &e.id == id)).is_some_and(|e| e.meta.local());
-        let start = if local { crate::settings::tr("本机文件", "Files on this computer").to_string() } else {
+        let start = if local { self.current.as_deref().and_then(|id| self.store.local_path(id)).and_then(|p| p.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned())).unwrap_or_default() } else {
             let root = self.current.as_ref().and_then(|id| self.entries.iter().find(|e| &e.id == id)).map(|e| e.top.clone()).unwrap_or_default();
             self.folder_name(&root)
         };
@@ -1877,7 +1874,7 @@ impl Workspace {
                     Some(t) => w.open(t, window, cx),
                     None => w.show_view(View::Default, cx),
                 })))
-                .child(ui_text(start.to_string()))
+                .child(ui_text(start.to_string()).optical())
                 .into_any_element());
             crumbs.push(sep());
         }
@@ -1907,7 +1904,7 @@ impl Workspace {
                     .when_some(em.clone(), |d, em| {
                         d.child(div().size(px(20.)).mr(px(4.)).flex_none().flex().items_center().justify_center().text_size(px(16.)).child(em))
                     })
-                    .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(name.clone())))
+                    .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(name.clone()).optical()))
                     .on_click(cx.listener(move |w, _, window, cx| w.open(&id, window, cx)))
                     .into_any_element(),
             );
@@ -1917,7 +1914,7 @@ impl Workspace {
             crumbs.push(
                 div().id("crumb-board-doc").no_drag().min_w(px(28.)).max_w(px(200.)).px(px(4.)).flex().items_center().rounded(px(4.)).cursor_pointer()
                     .text_color(crate::ui::crumb_ink()).hover(|s| s.text_color(crate::ui::crumb_page()))
-                    .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(title.clone())))
+                    .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(title.clone()).optical()))
                     .on_click(cx.listener(|w, _, window, cx| if let Some(e) = w.editor.clone() { e.update(cx, |e, cx| e.close_open_board(window, cx)) }))
                     .into_any_element(),
             );
@@ -1928,7 +1925,7 @@ impl Workspace {
             crumbs.push(
                 div().id("crumb-table-doc").no_drag().min_w(px(28.)).max_w(px(200.)).px(px(4.)).flex().items_center().rounded(px(4.)).cursor_pointer()
                     .text_color(crate::ui::crumb_ink()).hover(|s| s.text_color(crate::ui::crumb_page()))
-                    .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(title.clone())))
+                    .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(title.clone()).optical()))
                     .on_click(cx.listener(|w, _, window, cx| if let Some(e) = w.editor.clone() { e.update(cx, |e, cx| e.close_open_table(window, cx)) }))
                     .into_any_element(),
             );
@@ -1962,7 +1959,7 @@ impl Workspace {
                     crate::design::Button::ghost("open-sidebar")
                         .no_drag()
                         .ml(px(4.))
-                        .icon("panel-left-open")
+                        .icon("sidebar")
                         .tip(crate::settings::tr("展开侧栏", "Show sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
                         .on_click(cx.listener(|w, _, _, cx| {
                             w.sidebar_open = true;
@@ -1998,7 +1995,7 @@ impl Workspace {
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_ellipsis()
-                                    .child(ui_text(title))
+                                    .child(ui_text(title).optical())
                                     // a 数据表 file has no title in its page: double-click its name here to rename it
                                     .when(table_file, |d| d.no_drag().on_click(cx.listener(|w, ev: &ClickEvent, window, cx| if ev.click_count() >= 2 && let Some(id) = w.current.clone() { w.start_rename(&id, window, cx); }))),
                             ),
@@ -2011,10 +2008,20 @@ impl Workspace {
             )
             .child(div().flex_1().min_w(px(16.)))
             .child(
-                div().gap(px(4.))
+                // + · 搜索 · …: "…" and 搜索 sit where a folder page's do, "+" first as there
+                div().gap(px(HEADER_ACTIONS_GAP))
                     .h(px(HEADER_ACTIONS_H)).flex_none()
                     .flex()
                     .items_center()
+                    .child(
+                        // Straight to a new document: no 新建 menu, as 导入 is rare.
+                        seg("doc-new", "plus").tip(crate::settings::tr("新建文档", "New document"), None).on_click(cx.listener(|w, _, window, cx| w.new_doc(window, cx))),
+                    )
+                    .child(
+                        seg("doc-search", "search")
+                            .tip_label(crate::shortcuts::keys(crate::settings::text("搜索(⌘ + J)")).into(), TipSide::Below)
+                            .on_click(cx.listener(|_, _, window, cx| window.dispatch_action(Box::new(FocusSearch), cx))),
+                    )
                     .when(self.current.is_some(), |d| {
                         d.child(
                             // No tooltip while its dropdown is open; the menu hangs
@@ -2033,16 +2040,7 @@ impl Workspace {
                                     cx.notify();
                                 })),
                         )
-                    })
-                    .child(
-                        seg("doc-search", "search")
-                            .tip_label(crate::shortcuts::keys(crate::settings::text("搜索(⌘ + J)")).into(), TipSide::Below)
-                            .on_click(cx.listener(|_, _, window, cx| window.dispatch_action(Box::new(FocusSearch), cx))),
-                    )
-                    .child(
-                        // Straight to a new document: no 新建 menu, as 导入 is rare.
-                        seg("doc-new", "plus").tip(crate::settings::tr("新建文档", "New document"), None).on_click(cx.listener(|w, _, window, cx| w.new_doc(window, cx))),
-                    ).into_any_element()
+                    }).into_any_element()
             )
     }
 }
@@ -2053,6 +2051,9 @@ pub const HEADER_H: f32 = 48.;
 /// window's minimum width: a narrower window hides the sidebar.
 pub const DOC_MIN_W: f32 = 480.;
 pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
+/// Between the icon buttons of a header row: a folder page's (搜索 … "+") and the sidebar's
+/// (添加文件夹, the toggle). 2, the folder header's spacing since #421.
+pub(crate) const HEADER_ACTIONS_GAP: f32 = 2.;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2260,6 +2261,10 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &crate::modes::EditMode, window, cx| w.set_mode(false, window, cx)))
             .on_action(cx.listener(|w, _: &crate::modes::ReadMode, window, cx| w.set_mode(true, window, cx)))
             .on_action(cx.listener(|w, _: &crate::typewriter::ToggleTypewriter, _, cx| w.set_typewriter(!crate::settings::typewriter(), true, cx)))
+            .on_action(cx.listener(|w, _: &crate::zoom::ZoomInText, _, cx| w.zoom_text(Some(true), cx)))
+            .on_action(cx.listener(|w, _: &crate::zoom::ZoomOutText, _, cx| w.zoom_text(Some(false), cx)))
+            .on_action(cx.listener(|w, _: &crate::zoom::ResetTextZoom, _, cx| w.zoom_text(None, cx)))
+            .on_action(cx.listener(|w, _: &crate::typewriter::ToggleParagraphFocus, _, cx| w.set_paragraph_focus(!crate::settings::paragraph_focus(), true, cx)))
             .on_action(cx.listener(|w, _: &crate::modes::ToggleShortcuts, _, cx| {
                 w.shortcuts = !w.shortcuts;
                 cx.notify();

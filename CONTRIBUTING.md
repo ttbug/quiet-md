@@ -8,7 +8,7 @@ macOS needs the Xcode Command Line Tools; Windows needs the Visual Studio 2022 C
 
 ```sh
 cargo build --release --locked
-./target/release/quiet_md                          # uses ~/Documents/Quiet.md
+./target/release/quiet_md                          # uses ~/Documents/Quiet Notes (or an existing ~/Documents/Quiet.md)
 QUIET_MD_HOME=/tmp/lib ./target/release/quiet_md   # uses another library
 ```
 

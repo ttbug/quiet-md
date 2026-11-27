@@ -2,8 +2,8 @@
 
 `quiet` reads, searches and edits a Quiet.md library: a folder of documents
 (`.xml` DocxXML and `.md` Markdown), boards (`.excalidraw`) and 数据表
-(`.sqlite`). This guide matches the installed `quiet`; run `quiet skill`
-again after an update. `quiet help COMMAND` shows one command in detail.
+(`.sqlite`). `quiet guide` prints this guide as the installed `quiet` knows
+it; `quiet help COMMAND` shows one command in detail.
 
 The library is plain files, and you may read them directly. Edit through
 `quiet` instead: it keeps the structure valid, rewrites links when a document
@@ -66,10 +66,17 @@ quiet rename DOC TITLE
 quiet mv DOC FOLDER          (within the document's top folder; its name alone: its top)
 quiet rm DOC                 to the trash (kept 30 days)
 
-quiet table DOC[#REF] [--table NAME] [--limit N] [--offset N]
+quiet table DOC[#REF] [--table T] [--view V] [--where 'FIELD OP VALUE']… [--any] [--sort F[:desc]]… [--group F]…
+                 [--fields A,B] [--stats [sum,…]] [--as json|csv|md] [--limit N] [--offset N]
 quiet table add DOC[#REF] --set Field=Value … | --rows JSON|-
-quiet table update DOC[#REF] ROW --set Field=Value … | --rows JSON|-
-quiet table delete DOC[#REF] ROW…
+quiet table update DOC[#REF] ROW --set Field=Value … | --rows JSON|-   (or --where COND… --set …)
+quiet table delete DOC[#REF] ROW… | --where COND…
+quiet table import DOC (--csv FILE|- | --rows JSON|-) [--create-fields]
+quiet table field add DOC NAME --type T [--options A,B] [--formula EXPR] [--link TABLE] [--lookup LINK.FIELD] [--format F] [--after F]
+quiet table field change DOC NAME [--name N] [--type T] [--add-option X] [--remove-option X] [--rename-option OLD=NEW] …
+quiet table field rename DOC NAME NEW | quiet table field delete DOC NAME…
+quiet table view DOC | view add DOC NAME [--kind K] | view set DOC NAME … | view rename DOC NAME NEW | view delete DOC NAME
+quiet table new DOC NAME [--fields A,B] | quiet table rename DOC NAME NEW | quiet table remove DOC NAME [--force]
 quiet board DOC[#REF] [--full]
 quiet board add DOC[#REF] --elements JSON|- [--replace]
 quiet board rm DOC[#REF] ID…
@@ -82,7 +89,6 @@ quiet import FILE… [--in FOLDER]   .md/.txt, .xml, .csv/.tsv (as a 数据表),
 
 quiet run [FILE|-] [-e CODE] [--timeout SECS]
 quiet call OP [JSON]         any operation by name, as run's lib calls it
-quiet mcp                    the same as MCP tools, for clients without a shell
 ```
 
 Every write takes `--dry-run` (print what would change, write nothing) and
@@ -121,9 +127,31 @@ subpages, raw:TAG (kept verbatim).
 **数据表.** Rows have lasting ids (`r12`). Values are text as the app shows
 them and are written as if pasted: numbers, dates, `true`/`false` for
 checkboxes, select options (missing ones are added), several options joined
-with commas. Computed fields are read-only. `table` prints each field's type.
+with commas, a link (关联) as the other table's first-field text or `r12`.
+Computed fields are read-only. `table` prints the file's tables and views and
+each field's type, options, formula, link or lookup (`--json`: `schema`).
 A new table: `quiet new 书单 --kind table --fields 书名,作者,状态`, or from CSV
 (types guessed from the values) with `--csv` or `quiet import file.csv`.
+
+Read what you need, not the whole table: `--view V` shows a view as the app
+does (its 筛选, 排序, 分组, hidden fields); `--where 'FIELD OP VALUE'`
+(repeatable, all must hold; `--any`: any of them) adds conditions on top.
+OP: `= != ~ !~ > >= < <= empty notempty before after` (or 等于 包含 为空 早于…);
+a field takes only some (the error lists them). Dates compare with a day or
+`today`, `this_week`, `past_7`, `this_month`… (今天, 本周, 过去 7 天内). Selects
+compare by option name (`~` any of `a,b`). `--sort F:desc`, `--group F`,
+`--fields A,B`, `--stats` (each column's 统计; or `--stats sum,average`),
+`--as csv|md` (the rows as CSV or a Markdown table). Change many rows at
+once with `table update DOC --where … --set F=V` or `table delete DOC --where …`
+(check with `--dry-run`: it lists the rows).
+
+Fields, views and tables change like in the app. Types by key or Chinese
+name: text single_select multi_select person date attachment number checkbox
+url formula lookup auto_number phone email location barcode progress
+currency rating link created_time modified_time. A type change converts the
+cells and reports how many it lost; a formula is checked first (`bad_formula`
+says where). The first field, the last view and the last table stay. `quiet
+help table` has every option.
 
 **画板.** `board` lists elements: id, type, x,y, w×h, text or label, and
 `from → to` for bound arrows, plus the bounds of the whole drawing. Add
@@ -164,8 +192,12 @@ Top-level `await` and `return` work; a returned value is printed. `help()` and
 - `doc.setText(ref, text)` (inline Markdown), `doc.setDone(ref, done = true)`, `doc.setKind(ref, kind)`
 - `doc.rename(title)`, `doc.moveTo(folder)`, `doc.trash()` — applied when the script ends
 - `doc.links()` → `{out: [{to, broken, text}], back: [{from, title, text}]}` (out: as edited in this script; back: as on disk)
-- `doc.table({at, table, limit, offset})` → `{fields, schema, total, rows: [{_id, field: text}]}` (every value is a string: `Number(r.评分)` to compare)
+- `doc.table({at, table, view, where, any, sort, group, fields, stats, as, limit, offset})` → `{fields, schema, views, tables, total, rows: [{_id, field: text}], groups?, stats?, text?}` (every value is a string: `Number(r.评分)` to compare; `where`: `"状态 = 在读"`, `{field, op, value}` or a list; `sort`/`group`: `"F:desc"` or a list; `as: "csv"|"md"` gives `text`)
 - `doc.addRows([{field: value}], {at, table})` → `["r13", …]`; `doc.updateRow(row, {field: value})`; `doc.updateRows([{_id, field: value}])`; `doc.deleteRows(rows)`
+- `doc.updateWhere(where, {field: value}, {any, view})` → ids; `doc.deleteWhere(where)` → `["r3 三体", …]`; `doc.importRows([{field: value}] or csvText, {createFields})`
+- `doc.addField(name, type, {options, formula, link, lookup, rollup, format, after, twoWay})`; `doc.changeField(name, {name, type, options, addOptions, removeOptions, renameOptions: {old: new}, formula, format})` → `{converted, lost, lost_rows}`; `doc.deleteFields(names)`
+- `doc.views()` → `[{name, kind, where, sort, group, hidden, stats, rows}]`; `doc.addView(name, {kind})`; `doc.setView(name, {where, any, sort, group, hide, show, order, stack, date, end, stats: {field: stat}, clear})`; `doc.renameView(name, to)`; `doc.deleteView(name)`
+- `doc.addTable(name, {fields, csv})`; `doc.renameTable(name, to)`; `doc.removeTable(name, {force})` (each table op takes `{table}` to pick a table of the file)
 - `doc.board({at, full})` → `{elements, bounds}`; `doc.addToBoard(skeletons, {at, replace})` → ids; `doc.removeFromBoard(ids)`
 - `doc.history(version?)` → `{versions}` or `{diff}`; `doc.restore(version)`
 - `console.log(...)` / `print(...)`: objects print as JSON
@@ -224,9 +256,17 @@ Mark finished books in a 数据表 and count what is left:
 
 ```js
 const books = lib.doc("书单");
-const { rows } = books.table();
-for (const r of rows.filter(r => r.进度 === "100%")) books.updateRow(r, { 状态: "读完" });
-return rows.filter(r => r.状态 !== "读完").length;
+books.updateWhere("进度 = 100%", { 状态: "读完" });
+return books.table({ where: "状态 != 读完", limit: 0 }).total;
+```
+
+Give a 数据表 a 看板 of what is being read, with a score column:
+
+```sh
+quiet table field add 书单 评分 --type rating --format stars=5
+quiet table view add 书单 在读 --kind kanban
+quiet table view set 书单 在读 --where '状态 != 读完' --sort 评分:desc --stack 状态
+quiet table 书单 --view 在读 --stats --as md
 ```
 
 Draw a flow on a new board from a document's headings (an arrow with

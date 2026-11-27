@@ -1,8 +1,8 @@
 //! The top-level folders the windows share: every top-level folder's library behind one
 //! handle. A call about a document goes to the top-level folder it is in; a new one goes
 //! into its folder's top-level folder, else the top-level folder of the document in front (`active`),
-//! else the first top-level folder. Nothing here crosses top-level folders: moves and links stay
-//! inside one (docs/design/workspaces.md, W6 / W7).
+//! else the first top-level folder. Links stay inside one (docs/design/workspaces.md, W6); a
+//! page or folder moved into another is handed from one library to the other (`move_across`).
 
 use crate::store::*;
 use crate::model::Document;
@@ -114,6 +114,7 @@ impl SharedStore {
         r
     }
     pub fn can_rename_folder_top(&self, key: &str) -> bool { self.0.borrow().ws.can_rename(key) }
+    pub fn folder_top_keeps_name(&self, key: &str) -> bool { self.0.borrow().ws.keeps_name(key) }
     /// Where a 快速笔记 goes: the top-level folder picked in Settings while it is open, else the first open one.
     pub fn quick_note_folder(&self) -> Option<String> { self.0.borrow().ws.quick_note_folder(&crate::settings::prefs().quick_note_folder).map(|r| r.key.clone()) }
     pub fn top_path(&self, key: &str) -> Option<PathBuf> { self.0.borrow().ws.folder(key).map(|r| r.path.clone()) }
@@ -321,6 +322,13 @@ impl SharedStore {
     /// 版本历史's snapshots kept per document: the top-level folder in front's (文件夹级, 2.1).
     pub fn history_limit(&self) -> u32 { self.put(None, |s, _| Ok(s.settings().history_limit())).unwrap_or_else(|_| fdl_core::versions::default_history_limit()) }
     pub fn set_history_limit(&self, n: u32) -> Result<()> { self.put(None, |s, _| { let mut v = s.settings(); v.set_history_limit(n); s.save_settings(&v) }) }
+    /// 回收站's 自动删除 days: the top-level folder in front's; set on every one, as the 回收站 shows them all.
+    pub fn trash_days(&self) -> u64 { self.put(None, |s, _| Ok(s.settings().trash_days())).unwrap_or(fdl_core::store::TRASH_DAYS) }
+    pub fn set_trash_days(&self, n: u64) -> Result<()> {
+        let mut out = Ok(());
+        self.each(|s| { let mut v = s.settings(); v.set_trash_days(n); if let Err(e) = s.save_settings(&v) { out = Err(e) } });
+        out
+    }
     pub fn scroll_top(&self, id: &str) -> Option<(usize, f32)> { self.on(id, |s| s.scroll_top(id)).flatten() }
     pub fn remember_scroll(&self, id: &str, top: Option<(usize, f32)>) { self.on(id, |s| s.remember_scroll(id, top)); }
     pub fn flush_view_state(&self) -> Result<()> {
@@ -376,6 +384,38 @@ impl SharedStore {
         let fresh = match self.0.borrow_mut().ws.store(key) { Some(s) if s.writes() == n => { s.adopt(writer); entries } Some(s) => s.list(), None => entries };
         self.merge_entries(key, fresh)
     }
+    /// The top-level folders a move of `id` into folder `parent` (as the window's rows have
+    /// it) goes from and to, when they differ. A top-level folder's own row never moves.
+    pub fn crossing(&self, id: &str, parent: Option<&str>) -> Option<(String, String)> {
+        if top_of_row(id).is_some() { return None; }
+        let (from, to) = (self.top_of(id)?, self.top_of(parent?)?);
+        (from != to).then_some((from, to))
+    }
+    /// `Store::move_across` on the window's thread: `id` from top-level folder `from` into folder
+    /// `parent` of `to` (as that library sees it).
+    pub fn move_across(&self, from: &str, to: &str, id: &str, parent: Option<&str>, place: Place) -> Result<()> {
+        let mut sh = self.0.borrow_mut();
+        let (a, b) = sh.ws.pair(from, to).ok_or_else(no_folder)?;
+        let r = a.move_across(b, id, parent, place);
+        sh.ws.forget_owners();
+        r
+    }
+    /// Pages went from one top-level folder to another (taken over from writers): which holds what is looked up again.
+    pub fn moved_across(&self) { self.0.borrow_mut().ws.forget_owners(); }
+    /// The open document `id` went from top-level folder `from` to `to`: its editor's baseline
+    /// goes along. `fresh`: what its file holds now (an editor with edits not saved yet, whose
+    /// save writes over it); else the one it had, so the next look (`refresh_external`) takes
+    /// in what the move rewrote (pictures, links).
+    pub fn hand_loaded(&self, from: &str, to: &str, id: &str, fresh: bool) {
+        let mut sh = self.0.borrow_mut();
+        let Some(old) = sh.ws.store(from).and_then(|s| s.take_loaded(id)) else { return };
+        if let Some(s) = sh.ws.store(to) { s.give_loaded(id, (!fresh).then_some(old)); }
+    }
+    /// Writers of top-level folders `keys`, each with its library's `Store::writes` now (`adopt_written`).
+    pub fn writers(&self, keys: &[String]) -> Vec<(String, u64, Store)> {
+        let mut sh = self.0.borrow_mut();
+        keys.iter().filter_map(|k| { let s = sh.ws.store(k)?; Some((k.clone(), s.writes(), s.tree_writer())) }).collect()
+    }
     /// `tree_writer` for top-level folder `key`.
     pub fn top_writer(&self, key: &str) -> Option<Store> { self.0.borrow_mut().ws.store(key).map(|s| s.tree_writer()) }
     pub fn set_parent(&mut self, id: &str, parent: Option<&str>) -> Result<Meta> {
@@ -389,14 +429,13 @@ impl SharedStore {
         let (parent, before) = (self.real_parent(parent), self.real_parent(before));
         self.on_res(id, |s| s.move_in_tree(id, parent, before))
     }
-    /// Moves stay inside a top-level folder for now (W7).
+    /// A move in one top-level folder (`set_parent`, `move_in_tree`); between two, `move_across`.
     pub fn same_top(&self, id: &str, parent: Option<&str>) -> Result<()> {
         // With top-level folders as rows, the very top is no top-level folder's: nothing goes there.
         let stray = parent.is_none() && self.top_rows();
         if stray || parent.is_some_and(|p| self.top_of(p) != self.top_of(id)) { anyhow::bail!("{}", crate::settings::tr("暂不支持在文件夹之间移动", "Moving between folders isn't supported yet")); }
         Ok(())
     }
-    pub fn set_starred(&mut self, id: &str, on: bool) -> Result<u64> { self.on_res(id, |s| s.set_starred(id, on)) }
     pub fn set_pinned(&mut self, id: &str, pinned: bool) -> Result<()> { self.on_res(id, |s| s.set_pinned(id, pinned)) }
     pub fn is_markdown(&self, id: &str) -> bool { self.on(id, |s| s.is_markdown(id)).unwrap_or(false) }
     pub fn kind(&self, id: &str) -> crate::store::DocKind { self.on(id, |s| s.kind(id)).unwrap_or_default() }
@@ -410,12 +449,8 @@ impl SharedStore {
     pub fn create_board_in(&mut self, title: &str, board: &crate::whiteboard::Board, parent: Option<&str>) -> Result<String> { self.put(parent, |s, parent| s.create_board_in(title, board, parent)) }
     #[cfg(not(target_family = "wasm"))]
     pub fn create_table_in(&mut self, title: &str, base: &crate::table::Base, parent: Option<&str>) -> Result<String> { self.put(parent, |s, parent| s.create_table_in(title, base, parent)) }
-    #[cfg(not(target_family = "wasm"))]
-    pub fn copy_table(&mut self, src: &str, title: &str) -> Result<String> { self.on_res(src, |s| s.copy_table(src, title)) }
     #[cfg(target_family = "wasm")]
     pub fn create_table_in(&mut self, _title: &str, _base: &crate::table::Base, _parent: Option<&str>) -> Result<String> { anyhow::bail!("unsupported") }
-    #[cfg(target_family = "wasm")]
-    pub fn copy_table(&mut self, _src: &str, _title: &str) -> Result<String> { anyhow::bail!("unsupported") }
     #[cfg(not(target_family = "wasm"))]
     pub fn copy_table_version(&mut self, src: &str, name: &str, title: &str) -> Result<String> { self.on_res(src, |s| s.copy_table_version(src, name, title)) }
     #[cfg(target_family = "wasm")]
@@ -424,7 +459,6 @@ impl SharedStore {
     pub fn snapshot_table(&self, id: &str, force: bool) -> Result<bool> { self.on_res(id, |s| s.snapshot_table(id, force)) }
     #[cfg(target_family = "wasm")]
     pub fn snapshot_table(&self, _id: &str, _force: bool) -> Result<bool> { Ok(false) }
-    pub fn front_matter_of(&self, id: &str) -> String { self.on(id, |s| s.front_matter_of(id)).unwrap_or_default() }
     /// A Markdown file opened where it is: in the top-level folder holding it, else kept
     /// with the active top-level folder's 本机文件.
     pub fn open_local(&mut self, path: &Path) -> Result<String> {

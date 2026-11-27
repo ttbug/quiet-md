@@ -48,7 +48,7 @@ tokens!(
     bg_overlay, line_divider, line_border, fill_hover, fill_hover_strong, fill_pressed,
     fill_turninto_active, selection, block_hover, block_selected, handle_active, size_cell,
     size_cell_border, size_cell_active, size_cell_disabled, swatch_border, block_bg_area, todo_done,
-    scrollbar_thumb, shadow, code_hover_ring, quote_bar, caret, pinned,
+    shadow, code_hover_ring, quote_bar, caret, pinned,
     table_header, table_line, table_bar_hover, table_bar_selected, danger_bar, danger_cell,
     danger, window, sidebar_text, sidebar_hover, sidebar_selected, sidebar_section,
     button_border, code_chip, code_chip_border, code_bg, code_gutter, code_gutter_line,

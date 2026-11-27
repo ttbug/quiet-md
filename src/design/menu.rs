@@ -82,11 +82,11 @@ pub const MIN_W: f32 = 128.;
 /// It has an opaque ground, which the shadow-drawn edge needs. `menu()` makes it a column of rows
 /// (`DropdownMenuContent`: p-1, at least 128 wide).
 #[derive(IntoElement)]
-pub struct Popover { id: ElementId, base: Stateful<Div>, menu: bool, padded: bool, fit: Option<f32>, handle: Option<ScrollHandle>, inset: Option<f32> }
+pub struct Popover { id: ElementId, base: Stateful<Div>, menu: bool, padded: bool, fit: Option<f32>, handle: Option<ScrollHandle>, inset: Option<f32>, sub: bool }
 element!(Popover, parent);
 
 impl Popover {
-    pub fn new(id: impl Into<ElementId>) -> Self { let id = id.into(); Popover { base: div().id(id.clone()), id, menu: false, padded: false, fit: None, handle: None, inset: None } }
+    pub fn new(id: impl Into<ElementId>) -> Self { let id = id.into(); Popover { base: div().id(id.clone()), id, menu: false, padded: false, fit: None, handle: None, inset: None, sub: false } }
     /// A column of menu rows, `PAD` above and below them (rows keep `PAD` from the sides), `min-w-32`.
     pub fn menu(mut self) -> Self { self.menu = true; self }
     /// A popover holding a form: padded 16 (p-4), a column with 16 between its fields (gap-4).
@@ -99,6 +99,9 @@ impl Popover {
     /// How far in from the right edge a `fit` popover's content keeps of itself, for the room it
     /// makes the scrollbar (`scroll::ScrollBar::room`): a padded one's padding, else a row's `PAD`.
     pub fn inset(mut self, inset: f32) -> Self { self.inset = Some(inset); self }
+    /// The open submenu of a row (`DropdownMenuSubContent`): where it is is the far end of the
+    /// pointer's grace area (`submenu_area`).
+    pub fn submenu(mut self) -> Self { self.sub = true; self }
 }
 
 impl RenderOnce for Popover {
@@ -123,6 +126,7 @@ impl RenderOnce for Popover {
                 .when(padded, |d| d.p(px(g.popover_pad)).flex().flex_col().gap(px(g.popover_gap)))
                 .when(own_right, |d| d.pr(px(if padded { g.popover_pad } else { 0. } + room)))
                 .when_some(fit, |d, (h, (handle, bar))| d.max_h(px(h)).overflow_y_scroll().track_scroll(&handle).child(bar.render(&handle)))
+                .when(self.sub, |d| d.child(submenu_area()))
         });
         MenuScope { id: self.id, child: d.into_any_element() }
     }
@@ -201,7 +205,8 @@ impl Element for MenuScope {
         let rows = window.with_element_state(id.unwrap(), |s: Option<Shared>, _| { let s = s.unwrap_or_default(); (s.clone(), s) });
         {
             let r = &mut *rows.borrow_mut();
-            let hover = r.now.iter().find(|x| x.1.is_hovered(window)).map(|x| x.0.clone());
+            // on the way to an open submenu the rows it crosses don't light (Radix's pointer grace)
+            let hover = if holding() { None } else { r.now.iter().find(|x| x.1.is_hovered(window)).map(|x| x.0.clone()) };
             let sel = r.now.iter().find(|x| x.2).map(|x| x.0.clone());
             // the pointer took a row, left them all, or moved on one: it has the say
             if hover != r.last_hover || r.moved { r.pointer = true; }
@@ -217,11 +222,147 @@ impl Element for MenuScope {
     }
 }
 
+// ---- the pointer's grace on the way to a submenu ----
+//
+// Radix's `DropdownMenu.Sub` (@radix-ui/react-menu: `MenuSubTrigger`'s `onPointerLeave`,
+// `isPointerMovingToSubmenu`, `isPointerInGraceArea`): when the pointer leaves the row of an open
+// submenu, the point it left by (5 back towards the row) and the submenu's four corners make a
+// polygon. While the pointer moves inside it, heading towards the submenu's side, the rows it
+// crosses neither light nor take over: the submenu stays. Leaving the polygon, turning back, or
+// `GRACE_MS` after it left the row, the row it is on has its way. A click or a key ends it at once,
+// so the keyboard never waits. The rows' handlers that open or shut a submenu go through
+// `sub_hover` / `sub_move`; the submenu marks where it is with `Popover::submenu` (or
+// `submenu_area`); `MenuItem`'s `submenu` and `open` mark its row.
+
+/// Radix's `pointerGraceTimer`.
+pub const GRACE_MS: u64 = 300;
+/// How far back towards the row the polygon's tip sits (Radix's bleed).
+const BLEED: f32 = 5.;
+
+struct Grace {
+    area: [Point<Pixels>; 5],
+    /// The submenu is on the right.
+    right: bool,
+    turn: u64,
+    /// What the row the pointer reached would have done, kept for when the grace ends.
+    pending: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+}
+
+thread_local! {
+    static GRACE: RefCell<Option<Grace>> = const { RefCell::new(None) };
+    static GEN: Cell<u64> = const { Cell::new(0) };
+    /// The open submenu as last painted.
+    static SUB: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
+    /// The pointer's last point, and whether it last moved right (Radix's `pointerDirRef`).
+    static LAST: Cell<Option<Point<Pixels>>> = const { Cell::new(None) };
+    static DIR_RIGHT: Cell<Option<bool>> = const { Cell::new(None) };
+}
+
+/// The polygon the pointer may cross on its way to `sub` from `exit`, where it left the row:
+/// Radix's area (the tip `BLEED` back towards the row, then the submenu's near and far corners).
+pub fn grace_area(exit: Point<Pixels>, sub: Bounds<Pixels>, right: bool) -> [Point<Pixels>; 5] {
+    let bleed = if right { -BLEED } else { BLEED };
+    let (near, far) = if right { (sub.left(), sub.right()) } else { (sub.right(), sub.left()) };
+    [point(exit.x + px(bleed), exit.y), point(near, sub.top()), point(far, sub.top()), point(far, sub.bottom()), point(near, sub.bottom())]
+}
+
+/// Radix's `isPointInPolygon` (ray casting).
+pub fn in_polygon(p: Point<Pixels>, poly: &[Point<Pixels>]) -> bool {
+    let (x, y) = (f32::from(p.x), f32::from(p.y));
+    let mut inside = false;
+    let mut j = poly.len() - 1;
+    for i in 0..poly.len() {
+        let (xi, yi, xj, yj) = (f32::from(poly[i].x), f32::from(poly[i].y), f32::from(poly[j].x), f32::from(poly[j].y));
+        if (yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi { inside = !inside; }
+        j = i;
+    }
+    inside
+}
+
+/// The pointer is on its way to a submenu: the rows it crosses wait.
+fn holding() -> bool { GRACE.with(|g| g.borrow().is_some()) }
+
+/// Ends the grace; with `run`, the row the pointer reached has its way now.
+fn end_grace(run: bool, window: &mut Window, cx: &mut App) {
+    let Some(g) = GRACE.with(|g| g.borrow_mut().take()) else { return };
+    if let Some(f) = g.pending.filter(|_| run) { f(window, cx); }
+    window.refresh();
+}
+
+/// Marks where the open submenu is, for its row's grace area (`Popover::submenu` adds it).
+pub fn submenu_area() -> impl IntoElement {
+    canvas(|b, _, _| SUB.with(|s| s.set(Some(b))), |_, _, _, _| {}).absolute().inset_0()
+}
+
+/// Follows the pointer for the open submenu's row painted at `row`.
+fn watch_grace(row: Bounds<Pixels>, window: &mut Window) {
+    window.on_mouse_event(move |ev: &MouseMoveEvent, phase, window, cx| {
+        if phase != DispatchPhase::Capture { return }
+        let (p, last) = (ev.position, LAST.with(|l| l.replace(Some(ev.position))));
+        if let Some(l) = last.filter(|l| l.x != p.x) { DIR_RIGHT.with(|d| d.set(Some(p.x > l.x))); }
+        let sub = SUB.with(|s| s.get());
+        // back on the row, or there: no grace
+        if row.contains(&p) || sub.is_some_and(|s| s.contains(&p)) { end_grace(false, window, cx); return }
+        let Some(sub) = sub else { return };
+        let heading = |right: bool| DIR_RIGHT.with(|d| d.get()) == Some(right);
+        let held = GRACE.with(|g| g.borrow().as_ref().map(|g| in_polygon(p, &g.area) && heading(g.right)));
+        match held {
+            Some(true) => {}
+            Some(false) => end_grace(true, window, cx),
+            // just off the row: a grace while it heads for the submenu
+            None if last.is_some_and(|l| row.contains(&l)) => {
+                let right = sub.center().x > row.center().x;
+                let area = grace_area(p, sub, right);
+                if !(in_polygon(p, &area) && heading(right)) { return }
+                let turn = GEN.with(|g| { g.set(g.get() + 1); g.get() });
+                GRACE.with(|g| *g.borrow_mut() = Some(Grace { area, right, turn, pending: None }));
+                let w = window.window_handle();
+                cx.spawn(async move |cx| {
+                    cx.background_executor().timer(std::time::Duration::from_millis(GRACE_MS)).await;
+                    let _ = w.update(cx, |_, window, cx| if GRACE.with(|g| g.borrow().as_ref().is_some_and(|g| g.turn == turn)) { end_grace(true, window, cx) });
+                }).detach();
+            }
+            None => {}
+        }
+    });
+    // a click or a key: no waiting
+    window.on_mouse_event(|_: &MouseDownEvent, phase, _, _| if phase == DispatchPhase::Capture { GRACE.with(|g| g.borrow_mut().take()); });
+    window.on_key_event(|_: &KeyDownEvent, phase, _, _| if phase == DispatchPhase::Capture { GRACE.with(|g| g.borrow_mut().take()); });
+}
+
+/// Keeps `f` for when the grace ends if the pointer is on its way to a submenu; false if it isn't.
+fn hold(f: Rc<dyn Fn(&mut Window, &mut App)>) -> bool {
+    GRACE.with(|g| g.borrow_mut().as_mut().map(|g| g.pending = Some(f)).is_some())
+}
+
+/// An `on_hover` handler of a menu's row that opens or shuts a submenu: on the way to an open
+/// submenu it waits for the grace to end (Radix's pointer grace).
+pub fn sub_hover(f: impl Fn(&bool, &mut Window, &mut App) + 'static) -> impl Fn(&bool, &mut Window, &mut App) + 'static {
+    let f = Rc::new(f);
+    move |on, window, cx| {
+        let g = f.clone();
+        if *on && hold(Rc::new(move |window, cx| g(&true, window, cx))) { return }
+        f(on, window, cx)
+    }
+}
+
+/// `sub_hover` for an `on_mouse_move` handler.
+pub fn sub_move(f: impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static) -> impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static {
+    let f = Rc::new(f);
+    move |ev, window, cx| {
+        let (g, e) = (f.clone(), ev.clone());
+        if hold(Rc::new(move |window, cx| g(&e, window, cx))) { return }
+        f(ev, window, cx)
+    }
+}
+
 /// A row's fill under a menu's rule: checks in while prepainting (a disabled row too: the pointer on it
 /// lights none), paints `fill` if lit, and redraws
 /// when the pointer comes or goes (or moves on it while the keyboard has the say).
-fn lit_fill(id: ElementId, selected: bool, open: bool, off: bool, fill: Hsla, r: f32) -> impl IntoElement {
+fn lit_fill(id: ElementId, selected: bool, open: bool, sub: bool, off: bool, fill: Hsla, r: f32) -> impl IntoElement {
     canvas(move |bounds, window, _| {
+        // the open submenu's row: its submenu records itself afresh after it (`submenu_area`)
+        if open && sub { SUB.with(|s| s.set(None)); }
         let rows = scope()?;
         let hit = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         rows.borrow_mut().now.push((id.clone(), hit.clone(), selected));
@@ -229,6 +370,7 @@ fn lit_fill(id: ElementId, selected: bool, open: bool, off: bool, fill: Hsla, r:
     }, move |bounds, state, window, _| {
         let Some((rows, hit, id)) = state else { return };
         if !off && (open || rows.borrow().lit.as_ref() == Some(&id)) { window.paint_quad(gpui::fill(bounds, fill).corner_radii(px(r))); }
+        if open && sub { watch_grace(bounds, window); }
         let was = hit.is_hovered(window);
         window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, _| {
             if phase != DispatchPhase::Capture { return }
@@ -322,7 +464,7 @@ impl RenderOnce for MenuItem {
                 .mx(px(g.menu_pad)).px(px(g.menu_row_px)).flex().items_center().gap(px(g.menu_gap)).rounded(px(g.menu_row_r))
                 .text_size(px(g.text)).line_height(px(super::text::SM_LINE)).text_color(fg)
                 .when(off, |d| d.opacity(0.5)).when(!off, |d| d.cursor_pointer())
-                .when_some(id.filter(|_| scoped), |d, id| d.child(lit_fill(id, sel, open, off, fill, g.menu_row_r)))
+                .when_some(id.filter(|_| scoped), |d, id| d.child(lit_fill(id, sel, open, submenu, off, fill, g.menu_row_r)))
                 .when(!scoped && !off, |d| d.hover(move |s| s.bg(fill)).when(sel || open, |d| d.bg(fill)))
                 .when_some(ic, |d, n| d.child(if editor_icon { crate::editor_ui::icon(&n, 16., fg) } else { icon(&n, 16., fg) }))
                 .when_some(leading, |d, el| d.child(el))
@@ -378,5 +520,42 @@ impl MenuSeparator { pub fn new() -> Self { MenuSeparator } }
 impl RenderOnce for MenuSeparator {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         div().flex_none().h(px(SEP_W)).my(px(SEP_MY)).mx(px(geo().rule_inset)).bg(color::border())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{grace_area, in_polygon};
+    use gpui::{Bounds, Pixels, point, px, size};
+
+    fn b(x: f32, y: f32, w: f32, h: f32) -> Bounds<Pixels> { Bounds::new(point(px(x), px(y)), size(px(w), px(h))) }
+    fn inside(exit: (f32, f32), sub: Bounds<Pixels>, right: bool, p: (f32, f32)) -> bool {
+        in_polygon(point(px(p.0), px(p.1)), &grace_area(point(px(exit.0), px(exit.1)), sub, right))
+    }
+
+    #[test]
+    fn grace_area_on_the_right() {
+        // a row 200..400 wide at y 100..132, left by its right edge at y 116; the submenu at 404..604, 96..296
+        let sub = b(404., 96., 200., 200.);
+        assert!(inside((400., 116.), sub, true, (402., 116.)));
+        assert!(inside((400., 116.), sub, true, (402., 130.)));
+        assert!(inside((400., 116.), sub, true, (403., 270.)), "down towards the submenu's bottom corner");
+        assert!(inside((400., 116.), sub, true, (396., 116.)), "the bleed behind the exit");
+        assert!(!inside((400., 116.), sub, true, (390., 116.)), "back over the row");
+        assert!(!inside((400., 116.), sub, true, (380., 160.)), "back under the row");
+        assert!(!inside((400., 116.), sub, true, (402., 60.)), "above the submenu");
+    }
+
+    #[test]
+    fn grace_area_on_the_left() {
+        // the 页宽 case: a row 600..800 at y 50..82, left by its top-left going up-left; the submenu at 396..596, 46..170
+        let sub = b(396., 46., 200., 124.);
+        assert!(inside((610., 52.), sub, false, (598., 50.)));
+        assert!(inside((610., 52.), sub, false, (600., 80.)), "down-left towards the submenu's bottom corner");
+        assert!(inside((610., 52.), sub, false, (613., 52.)), "the bleed behind the exit");
+        assert!(!inside((610., 52.), sub, false, (620., 52.)), "back over the row");
+        assert!(!inside((700., 82.), sub, false, (700., 110.)), "straight down to 阅读模式");
+        assert!(!inside((610., 52.), sub, false, (598., 20.)), "above the submenu");
+        assert!(!inside((610., 52.), sub, false, (598., 180.)), "below the submenu");
     }
 }

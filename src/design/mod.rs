@@ -34,14 +34,14 @@ pub use button::{Button, ButtonSize, ButtonVariant};
 #[allow(unused_imports)]
 pub use card::{Card, Item, Separator, Toast, ToastTone};
 #[allow(unused_imports)]
-pub use control::{Checkbox, Radio, Segment, Segmented, Switch};
+pub use control::{Checkbox, Radio, Segment, Segmented, Slider, Swatch, Switch};
 #[allow(unused_imports)]
 pub use dialog::{Dialog, DialogFocus, scrim};
 #[allow(unused_imports)]
 pub use field::{Field, FieldSize, Label, Textarea};
 #[allow(unused_imports)]
 pub use scroll::ScrollBar;
-pub use menu::{Align, MenuItem, MenuLabel, MenuSeparator, Popover, hang, room};
+pub use menu::{Align, MenuItem, MenuLabel, MenuSeparator, Popover, hang, room, sub_hover, sub_move, submenu_area};
 pub use toolbar::{ButtonGroup, ButtonGroupSeparator, Toggle, ToggleSize, Toolbar};
 
 use crate::theme::{dark, rgbaf};
@@ -309,6 +309,12 @@ pub const G: Geo = Geo {
     toast_r: R + 8., toast_px: 16., toast_py: 16., tip_r: R - 2., tip_px: 12., tip_py: 6.,
     add_row_h: 36., footer_h: 40., group_h: 36.,
 };
+
+/// How far a page's own surface sits in from the pane under the header, on the sides and at the
+/// foot: the header's margin round its buttons, so the surface lines up with them. At the top it
+/// starts at the header's foot (that margin is already above it). The 数据表's sheet and the board's
+/// floating controls (menu, tool bar, styles panel, zoom, help) both keep to it.
+pub const PAGE_INSET: f32 = (crate::app::HEADER_H - crate::app::HEADER_ACTIONS_H) / 2.;
 
 /// The geometry (a function, so a later density or step-up can choose).
 pub fn geo() -> &'static Geo { &G }

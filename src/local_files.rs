@@ -1,13 +1,11 @@
-//! 本机文件: Markdown files opened where they are (打开文件…, the Finder),
-//! edited in place and listed under 本机文件, last opened first (folders
-//! opened the same way are `local_folders.rs`). The library
-//! only remembers them: 从列表中移除 never touches the file, and 导入到文档库
-//! makes a copy.
+//! A Markdown file opened on its own (打开文件…, the Finder's Open With, the Dock):
+//! edited where it is in a window of its own, never listed in the sidebar, which
+//! holds top-level folders only (folders opened the same way are `local_folders.rs`).
+//! The library keeps an id for it, for 最近浏览 and so it opens as the same page.
 
 use fdl_core::vfs::PathExt as _;
-use crate::app::{RowMenu, Workspace};
+use crate::app::Workspace;
 use crate::settings::tr;
-use crate::store::Entry;
 use crate::ui::ToastKind;
 use gpui::*;
 use std::path::PathBuf;
@@ -42,14 +40,6 @@ fn pick(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<PathBuf>>>
 }
 
 impl Workspace {
-    /// 本机文件 (single files and opened folders, not what is in them), last opened first;
-    /// an attachment opened in its own window is its page's, not one of them.
-    pub(crate) fn local_entries(&self) -> Vec<&Entry> {
-        let mut v: Vec<&Entry> = self.entries.iter().filter(|e| e.meta.local() && !e.meta.attachment() && e.meta.parent.is_none()).collect();
-        v.sort_by(|a, b| b.meta.opened.cmp(&a.meta.opened).then_with(|| a.id.cmp(&b.id)));
-        v
-    }
-
     /// 打开文件…: pick Markdown files and open them in place.
     pub fn open_file_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.row_menu = None;
@@ -61,8 +51,8 @@ impl Workspace {
         .detach();
     }
 
-    /// Open Markdown files and folders where they are (the last file shows);
-    /// anything else is imported as before.
+    /// Open Markdown files and folders where they are: a file outside the top-level
+    /// folders in a window of its own, one inside them here; anything else is imported as before.
     pub fn open_paths(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
         let (dirs, files): (Vec<PathBuf>, Vec<PathBuf>) = paths.iter().cloned().partition(|p| p.fs_is_dir());
         let (md, other): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().partition(|p| is_markdown_path(p));
@@ -78,8 +68,10 @@ impl Workspace {
         self.entries.set(self.store.list());
         self.sort();
         if let Some(id) = last {
-            self.folded[2] = false;
-            self.open(&id, window, cx);
+            if self.entries.iter().any(|e| e.id == id && e.meta.local()) {
+                // This window is being updated: the others are looked through once it is done.
+                cx.defer(move |cx| crate::quick_note::show_document(id, cx));
+            } else { self.open(&id, window, cx); }
         }
         cx.notify();
     }
@@ -151,58 +143,11 @@ impl Workspace {
         }
     }
 
-    /// A copy `id` of 本机文件 `src` keeps its times, as an import does.
-    pub(crate) fn keep_times(&mut self, id: &str, src: &std::path::Path) {
-        let _ = self.store.with(Some(id), |s| { crate::transfer::keep_times(s, id, src); Ok(()) });
-    }
-
-    /// 导入到文档库: a Markdown copy at the top of 我的文档.
-    pub(crate) fn import_local(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.row_menu = None;
-        let Some(doc) = self.doc_of(id, cx) else { return };
-        let front = self.store.front_matter_of(id);
-        match self.store.create_markdown(&doc, &front) {
-            Ok(new) => {
-                if let Some(src) = self.store.local_path(id) { self.keep_times(&new, &src); }
-                self.entries.set(self.store.list());
-                self.sort();
-                self.open(&new, window, cx);
-                self.show_toast_kind(ToastKind::Info, tr("已导入到文档库，原文件未改动", "Imported into the library; the original file is unchanged"), cx);
-            }
-            Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("导入失败：{}", "Could not import: {}", crate::settings::diagnostic(&e.to_string())), cx),
-        }
-        cx.notify();
-    }
-
-    /// 从列表中移除: forget the file; it stays where it is.
-    fn forget_local(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.row_menu = None;
-        self.delete_docs(&[id.to_string()], window, cx);
-    }
-
-    /// The "…" menu of a 本机文件 row.
-    pub(crate) fn local_row_menu(&self, m: RowMenu, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let (import, rename, reveal, forget) = (m.id.clone(), m.id.clone(), m.id.clone(), m.id.clone());
-        let row = |id: &'static str, glyph: &'static str, label: &'static str| crate::design::MenuItem::new(id).icon(glyph).label(label);
-        let pos = m.pos;
-        let shown = crate::local_folders::show_in_files();
-        vec![deferred(anchored().anchor(m.corner).position(pos).snap_to_window_with_margin(px(8.)).child(crate::design::Popover::new("local-row-menu").menu().fit(crate::design::room(pos, m.corner)).w(px(crate::design::menu_w::SM))
-            .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.row_menu = None; cx.notify(); }))
-            .child(row("lr-import", "folder-input", tr("导入到文档库", "Import into library")).on_click(cx.listener(move |w, _, window, cx| w.import_local(&import, window, cx))))
-            .child(row("lr-rename", "square-pen", tr("重命名", "Rename")).on_click(cx.listener(move |w, _, window, cx| w.start_rename(&rename, window, cx))))
-            .child(row("lr-reveal", "folder", shown).on_click(cx.listener(move |w, _, _, cx| {
-                w.row_menu = None;
-                if let Some(p) = w.store.local_path(&reveal) { cx.reveal_path(&p); }
-                cx.notify();
-            })))
-            .child(row("lr-forget", "x", tr("从列表中移除", "Remove from list")).on_click(cx.listener(move |w, _, window, cx| w.forget_local(&forget, window, cx))))))
-            .with_priority(2).into_any_element()]
-    }
 }
 
 /// Opening it would run something (an app, a script, an installer): a link
 /// in a note someone sent must not, so it only shows in the Finder.
-fn runs_program(p: &std::path::Path) -> bool {
+pub(crate) fn runs_program(p: &std::path::Path) -> bool {
     const RUN: &[&str] = &["app", "command", "tool", "terminal", "sh", "bash", "zsh", "csh", "fish", "py", "pyw", "pl", "rb", "php", "js", "jse",
         "scpt", "applescript", "workflow", "action", "pkg", "mpkg", "dmg", "jar", "exe", "com", "bat", "cmd", "msi", "msix", "ps1", "vbs", "vbe",
         "wsf", "wsh", "scr", "pif", "hta", "cpl", "reg", "lnk", "desktop", "appimage", "run", "url", "webloc", "inetloc", "fileloc"];

@@ -1,5 +1,6 @@
-//! A folder page's header: one row — the path on the left, five glyphs on the right
-//! (搜索 · 批量管理 · 显示 · … · "+").
+//! A folder page's header: one row — the path on the left, four glyphs on the right
+//! ("+" · 显示 · 搜索 · …): the two used most at the ends, "+" first and "…" last (the
+//! maintainer, 2026-11-26). Counted from the right "…" and 搜索 sit where a document's do.
 
 use super::{HomeSort, SortDir};
 use crate::app::Workspace;
@@ -29,12 +30,10 @@ impl Workspace {
         let search = icon_btn("tb-search", "search")
             .tip(tr("搜索文档", "Search documents"), Some(crate::shortcuts::hint("workspace::FocusSearch", "⌘ + J")))
             .on_click(cx.listener(|w, _, window, cx| w.open_search(window, cx)));
-        let batch = icon_btn("tb-batch", "batch").relative().child(self.home.track("tb-batch")).tip(crate::settings::text("批量管理"), None)
-            .on_click(cx.listener(|w, _, _, cx| { w.batch = Some(vec![]); w.row_menu = None; w.home.view_menu = false; cx.notify(); }));
-        let display = icon_btn("home-view", "view-settings").relative().selected(view_open).child(self.home.track("home-view"))
+        let display = icon_btn("home-view", if self.home.grid { "view-grid" } else { "view-list" }).relative().selected(view_open).child(self.home.track("home-view"))
             .when(!view_open, |d| d.tip(tr("显示", "View"), None))
             .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| { cx.stop_propagation(); w.home.view_menu = !view_open; cx.notify(); }));
-        // the folder's "…": its sidebar row's menu (`folder_row_menu`)
+        // the folder's "…": its sidebar row's menu (`folder_row_menu`), 批量管理 first
         let more = {
             let (id, open) = (folder.to_string(), self.row_menu.as_ref().is_some_and(|m| m.from.as_deref() == Some(TB_MORE)));
             icon_btn("tb-more", "ellipsis").relative().selected(open).child(self.home.track("tb-more"))
@@ -56,8 +55,8 @@ impl Workspace {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |w, _: &ClickEvent, _, cx| { let Some(b) = w.home.anchor("create-folder") else { return }; let pos = hang(b, Align::End, None).0; w.create_menu = if w.create_menu.is_some() { None } else { Some((parent.clone(), pos)) }; cx.notify(); }))
         };
-        let right = div().relative().flex_none().flex().items_center().gap(px(2.))
-            .child(search).child(batch).child(display).child(more).child(primary).child(self.home.track("tb-right"));
+        let right = div().relative().flex_none().flex().items_center().gap(px(crate::app::HEADER_ACTIONS_GAP))
+            .child(primary).child(display).child(search).child(more).child(self.home.track("tb-right"));
         crate::trash::page_header_with(self, left, 18., cx).child(div().w(px(16.)).flex_none()).child(right).into_any_element()
     }
 
@@ -68,16 +67,16 @@ impl Workspace {
         let all = n > 0 && ids.iter().all(|id| self.batch.as_ref().is_some_and(|s| s.contains(id)));
         let compact = main < 640.;
         let left = div().flex().items_center().min_w_0()
-            .child(div().id("home-batch-all").no_drag().flex_none().ml(px(4.)).size(px(14.)).cursor_pointer().group("home-batch-all")
+            .child(div().id("home-batch-all").no_drag().flex_none().ml(px(4.)).size(px(16.)).flex().items_center().justify_center().cursor_pointer().group("home-batch-all")
                 .child(checkbox(if all { Check::On } else if n > 0 { Check::Partial } else { Check::Off }, false))
                 .tip(crate::settings::text("全选"), None)
                 .on_click(cx.listener(move |w, _, _, cx| { w.batch = Some(if all { vec![] } else { ids.clone() }); cx.notify(); })))
-            .child(div().ml(px(10.)).text_size(px(15.)).line_height(px(24.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).whitespace_nowrap()
+            .child(div().ml(px(8.)).text_size(px(15.)).line_height(px(24.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).whitespace_nowrap()
                 .child(crate::localized_format!("已选 {n} 项", "Selected: {n}")));
-        let act = |id: &'static str, ic: &'static str, label: &'static str| Button::ghost(id).icon(ic).no_drag().disabled(n == 0)
+        let act = |id: &'static str, ic: &'static str, label: &'static str| Button::ghost(id).icon(ic).no_drag().disabled(n == 0).relative().children(crate::devtools::anchor_probe(id))
             .when(!compact, |d| d.label(crate::settings::label(label))).when(compact, |d| d.size(px(crate::app::HEADER_ACTIONS_H)).tip(label, None));
         let right = div().flex_none().flex().items_center().gap(px(2.))
-            .child(act("home-batch-copy", "copy", crate::settings::text("创建副本")).when(n > 0, |d| d.on_click(cx.listener(|w, _, _, cx| w.batch_copy(cx)))))
+            .child(act("home-batch-copy", "copy", crate::settings::text("创建副本")).when(n > 0, |d| d.on_click(cx.listener(|w, _, window, cx| w.batch_copy(window, cx)))))
             .child(act("home-batch-move", "folder-input", crate::settings::text("移动到")).when(n > 0, |d| d.on_click(cx.listener(|w, _, window, cx| w.batch_move(window, cx)))))
             .child(act("home-batch-delete", "bin", crate::settings::text("删除")).when(n > 0, |d| d.on_click(cx.listener(|w, _, _, cx| w.ask_batch_delete(cx)))))
             .child(Button::secondary("home-batch-exit").sized(ButtonSize::Sm).no_drag().ml(px(6.)).label(tr("完成", "Done")).relative().child(self.home.track("home-batch-exit"))
@@ -114,7 +113,7 @@ impl Workspace {
             .on_click(cx.listener(|w, _, _, cx| { if w.home.sort == HomeSort::Manual { return; } w.home.folders_first = !w.home.folders_first; w.save_home(); w.home.view_menu = false; cx.notify(); })))
     }
 
-    /// 显示 (Finder's and Notion's view options): 视图 and 排序 in one menu; 只看收藏 stays out, a star of its own.
+    /// 显示 (Finder's and Notion's view options): 视图 and 排序 in one menu.
     pub(crate) fn view_menu(&self, cx: &mut Context<Self>) -> Popover {
         let view = |id: &'static str, ic: &'static str, label: &'static str, grid: bool| MenuItem::new(id).icon(ic).label(label).checked(self.home.grid == grid)
             .on_click(cx.listener(move |w, _, _, cx| { w.home.grid = grid; w.save_home(); w.home.view_menu = false; cx.notify(); }));

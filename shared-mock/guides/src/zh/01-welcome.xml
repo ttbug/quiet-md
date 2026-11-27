@@ -5,7 +5,7 @@
 <h1>认识界面</h1>
 <img src="assets/guides/home.jpg" caption="文件夹：所有文档一目了然" align="center"/>
 <p>窗口主要分为两个区域。</p>
-<ol><li><b>侧栏</b>包含置顶、“我的文档”（你的文件夹）和设置。按 <code>⌘ ]</code> 可以展开或收起侧栏。</li><li><b>文档</b>是中间白色的书写区域。顶部显示页面路径和标题，右侧是更多、搜索和新建按钮。</li></ol>
+<ol><li><b>侧栏</b>包含置顶、你的文件夹和设置。按 <code>⌘ ]</code> 可以展开或收起侧栏。</li><li><b>文档</b>是中间白色的书写区域。顶部显示页面路径和标题，右侧是更多、搜索和新建按钮。</li></ol>
 <p>带标题的文档还会在页面左上方显示<b>目录</b>。点击某个标题即可跳转过去；滚动页面时，当前所在的章节会高亮显示。</p>
 <h1>上手五分钟</h1>
 <p>跟着下面的清单做一遍。点击复选框可以把一项标记为完成，也可以把光标放在这一项上按 <code>⌘ Enter</code>。</p>
@@ -28,7 +28,7 @@
 <tr><td><p>{{doc:code}}</p></td><td><p>语法高亮、代码块名称、自动换行和 LaTeX 公式</p></td></tr>
 <tr><td><p>{{doc:media}}</p></td><td><p>图片、裁剪、附件、文档图标和封面</p></td></tr>
 <tr><td><p>{{doc:boards}}</p></td><td><p>在画板上画图形、连接箭头、便签和草图</p></td></tr>
-<tr><td><p>{{doc:organize}}</p></td><td><p>文件夹、置顶、收藏、反向链接、搜索、阅读模式和回收站</p></td></tr>
+<tr><td><p>{{doc:organize}}</p></td><td><p>文件夹、置顶、反向链接、搜索、阅读模式和回收站</p></td></tr>
 <tr><td><p>{{doc:data}}</p></td><td><p>导入、导出、打印、备份和迁移文档</p></td></tr>
 <tr><td><p>{{doc:personalize}}</p></td><td><p>主题、自定义 CSS、快捷键、快速笔记和界面语言</p></td></tr>
 </tbody></table>
@@ -43,7 +43,7 @@
 <tr><td><p><code>⌘ ]</code> / <code>⌘ /</code></p></td><td><p>展开或收起侧栏 / 查看快捷键</p></td></tr>
 </tbody></table>
 <h1>笔记完全属于你</h1>
-<p>你的文档保存在 <code>~/Documents/Quiet.md</code>。每篇文档都是 <code>docs</code> 里的一个 XML 文件，图片和附件保存在 <code>assets</code> 里。用时间机器备份整个文件夹，或者把它拷到另一台 Mac 上即可。</p>
+<p>你的文档保存在 <code>~/Documents/Quiet Notes</code>。每篇文档都是 <code>docs</code> 里的一个 XML 文件，图片和附件保存在 <code>assets</code> 里。用时间机器备份整个文件夹，或者把它拷到另一台 Mac 上即可。</p>
 <blockquote><p>在本地书写和阅读笔记都不需要联网。加载网络图片时会访问网络，是否自动下载可以在设置里控制。</p></blockquote>
 <p>备份和迁移的详细说明，请看 {{doc:data}}。</p>
 <hr/><p align="center">准备好了吗？打开 {{doc:writing}}。</p>

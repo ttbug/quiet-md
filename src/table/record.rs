@@ -219,12 +219,12 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, r: &Rec
         if ui.show_hidden { list = list.children(hidden.into_iter().map(row)); }
     }
     list = list
-        .child(div().px(px(16.)).pt(px(8.)).flex().child(ghost_btn("tb-rec-add", "plus", label("新增字段")).sized(crate::design::ButtonSize::Sm)
-            .on_click(cx.listener(|v, ev: &ClickEvent, window, cx| {
+        .child(div().px(px(16.)).pt(px(8.)).flex().child(div().relative().child(v.anchor("tb-rec-add")).child(ghost_btn("tb-rec-add", "plus", label("新增字段")).sized(crate::design::ButtonSize::Sm)
+            .on_click(cx.listener(|v, _: &ClickEvent, window, cx| {
                 commit(v, true, window, cx);
-                let p = ev.position();
-                menus::add_field(v, None, point(p.x - px(20.), p.y + px(20.)), window, cx);
-            }))))
+                // hung from the button, as its menus are
+                v.hang_popup("tb-rec-add", crate::design::Align::Start, |v, pos| menus::add_field(v, None, pos, window, cx));
+            })))))
         .child(div().px(px(24.)).pt(px(16.)).pb(px(24.)).text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_placeholder())
             .child(format!("{} {}", label("创建于"), field::format_date(r.created, DateFmt::Dash, true)))
             .child(format!("{} {}", label("最后更新于"), field::format_date(r.modified, DateFmt::Dash, true))));

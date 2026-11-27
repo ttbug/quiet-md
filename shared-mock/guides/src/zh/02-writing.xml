@@ -44,5 +44,5 @@
 <table><colgroup><col width="310"/><col width="380"/></colgroup><tbody>
 <tr><td><p><code>#</code> 到 <code>#########</code></p></td><td><p>一至九级标题</p></td></tr><tr><td><p><code>-</code>、<code>*</code> 或 <code>+</code></p></td><td><p>无序列表</p></td></tr><tr><td><p><code>1.</code></p></td><td><p>有序列表；<code>5.</code> 表示从 5 开始编号</p></td></tr><tr><td><p><code>[]</code></p></td><td><p>任务</p></td></tr><tr><td><p><code>&gt;</code></p></td><td><p>引用</p></td></tr><tr><td><p><code>```</code> 或 <code>```python</code></p></td><td><p>代码块；按空格或 Enter 完成</p></td></tr><tr><td><p><code>---</code></p></td><td><p>分隔线，输入第三个短横线时立即生效</p></td></tr><tr><td><p><code>$E=mc^2$</code></p></td><td><p>行内公式 <latex>E=mc^2</latex></p></td></tr>
 </tbody></table>
-<h1>撤销、复制与粘贴</h1><ul><li><code>⌘ Z</code> 撤销编辑；<code>⌘ ⇧ Z</code> 或 <code>⌘ Y</code> 重做。连续输入的内容会合并为一步撤销。</li><li>在 Quiet.md 内复制，会保留样式、颜色、表格和图片。</li><li>从网页或飞书粘贴时，会保留支持的文档结构。Markdown 文本在粘贴时会自动转换。</li><li><code>⌘ ⇧ V</code> 粘贴为纯文本。</li><li>选中文字后，右下角的计数会显示所选内容的字数。</li></ul>
+<h1>撤销、复制与粘贴</h1><ul><li><code>⌘ Z</code> 撤销编辑；<code>⌘ ⇧ Z</code> 或 <code>⌘ Y</code> 重做。连续输入的内容会合并为一步撤销。</li><li>在 Quiet.md 内复制，会保留样式、颜色、表格和图片。</li><li>从网页或飞书粘贴时，会保留支持的文档结构。Markdown 文本在粘贴时会自动转换。</li><li><code>⌘ ⇧ V</code> 粘贴为纯文本。</li></ul>
 <hr/><p>下一篇：{{doc:blocks}}。</p>

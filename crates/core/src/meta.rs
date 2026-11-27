@@ -1030,7 +1030,7 @@ pub(super) fn upgrade(root: &Path, me: &Device, warnings: &mut Vec<String>) -> R
         for (k, v) in fields_of(key, a) { changes.push((id.clone(), k, v)); }
     }
     let settings: Value = reread(&internal.join("settings.json")).unwrap_or(Value::Null);
-    if let Some(n) = settings.get("history_limit").filter(|v| !v.is_null()) { changes.push((FOLDER_ITEM.into(), "history_limit".into(), n.clone())); }
+    for k in ["history_limit", "trash_days"] { if let Some(n) = settings.get(k).filter(|v| !v.is_null()) { changes.push((FOLDER_ITEM.into(), k.into(), n.clone())); } }
     if let Some(Value::Object(look)) = settings.get("look") {
         for (k, v) in look { changes.push((FOLDER_ITEM.into(), format!("look.{k}"), v.clone())); }
     }

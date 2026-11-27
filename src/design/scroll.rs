@@ -65,9 +65,9 @@ pub fn widen(style: &mut StyleRefinement, room: f32) -> bool {
     }
 }
 
-/// Paints the thumb: a capsule (`ends_for` keeps it out of the corners).
+/// Paints the thumb: a capsule (`ends_for` keeps it out of the corners), down or across.
 pub fn paint_thumb(window: &mut Window, thumb: Bounds<Pixels>, color: Hsla) {
-    window.paint_quad(fill(thumb, color).corner_radii(thumb.size.width / 2.));
+    window.paint_quad(fill(thumb, color).corner_radii(thumb.size.width.min(thumb.size.height) / 2.));
 }
 
 thread_local! {
@@ -109,15 +109,29 @@ pub fn thumb_tone(tone: f32, alpha: f32) -> Hsla {
     super::alpha(c, alpha)
 }
 
+/// `thumb_tone` for a thumb over a picture (the first-run pages' film) rather than a surface: opaque,
+/// as the tone looks laid on the page (`color::background`), so a dark thumb is as plain on a bright
+/// frame as on the dark page (white at 10% on the film all but vanished).
+pub fn solid_tone(tone: f32, alpha: f32) -> Hsla {
+    let c: Rgba = thumb_tone(tone, 1.).into();
+    let g: Rgba = color::background().into();
+    let mix = |a: f32, b: f32| a * c.a + b * (1. - c.a);
+    super::alpha(Rgba { r: mix(c.r, g.r), g: mix(c.g, g.g), b: mix(c.b, g.b), a: 1. }.into(), alpha)
+}
+
 /// Draws the window again after `wait` (a paint can't ask for the next one: `refresh` is ignored
-/// while drawing).
+/// while drawing), the view being painted too: a refresh alone reuses a view's last frame where the
+/// view hasn't changed, and the thumb, inside it, never stepped (the countdown's lists).
 fn wake(window: &mut Window, cx: &mut App, wait: Duration) {
-    let handle = window.window_handle();
+    let (handle, view) = (window.window_handle(), window.current_view());
     cx.spawn(async move |cx| {
         cx.background_executor().timer(wait).await;
-        let _ = handle.update(cx, |_, window, _| window.refresh());
+        let _ = handle.update(cx, |_, window, cx| redraw(view, window, cx));
     }).detach();
 }
+
+/// Draws the window again with `view`, a thumb's, drawn afresh (`wake`).
+fn redraw(view: EntityId, window: &mut Window, cx: &mut App) { cx.notify(view); window.refresh(); }
 
 /// The thumb's tone easing to its target over `FADE` (`step` each paint).
 #[derive(Default)]
@@ -177,6 +191,30 @@ impl Fade {
     }
 }
 
+/// A thumb a box lays out and drags itself (the data table's grid, which scrolls by offsets of its
+/// own, not a `ScrollHandle`): `ScrollBar`'s fade, tone and colour for it, so it shows, darkens under
+/// the pointer and darkest while held as every other thumb does.
+#[derive(Default)]
+pub struct Thumb { fade: Fade, tone: Tone, on: Cell<bool> }
+
+impl Thumb {
+    /// Paints the thumb at `thumb`, its band `zone` (the `BAR` that takes the press) lit under the
+    /// pointer; `active`: the pointer is over the box or a thumb is held; `held`: this one is;
+    /// `offset`: the scroll position along its way.
+    pub fn paint(self: &std::rc::Rc<Self>, thumb: Bounds<Pixels>, zone: Bounds<Pixels>, active: bool, held: bool, offset: f32, window: &mut Window, cx: &mut App) {
+        let on = zone.contains(&window.mouse_position());
+        self.on.set(on);
+        let a = self.fade.step(active || held, offset, window, cx);
+        let tone = self.tone.step(if held { HELD } else if on { HOVER } else { 0. }, window, cx);
+        if a > 0. { paint_thumb(window, thumb, thumb_tone(tone, a)); }
+        let (me, view) = (self.clone(), window.current_view());
+        // onto or off the thumb: its tone moves
+        window.on_mouse_event(move |ev: &MouseMoveEvent, phase, window, cx| {
+            if phase == DispatchPhase::Bubble && zone.contains(&ev.position) != me.on.get() { redraw(view, window, cx); }
+        });
+    }
+}
+
 /// The scrollbar of the box `handle` tracks. Put `render` beside the box in a `relative` parent
 /// (it lays itself on the parent's right edge), or as the box's last child.
 #[derive(Default)]
@@ -197,6 +235,8 @@ pub struct ScrollBar {
     wide: Cell<bool>,
     /// The popover whose box this is, to remember `wide` by when it closes (`ROOMY`).
     memo: std::cell::RefCell<Option<ElementId>>,
+    /// Over a picture, not a surface: the thumb is opaque (`solid_tone`).
+    solid: Cell<bool>,
 }
 
 impl ScrollBar {
@@ -262,6 +302,7 @@ impl ScrollBar {
             move |_, state, window, cx| {
                 let sb = sb2;
                 let Some((area, top, h, track, inset, content, offset, hitbox)) = state else { sb.grab.set(None); return };
+                let view = window.current_view();
                 window.set_cursor_style(CursorStyle::Arrow, &hitbox);
                 let held = sb.grab.get().is_some();
                 let mouse = window.mouse_position();
@@ -273,7 +314,7 @@ impl ScrollBar {
                 let tone = sb.tone.step(if held { HELD } else if on_thumb { HOVER } else { 0. }, window, cx);
                 if a > 0. {
                     let thumb = Bounds::new(point(area.right() - inset - px(THUMB), top), size(px(THUMB), h));
-                    paint_thumb(window, thumb, thumb_tone(tone, a));
+                    paint_thumb(window, thumb, if sb.solid.get() { solid_tone(tone, a) } else { thumb_tone(tone, a) });
                 }
                 window.on_mouse_event({
                     let (sb, hitbox) = (sb.clone(), hitbox.clone());
@@ -283,12 +324,12 @@ impl ScrollBar {
                         let dy = if ev.position.y >= top && ev.position.y <= top + h { ev.position.y - top } else { h / 2. };
                         sb.grab.set(Some((dy, content, h)));
                         cx.stop_propagation();
-                        window.refresh();
+                        redraw(view, window, cx);
                     }
                 });
                 window.on_mouse_event({
                     let (sb, list) = (sb.clone(), list2.clone());
-                    move |ev: &MouseMoveEvent, phase, window, _| {
+                    move |ev: &MouseMoveEvent, phase, window, cx| {
                         if phase != DispatchPhase::Bubble { return; }
                         match sb.grab.get() {
                             Some((dy, _, h)) if ev.pressed_button == Some(MouseButton::Left) => {
@@ -296,22 +337,22 @@ impl ScrollBar {
                                 let f = ((ev.position.y - dy - area.top() - px(ends_for(sb.radius.get().0))) / travel).clamp(0., 1.);
                                 // At the end, the real bottom: rows there may not be measured yet.
                                 list.set_offset(point(list.offset().x, -list.max_offset().y * f));
-                                window.refresh();
+                                redraw(view, window, cx);
                             }
                             // The button went up somewhere we didn't see.
-                            Some(_) => { sb.grab.set(None); window.refresh(); }
+                            Some(_) => { sb.grab.set(None); redraw(view, window, cx); }
                             // Entering or leaving the box shows or hides the thumb.
-                            None if area.contains(&ev.position) != sb.over.get() => window.refresh(),
+                            None if area.contains(&ev.position) != sb.over.get() => redraw(view, window, cx),
                             // onto or off the thumb: its tone moves
-                            None if (ev.position.x >= area.right() - px(BAR) && ev.position.x <= area.right() && ev.position.y >= top && ev.position.y <= top + h) != sb.on_thumb.get() => window.refresh(),
+                            None if (ev.position.x >= area.right() - px(BAR) && ev.position.x <= area.right() && ev.position.y >= top && ev.position.y <= top + h) != sb.on_thumb.get() => redraw(view, window, cx),
                             None => {}
                         }
                     }
                 });
                 window.on_mouse_event({
                     let sb = sb.clone();
-                    move |ev: &MouseUpEvent, phase, window, _| {
-                        if phase == DispatchPhase::Bubble && ev.button == MouseButton::Left && sb.grab.take().is_some() { window.refresh(); }
+                    move |ev: &MouseUpEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Bubble && ev.button == MouseButton::Left && sb.grab.take().is_some() { redraw(view, window, cx); }
                     }
                 });
             },
@@ -355,6 +396,9 @@ pub fn room(key: &'static str, inset: f32) -> Pixels { px(of(key).room(inset)) }
 pub fn make_room<E: Styled>(el: E, key: &'static str, inset: f32) -> E { of(key).make_room(el, inset) }
 
 /// `key`'s scrollbar, as `bar` keeps it.
+/// `key`'s scrollbar lies over a picture, not a surface (`solid_tone`).
+pub fn solid(key: &'static str) { of(key).solid.set(true); }
+
 fn of(key: &'static str) -> std::rc::Rc<ScrollBar> { BARS.with(|m| m.borrow_mut().entry(key).or_default().clone()) }
 
 /// A scroll handle kept under `key`, for a box with none of its own to `track_scroll` and give `bar`.
