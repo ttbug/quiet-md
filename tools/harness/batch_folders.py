@@ -62,11 +62,11 @@ def names(d):
 
 
 # Into a folder page, shown as `view`, and into 批量管理.
-OPEN = "row Project\nwait 800\nanchor home-view\nwait 300\nrow {view}\nwait 500\nanchor tb-more\nwait 300\nrow Manage\nwait 400\n"
+OPEN = "row Project\nwait 800\nanchor page-view\nwait 300\nrow {view}\nwait 500\nanchor tb-more\nwait 300\nrow Manage\nwait 400\n"
 
 
 def grid():
-    script = OPEN.format(view="Grid") + "anchor card:Sub\nwait 200\nanchor card:Alpha\nwait 400\nshot checked\nanchor home-batch-copy\nwait 2500\nshot copied\n"
+    script = OPEN.format(view="Grid") + "anchor card:Sub\nwait 200\nanchor card:Alpha\nwait 400\nshot checked\nanchor page-batch-copy\nwait 2500\nshot copied\n"
     lib, log = run("grid", script)
     project = lib / "Project"
     assert (project / "Sub copy" / "Inner.xml").is_file() and (project / "Sub copy" / "Deep" / "Leaf.xml").is_file(), names(project)
@@ -81,7 +81,7 @@ def grid():
 
 
 def list_():
-    script = OPEN.format(view="List") + "anchor list:Sub\nwait 200\nanchor list:Beta\nwait 400\nshot checked\nanchor home-batch-move\nwait 600\ntype Other\nwait 400\nanchor move:Other\nwait 300\nshot dialog\nanchor move-ok\nwait 2500\nshot moved\n"
+    script = OPEN.format(view="List") + "anchor list:Sub\nwait 200\nanchor list:Beta\nwait 400\nshot checked\nanchor page-batch-move\nwait 600\ntype Other\nwait 400\nanchor move:Other\nwait 300\nshot dialog\nanchor move-ok\nwait 2500\nshot moved\n"
     lib, log = run("list", script)
     project = lib / "Project"
     assert (project / "Other" / "Sub" / "Deep" / "Leaf.xml").is_file() and (project / "Other" / "Beta.xml").is_file(), names(project / "Other")

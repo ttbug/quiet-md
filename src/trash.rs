@@ -112,7 +112,7 @@ impl Workspace {
         let open = self.trash_days_menu;
         let auto = Button::ghost("trash-days").no_drag().mr(px(4.)).selected(open)
             .label(crate::localized_count!(days, "{} 天后自动删除", "Delete after {} day", "Delete after {} days", days)).icon_end("chevron-down")
-            .relative().child(self.home.track("trash-days"))
+            .relative().child(self.folder_page.track("trash-days"))
             .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| { cx.stop_propagation(); w.trash_menu = None; w.trash_days_menu = !open; cx.notify(); }));
         let header = page_header(self, "回收站", 26., cx).child(auto).children(empty).child(
             crate::ui::header_icon("trash-search", "search")
@@ -137,7 +137,7 @@ impl Workspace {
         };
         // A row is lit while hovered or holding its menu; the lines touching it hide.
         let lit = |i: usize| self.trash.get(i).is_some_and(|t| {
-            self.home.list_hover.as_ref().is_some_and(|h| *h == format!("trash-row-{}", t.id))
+            self.folder_page.list_hover.as_ref().is_some_and(|h| *h == format!("trash-row-{}", t.id))
                 || self.trash_menu.as_ref().is_some_and(|(m, _, _)| *m == t.id)
         });
         let table_header = div()
@@ -183,7 +183,7 @@ impl Workspace {
                     .items_center()
                     .when(i > 0, |d| d.border_t_1().border_color(row_line(lit(i - 1) || lit(i))))
                     .hover(row_hover)
-                    .on_hover(cx.listener(move |w, on: &bool, _, cx| if w.home.hover_row(&key, *on) { cx.notify() }))
+                    .on_hover(cx.listener(move |w, on: &bool, _, cx| if w.folder_page.hover_row(&key, *on) { cx.notify() }))
                     .when(menu_open, |d| d.bg(Theme::fill_hover()).rounded(px(ROW_RADIUS)))
                     .on_mouse_down(
                         MouseButton::Right,
@@ -258,7 +258,7 @@ impl Workspace {
 
     /// 自动删除's menu: the usual days, then 自定义 a day at a time (1–30).
     fn render_trash_days_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let b = self.view.eq(&crate::app::View::Trash).then(|| self.home.anchor("trash-days")).flatten()?;
+        let b = self.view.eq(&crate::app::View::Trash).then(|| self.folder_page.anchor("trash-days")).flatten()?;
         let days = self.store.trash_days();
         let set = |n: u64, close: bool| cx.listener(move |w: &mut Workspace, _: &ClickEvent, _: &mut Window, cx: &mut Context<Workspace>| {
             if w.store.set_trash_days(n).is_err() { w.show_toast(crate::settings::tr("设置保存失败", "Couldn’t save the setting"), cx); }
@@ -367,7 +367,7 @@ impl Workspace {
     /// What the unused-asset sweep (#237) reads besides the library: the
     /// sources every open editor holds — this window's and the others',
     /// quick notes included — that the disk does not (unsaved text, the
-    /// snapshots Undo can still bring back), and the 本机文件 and 本机文件夹,
+    /// snapshots Undo can still bring back), and the files opened on their own,
     /// whose pasted pictures are copied into the library's assets too.
     pub(crate) fn sweep_inputs(&self, window: &Window, cx: &Context<Self>) -> (Vec<String>, Vec<std::path::PathBuf>) {
         let mut live: Vec<String> = self.editor.as_ref().map(|e| e.read(cx).core.asset_refs()).unwrap_or_default();
@@ -496,8 +496,15 @@ impl Workspace {
                 {
                     // A folder goes with what is in it: say how much (备忘录's 「其中的 N 条笔记也会删除」).
                     let m = crate::tree::Tree::new(&self.entries).docs_inside(ids);
-                    if m > 0 { crate::localized_count!(m, "包括其中的 {} 篇文档。删除的内容将进入回收站，30 天后自动彻底删除", "This includes the {} document inside. Deleted items will be moved to Trash and permanently deleted after 30 days.", "This includes the {} documents inside. Deleted items will be moved to Trash and permanently deleted after 30 days.", m) }
-                    else { crate::settings::text("删除的内容将进入回收站，30 天后自动彻底删除").to_string() }
+                    let body = if m > 0 { crate::localized_count!(m, "包括其中的 {} 篇文档。删除的内容将进入回收站，30 天后自动彻底删除", "This includes the {} document inside. Deleted items will be moved to Trash and permanently deleted after 30 days.", "This includes the {} documents inside. Deleted items will be moved to Trash and permanently deleted after 30 days.", m) }
+                    else { crate::settings::text("删除的内容将进入回收站，30 天后自动彻底删除").to_string() };
+                    // A folder that is (or holds) a top-level folder of its own (workspaces.md 2.6): it leaves the sidebar too.
+                    let dirs: Vec<std::path::PathBuf> = ids.iter().filter(|id| self.entries.iter().any(|e| e.id == **id && e.meta.folder.is_some())).filter_map(|id| self.store.folder_dir(Some(id))).collect();
+                    match self.store.tops_within(&dirs).as_slice() {
+                        [] => body,
+                        [(_, name)] => format!("{} {}", crate::localized_format!("「{}」也是侧栏里的一个顶层文件夹，会一起从侧栏移除。", "“{}” is also a top-level folder in the sidebar and leaves it too.", name), body),
+                        more => format!("{} {}", crate::localized_count!(more.len(), "其中有 {} 个也是侧栏里的顶层文件夹，会一起从侧栏移除。", "{} of them is also a top-level folder in the sidebar and leaves it too.", "{} of them are also top-level folders in the sidebar and leave it too.", more.len()), body),
+                    }
                 },
                 crate::settings::text("删除"),
                 true,
@@ -529,7 +536,7 @@ impl Workspace {
                 let why = match reason {
                     ConsentReason::Synced(SyncService::Provider(p)) => crate::localized_format!("文档库在 {p} 同步的文件夹里。", "The library is in a folder synced by {p}. "),
                     ConsentReason::Synced(_) => crate::settings::tr("文档库在 iCloud 云盘里。", "The library is in iCloud Drive. ").to_string(),
-                    ConsentReason::OtherDevice(DeviceHint::MissingFile(p)) => crate::localized_format!("这个文档库可能也在别的电脑上使用（打开过的本机文件 {p} 不在这台电脑上）。", "This library may also be used on another computer (a local file it opened, {p}, isn't on this one). "),
+                    ConsentReason::OtherDevice(DeviceHint::MissingFile(p)) => crate::localized_format!("这个文档库可能也在别的电脑上使用（单独打开过的文件 {p} 不在这台电脑上）。", "This library may also be used on another computer (a file opened on its own, {p}, isn't on this one). "),
                     ConsentReason::OtherDevice(DeviceHint::SyncCopy(n)) => crate::localized_format!("这个文档库可能也在别的电脑上使用（同步留下了 {n}）。", "This library may also be used on another computer (sync left {n} behind). "),
                     ConsentReason::Restored => crate::settings::tr("你之前把文档库恢复成了原来的存放方式。", "You went back to the old layout before. ").to_string(),
                 };

@@ -2,7 +2,7 @@
 //! The layout departs in one place: a sunken sidebar on the window surface
 //! and a full-bleed white note plane instead of floating panels.
 
-use gpui::{BoxShadow, Hsla, Rgba, WindowBackgroundAppearance, point, px, rgb};
+use gpui::{Hsla, Rgba, WindowBackgroundAppearance, rgb};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // ---- dark mode
@@ -337,51 +337,6 @@ pub mod craft {
     pub const CHROME: u32 = 0xe6e7e8;
 }
 
-/// Shadows stay black; on the dark page they need more weight to show.
-fn shadow(a: f32, y: f32, blur: f32, spread: f32) -> BoxShadow {
-    let a = if dark() { (a * 3.).min(0.6) } else { a };
-    BoxShadow { color: rgbaf(0, 0, 0, a), offset: point(px(0.), px(y)), blur_radius: px(blur), spread_radius: px(spread), inset: false }
-}
-
-/// Menus and dropdowns: macOS 26 menu panel, soft and wide.
-pub fn shadow_menu() -> Vec<BoxShadow> {
-    vec![shadow(0.05, 1., 3., 0.), shadow(0.10, 8., 24., 0.)]
-}
-
-/// Second-level panels, search popups, toasts.
-pub fn shadow_panel() -> Vec<BoxShadow> {
-    vec![shadow(0.05, 1., 4., 0.), shadow(0.12, 12., 32., 0.)]
-}
-
-/// Modal dialogs (the modal container shadow is a deep, soft 9-slice).
-pub fn shadow_dialog() -> Vec<BoxShadow> {
-    vec![shadow(0.06, 2., 8., 0.), shadow(0.16, 24., 64., 0.)]
-}
-
-/// Cards resting on the sidebar (更新日志): a faint lift, no border.
-pub fn shadow_card() -> Vec<BoxShadow> {
-    vec![shadow(0.04, 1., 2., 0.), shadow(0.06, 4., 14., 0.)]
-}
-
-/// A folder page's document cards: the folder card's shadow (`home_folder`), fainter,
-/// cast from the same inset box so the two line up along the bottom.
-pub fn shadow_sheet() -> Vec<BoxShadow> {
-    vec![shadow(0.035, 8., 22., -2.)]
-}
-
-/// The note plane's left edge over the sidebar: a faint shade cast leftward, so the
-/// two read as layers. The plane meets the window's other edges, where nothing shows.
-pub fn shadow_note() -> Vec<BoxShadow> {
-    let mut v = vec![shadow(0.012, 0., 1., 0.), shadow(0.014, 0., 6., 0.)];
-    v[1].offset.x = px(-1.);
-    v
-}
-
-/// Header buttons and other white pills on a white panel (back / share).
-pub fn shadow_button() -> Vec<BoxShadow> {
-    vec![shadow(0.05, 1., 1.5, 0.)]
-}
-
 /// The platform's sans: the interface's family unless 外观 › 界面字体 says
 /// otherwise, and the document's when its theme names no family. On Linux
 /// fontconfig's sans-serif (`gpui_linux::system_ui_font_family`, #452).
@@ -405,8 +360,8 @@ pub struct Theme;
 
 impl Theme {
     pub fn text() -> Hsla { c(craft::N900) }
-    /// Secondary text: dates, meta, captions of controls.
-    pub fn text_caption() -> Hsla { c(craft::N600) }
+    /// Secondary text: dates, meta, captions of controls. Dark: shadcn's `muted-foreground`.
+    pub fn text_caption() -> Hsla { if dark() { crate::design::color::muted_foreground() } else { c(craft::N600) } }
     pub fn text_placeholder() -> Hsla { c(craft::N500) }
     /// Empty-block hints: placeholders are text at ~25%.
     pub fn block_placeholder() -> Hsla { ca(craft::N900, 0.25) }
@@ -483,8 +438,11 @@ impl Theme {
         if crate::native_header::supported() { ca(craft::WINDOW, if dark() { 0.82 } else { 0. }) } else if crate::theme::glass() { ca(craft::WINDOW, 0.84) } else { ca(craft::WINDOW, 1.) }
     }
 
-    /// Sidebar row label: text at 85%.
-    pub fn sidebar_text() -> Hsla { ca(craft::N900, 0.85) }
+    /// Sidebar row label: text at 85%; dark: shadcn's `sidebar-foreground` (`foreground`), the
+    /// adapted ink at 85% read faint on the dark glass (2026-11-26).
+    pub fn sidebar_text() -> Hsla { if dark() { crate::design::color::foreground() } else { ca(craft::N900, 0.85) } }
+    /// A selected or receiving sidebar row's label: the text; dark: `sidebar-foreground` as every row.
+    pub fn sidebar_text_on() -> Hsla { if dark() { crate::design::color::foreground() } else { Theme::text() } }
     pub fn sidebar_hover() -> Hsla { ca(craft::N1000, 0.045) }
     /// Selected sidebar row (measured #DEDEDF).
     pub fn sidebar_selected() -> Hsla { ca(craft::N1000, 0.072) }
@@ -496,11 +454,17 @@ impl Theme {
     pub fn sidebar_field_edge() -> Hsla { ca(craft::B500, 0.6) }
     pub fn sidebar_field_ring() -> Hsla { ca(craft::B500, 0.16) }
     pub fn sidebar_landed() -> Hsla { ca(craft::N1000, 0.07) }
-    /// Section headers on the sidebar.
-    pub fn sidebar_section() -> Hsla { c(0x333739) }
-    /// Normal monochrome icons: #191919 measured from the supplied Claude Code screenshot.
-    /// Keep the existing adaptive tint in dark mode.
-    pub fn icon() -> Hsla { if dark() { ca(craft::N900, 0.6) } else { rgb(0x191919).into() } }
+    /// The fold chevron beside a top-level folder's heading: a caption in the light; dark:
+    /// `sidebar-foreground`, as a 12pt stroke in `muted-foreground` antialiases to about 3:1 on the glass.
+    pub fn sidebar_chevron() -> Hsla { if dark() { crate::design::color::foreground() } else { Theme::text_caption() } }
+    /// Section headers on the sidebar; dark: `sidebar-foreground`.
+    pub fn sidebar_section() -> Hsla { if dark() { crate::design::color::foreground() } else { c(0x333739) } }
+    /// Normal monochrome icons: #191919 measured from the supplied Claude Code screenshot; dark:
+    /// `foreground`, as the design system's buttons (the old 60% ink, ≈#919396, read faint).
+    pub fn icon() -> Hsla { if dark() { crate::design::color::foreground() } else { rgb(0x191919).into() } }
+    /// Secondary glyphs (disclosure chevrons, a field's type, a breadcrumb's separator): as `icon` in
+    /// the light; dark: `muted-foreground`.
+    pub fn icon_muted() -> Hsla { if dark() { crate::design::color::muted_foreground() } else { rgb(0x191919).into() } }
     /// Line above the sidebar footer (1pt, black 3.5%, #E8E8E9 on the sidebar).
     /// Line under the page title.
     /// White pill buttons on the note (back / + / share): hairline.

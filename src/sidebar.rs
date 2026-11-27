@@ -151,7 +151,7 @@ impl Workspace {
         // Pinned docs are shortcuts: they stay in 我的文档 too.
         // 置顶 follows the same order as the lists below it. Only the pinned are
         // sorted: copying and sorting every entry each frame cost 3 ms in a big library.
-        let order = self.home.order();
+        let order = self.folder_page.order();
         let mut pinned: Vec<&Entry> = self.entries.iter().filter(|e| e.meta.pinned).collect();
         pinned.sort_by(|a, b| order.cmp(a, b));
         if !pinned.is_empty() {
@@ -167,7 +167,7 @@ impl Workspace {
         // of the tree there; none, a way to open one.
         let tops = self.store.shown_tops();
         if tops.is_empty() {
-            list = list.child(self.empty_home(cx));
+            list = list.child(self.empty_sidebar(cx));
         } else {
             // No 我的文档 heading: the first folder's heading is the sidebar's first row, right under
             // the window's header where 我的文档's was. 批量操作's 已选 N 项 takes the top.
@@ -449,12 +449,14 @@ impl Workspace {
             )
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
+                cx.listener(move |w, ev: &MouseDownEvent, window, cx| {
                     let batch = in_lib && w.batch.is_some();
                     if batch && !w.batch.as_ref().is_some_and(|b| b.contains(&id2)) && !w.toggle_check(&id2) {
                         return;
                     }
                     w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch, from: None });
+                    // the keys go to the sidebar: ⌘Z after what the menu does undoes that, not the page's typing
+                    window.focus(&w.focus, cx);
                     cx.notify();
                 }),
             )
@@ -481,7 +483,7 @@ impl Workspace {
             .child(canvas(move |b, _, _| record.borrow_mut().insert(slot.clone(), b), |_, _, _, _| {}).absolute().inset_0())
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |w, _: &MouseDownEvent, _, cx| {
+                cx.listener(move |w, _: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
                     // The row menu's outside-click handler has already closed it on this press, so
                     // a press on its own button closes it rather than reopening it (see `open`).
@@ -491,6 +493,7 @@ impl Workspace {
                     let menu_h = row_menu_height(ROW_ITEMS + usize::from(w.takes_children(&id)), ROW_DIVIDERS);
                     let (pos, corner) = crate::design::hang(b, crate::design::Align::Start, Some(menu_h));
                     w.row_menu = Some(RowMenu { id: id.clone(), pos, corner, sub: false, batch: false, from: Some(from.clone()) });
+                    window.focus(&w.focus, cx);
                     cx.notify();
                 }),
             )
@@ -585,7 +588,7 @@ impl Workspace {
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .mr(px(give))
-                .text_color(if heading { Theme::sidebar_section() } else if drop_target || selected { Theme::text() } else { Theme::sidebar_text() })
+                .text_color(if heading { Theme::sidebar_section() } else if drop_target || selected { Theme::sidebar_text_on() } else { Theme::sidebar_text() })
                 .when(heading, |d| d.font_weight(FontWeight::SEMIBOLD))
                 .child(ui_text(display_title(&e.title)))
                 .into_any_element(),
@@ -605,7 +608,7 @@ impl Workspace {
                         w.folder_drag.icon_press = true;
                         w.folder_drag.icon_alt = ev.modifiers.alt;
                     }))
-                    .child(icon(if open { "chevron-down" } else { "chevron-right" }, 12., Theme::text_caption())))
+                    .child(icon(if open { "chevron-down" } else { "chevron-right" }, 12., Theme::sidebar_chevron())))
                 .into_any_element()
         } else { title };
         let renaming = self.rename.as_ref().is_some_and(|r| r.id == e.id);

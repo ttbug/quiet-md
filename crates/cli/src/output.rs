@@ -25,14 +25,14 @@ fn size(n: u64) -> String { if n >= 1000 { format!("{:.1}k", n as f64 / 1000.) }
 fn cell(v: &Value, k: &str) -> String { s(v, k).replace('|', "\\|").replace('\n', " ") }
 
 /// Compact text for people and agents alike; `--json` has every field.
-/// Paths start at 主页: the top-level folder's name first.
+/// Paths start with the top-level folder's name.
 pub fn text(op: &str, v: &Value) -> String {
     let mut o = String::new();
     match op {
         "ls" => for e in v.as_array().into_iter().flatten() {
             let mark = if e.get("pinned").is_some() { " pinned" } else { "" };
             if e.get("top").is_some() {
-                // A top-level folder on 主页: where it is on disk, and whether it opens.
+                // A top-level folder: where it is on disk, and whether it opens.
                 let state = match e.get("documents") { Some(n) => format!("{n} documents{}", if e.get("default").is_some() { ", new documents go here" } else { "" }), None => format!("unavailable: {}", s(e, "error")) };
                 o += &format!("{}/  ({state})  {}\n", s(e, "path"), s(e, "dir"));
             } else if s(e, "kind") == "folder" { o += &format!("{}/\n", s(e, "path")); } else { o += &format!("{}  [{}] {}{mark}\n", s(e, "path"), s(e, "kind"), s(e, "modified")); }
@@ -47,7 +47,7 @@ pub fn text(op: &str, v: &Value) -> String {
                 if let Some(n) = r.get("more_hits") { o += &format!("  … {n} more blocks match (quiet blocks DOC --grep WORD)\n"); }
             }
         }
-        "outline" | "open" => {
+        "outline" | "load" | "open" => {
             o += &format!("{}  [{}] rev {}  {} blocks, {} chars\n", s(v, "path"), s(v, "kind"), s(v, "rev"), s(v, "block_count"), size(v["chars"].as_u64().unwrap_or(0)));
             for h in list(v, "headings") {
                 let l = h["level"].as_u64().unwrap_or(1) as usize;
@@ -169,7 +169,7 @@ pub fn text(op: &str, v: &Value) -> String {
         "table_delete" => o += &format!("deleted {} row(s){}\n", s(v, "deleted"), if list(v, "rows").count() > 0 { format!(": {}", list(v, "rows").filter_map(Value::as_str).collect::<Vec<_>>().join(", ")) } else { String::new() }),
         "board_add" => o += &format!("added {}\n", refs(&v["added"])),
         "board_remove" => o += &format!("removed {} element(s)\n", s(v, "removed")),
-        "create" | "mkdir" | "rename" | "mv" | "trash" | "restore" | "untrash" | "import" => {}
+        "create" | "mkdir" | "rename" | "mv" | "trash" | "restore" | "untrash" | "import" | "pin" | "unpin" | "duplicate" => {}
         _ => o += &format!("{}\n", serde_json::to_string_pretty(v).unwrap_or_default()),
     }
     o
@@ -195,7 +195,7 @@ fn view_line(w: &Value) -> String {
     format!("{}\n", parts.join(" · "))
 }
 
-/// What a commit wrote (or, `dry`, would write), by paths from 主页.
+/// What a commit wrote (or, `dry`, would write), by full paths (the top-level folder first).
 pub fn report(r: &Value, dry: bool) -> String {
     let mut o = String::new();
     for c in r.as_array().into_iter().flatten() {

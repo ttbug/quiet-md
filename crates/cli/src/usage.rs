@@ -23,7 +23,7 @@ const KEEP: usize = 31;
 /// The commands counted by name; anything else counts as `other`.
 const NAMES: &[&str] = &["ls", "find", "outline", "read", "blocks", "links", "check", "new", "mkdir", "insert", "replace", "delete", "move", "set",
     "rename", "mv", "rm", "table", "table add", "table update", "table delete", "table import", "table field", "table view", "table new", "table rename", "table remove", "board", "board add", "board rm", "history", "restore", "trash",
-    "untrash", "import", "run", "call", "skill", "help", "telemetry", "mcp"];
+    "untrash", "import", "run", "call", "skill", "help", "telemetry", "mcp", "folders", "folders add", "folders remove", "open", "pin", "unpin", "duplicate"];
 
 const NOTICE: &str = "quiet counts how often its commands run (which ones and how many, under a random id; never your notes or arguments) and sends those counts once a day to telemetry.quiet.md. Turn it off with `quiet telemetry off` or in Quiet.md's Settings › General › Anonymous usage statistics; `quiet telemetry status` shows what is sent.";
 
@@ -44,7 +44,7 @@ fn blocked() -> Option<&'static str> {
     if env("CI") { return Some("running in CI"); }
     // The app's 设置 › 通用 › 匿名使用统计 off; untouched, it follows
     // 自动检查更新 (off: the user wants the app to stay offline).
-    // 应用级设置 since 主页; before, the library's `.quiet/`.
+    // 应用级设置 since there are several top-level folders; before, the library's `.quiet/`.
     let prefs = [fdl_core::store::Store::settings_dir(), fdl_core::store::Store::legacy_dir().join(".quiet")].map(|d| d.join("preferences.json"));
     if let Some(p) = prefs.iter().find_map(|f| std::fs::read(f).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()) {
         match p.get("usage_stats").and_then(Value::as_bool) {

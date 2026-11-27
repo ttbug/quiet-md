@@ -2,9 +2,9 @@
 # the README's folder page). Offscreen shots, put on the meadow by compose.py.
 resize 1280 800
 wait 1500
-row Writing and formatting
+row Documents
 wait 600
-row Blocks: lists, quotes and callouts
+row Writing: text, lists and callouts
 wait 1200
 move 1270 790
 wait 400

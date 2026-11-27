@@ -5,7 +5,7 @@ impl Store {
     /// It takes the parsed documents along, so its `list` reads only files that changed.
     pub fn tree_writer(&self) -> Self {
         Self { file_changes: vec![], top_dir: self.top_dir.clone(), index: self.index.clone(), foreign: self.foreign.clone(), trash: self.trash.clone(), flat: self.flat,
-            loaded: Default::default(), copied: Default::default(), parsed: self.parsed.clone(), checked: self.checked.clone(), writes: Default::default(), warnings: vec![], migrated: None, batch: Default::default(), view: Default::default(),
+            loaded: Default::default(), copied: Default::default(), parsed: self.parsed.clone(), checked: self.checked.clone(), inodes: self.inodes.clone(), inodes_due: Default::default(), writes: Default::default(), warnings: vec![], migrated: None, batch: Default::default(), view: Default::default(),
             v5: self.v5, me: self.me.clone(), clock: self.clock.clone(), seen: self.seen.clone(), merged: self.merged.clone(), key: self.key.clone(), place_by_hand: self.place_by_hand, v6: self.v6, seen_trash: self.seen_trash.clone(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: self.here.clone() , clean_due: None }
     }
 
@@ -93,7 +93,7 @@ impl Store {
     pub fn initialize_manual_order(&mut self) -> Result<bool> {
         let _lock = self.begin_write()?;
         let mut settings = self.settings();
-        let initialized = settings.home_manual_initialized;
+        let initialized = settings.manual_initialized;
         let mut groups: HashMap<Option<&str>, Vec<&str>> = HashMap::new();
         for (id, m) in &self.index { groups.entry(m.parent.as_deref()).or_default().push(id); }
         // Freeze the order the sidebar shows (`Meta::place`): pages not yet placed
@@ -106,7 +106,7 @@ impl Store {
                 let m = &self.index[id];
                 let n = if parent.is_none() { (m.order, Some(i as u64 + 1)) } else { (i as u64 + 1, None) };
                 // Numbered so already: nothing to write. A FORMAT 5 library keeps no
-                // `home_manual_initialized` (its settings live in the device files),
+                // `manual_initialized` (its settings live in the device files),
                 // so every folder opened came here and rewrote the whole index.
                 if (m.order, m.top_order) != n { numbers.push((id.to_string(), n)); }
             }
@@ -116,7 +116,7 @@ impl Store {
         for (id, (order, top_order)) in numbers { if let Some(m) = self.index.get_mut(&id) { (m.order, m.top_order) = (order, top_order); } }
         if let Err(e) = self.save_index() { self.index = previous; return Err(e); }
         self.record_tree_changes(&previous);
-        settings.home_manual_initialized = true;
+        settings.manual_initialized = true;
         self.save_settings(&settings).map(|()| true)
     }
 

@@ -398,13 +398,6 @@ pub fn apply_appearance(pref: &str) {
     let _ = pref;
 }
 
-/// 关于 › 首次启动引导's note, its shortcut spelled as this platform binds it (cmd-alt-shift-o is
-/// Ctrl+Alt+Shift+O off the Mac); every translation carries the Mac glyphs, swapped here.
-fn onboarding_note() -> String {
-    let note = tr("在这个窗口上再走一遍首次启动的欢迎页（⌘⌥⇧O）；只会应用快捷键，不改动文档库", "Go through the first-launch pages again over this window (⌘⌥⇧O); only the shortcut is applied, the library stays as it is");
-    if cfg!(target_os = "macos") { note.to_string() } else { note.replace("⌘⌥⇧O", "Ctrl+Alt+Shift+O") }
-}
-
 /// Draw light or dark as the preference and the system say; true when the look changed.
 pub fn sync_dark(cx: &App) -> bool {
     let on = match prefs().appearance.as_str() {
@@ -1469,7 +1462,7 @@ impl Workspace {
         };
         div().w(px(self.sidebar_w(window))).h_full().flex_none().flex().flex_col().text_color(Theme::text()).font_family(theme::ui_family())
             // The document sidebar's header, 返回 where 添加文件夹 is: the toggle doesn't move.
-            .child(self.sidebar_header(crate::ui::header_icon("settings-back", "arrow-left").relative().child(self.home.track("settings-back")).tip(tr("返回", "Back"), Some("Esc"))
+            .child(self.sidebar_header(crate::ui::header_icon("settings-back", "arrow-left").relative().child(self.folder_page.track("settings-back")).tip(tr("返回", "Back"), Some("Esc"))
                 .on_click(cx.listener(|w, _, _, cx| w.close_settings(cx))), cx))
             // The document sidebar's rhythm: 设置 sits where the first folder's heading does, a
             // row right under the bar, and the rows follow `ROW_GAP` apart.
@@ -1782,7 +1775,7 @@ impl Workspace {
                 row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", self.store.trash_days()).into()),
                     button("open-trash", tr("打开", "Open")).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Trash, cx)))).into_any_element(),
                 // #237: files no document (the Trash included) mentions.
-                row(tr("未使用资源", "Unused assets"), Some(tr("资源文件夹里没有任何文档（含回收站、版本历史和本机文件）引用的图片和文件。检查后确认才会移出。", "Images and files in the asset folder that no document mentions, including the Trash, version history and local files. Nothing is moved until you confirm.").into()),
+                row(tr("未使用资源", "Unused assets"), Some(tr("资源文件夹里没有任何文档（含回收站、版本历史和单独打开过的文件）引用的图片和文件。检查后确认才会移出。", "Images and files in the asset folder that no document mentions, including the Trash, version history and files opened on their own. Nothing is moved until you confirm.").into()),
                     button("sweep-assets", tr("检查", "Check")).on_click(cx.listener(|w, _, window, cx| {
                         let root = crate::store::Store::active_dir();
                         let (live, outside) = w.sweep_inputs(window, cx);
@@ -1815,8 +1808,6 @@ impl Workspace {
             .child(group("group-update", None, vec![update_row(cx).into_any_element()]))
             .child(group("group-repo", None, vec![row(tr("项目主页", "Project page"), Some(REPO.trim_start_matches("https://").into()),
                 button("open-repo", tr("打开", "Open")).on_click(|_, _, cx| crate::editor::open_link(cx, REPO))).into_any_element()]))
-            .child(group("group-onboarding", None, vec![row(tr("首次启动引导", "Onboarding"), Some(onboarding_note().into()),
-                button("replay-onboarding", tr("打开", "Open")).on_click(cx.listener(|w, _, window, cx| w.replay_onboarding(window, cx)))).into_any_element()]))
             .into_any_element()
     }
 }
@@ -2216,8 +2207,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "文件不存在" => "File not found",
         "文件夹不存在" => "Folder not found",
         "这个文件夹在文档库里，它的内容已经在我的文档中" => "This folder is inside the library; its notes are already in My documents",
-        "这个文件夹里有文档库，不能作为本机文件夹打开" => "This folder holds the library, so it can't be opened as a folder on this computer",
-        "本机文件夹和文档库之间只能复制，不能移动" => "Between folders on this computer and the library, notes can be copied but not moved",
         "加载失败，" => "Could not load. ",
         "点击重试" => "Retry",
         "图片过小，请放大后重试" => "Image too small. Enlarge it and try again.",
@@ -2403,6 +2392,8 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "分组" => "Group",
         "创建于" => "Created",
         "删除字段/列" => "Delete field",
+        "主字段作为记录标题保留" => "Kept as each record’s title",
+        "撤销可以恢复。" => "Undo brings it back.",
         "删除数据表" => "Delete table",
         "删除视图" => "Delete view",
         "删除记录" => "Delete record",
@@ -2658,6 +2649,15 @@ fn diagnostic_for(message: &str, english: bool) -> String {
         ("这篇文档还在从 iCloud 下载，请稍后再打开", "This document is still downloading from iCloud. Open it again in a moment."),
         ("恢复文档 {} 失败，已恢复的文档保留在文档库", "Could not restore document {}. Documents already restored remain in Documents."),
         ("文档已恢复，回收站索引清理失败：{}", "Document restored, but the Trash index could not be cleaned up: {}"),
+        // 移到另一个顶层文件夹（core across.rs）
+        ("已在这个文件夹里", "Already in this folder"),
+        ("不能移动到自身或后代文件夹中", "A folder can't move into itself or a folder inside it"),
+        ("已存在同名文件：{}", "A file with this name is already there: {}"),
+        ("文档或文件夹不存在", "This page or folder is no longer here"),
+        ("旧格式的文档库没有真实文件夹", "Move the library to real folders first"),
+        ("单独打开的文件只能复制进文件夹", "A file opened on its own is copied into a folder, not moved"),
+        ("目标位置已改变，请重试", "The folder changed. Try again."),
+        ("目标文件夹里已有相同编号的文档", "That folder already has a page with this ID"),
     ];
     for (source, target) in TEMPLATES {
         let parts: Vec<_> = source.split("{}").collect();
@@ -2717,12 +2717,14 @@ mod localization_tests {
         assert_eq!(diagnostic_for(source, false), source);
         assert_eq!(diagnostic_for(source, true), "Could not remove expired Trash document 我的笔记.xml: Permission denied");
         assert_eq!(diagnostic_for("文档索引已损坏，已从备份恢复（原文件保留为 index.json.bad）", true), "Document index was damaged and restored from backup (original retained as index.json.bad).");
+        assert_eq!(diagnostic_for("已存在同名文件：项目/甲.xml", true), "A file with this name is already there: 项目/甲.xml");
+        assert_eq!(diagnostic_for("目标位置已改变，请重试", true), "The folder changed. Try again.");
         assert_eq!(diagnostic_for("unknown OS error", true), "unknown OS error");
     }
 
     #[test]
     fn user_titles_are_never_translation_keys() {
-        for title in ["主页", "收藏", "未命名文档", "My notes", "我的中文笔记"] { assert_eq!(display_title(title), title); }
+        for title in ["收藏", "未命名文档", "My notes", "我的中文笔记"] { assert_eq!(display_title(title), title); }
     }
 }
 

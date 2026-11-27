@@ -126,11 +126,16 @@ impl Store {
         anyhow::ensure!(!self.flat && !to.flat, "旧格式的文档库没有真实文件夹");
         anyhow::ensure!(self.index_has(id), "文档或文件夹不存在");
         let m = self.index[id].clone();
-        anyhow::ensure!(!m.local(), "本机文件不能移入文档库的文件夹");
+        anyhow::ensure!(!m.local(), "单独打开的文件只能复制进文件夹");
         to.validate_folder(None, parent)?;
         if let Place::Before(Some(anchor)) = &place {
             anyhow::ensure!(to.index.get(anchor).is_some_and(|m| m.parent.as_deref() == parent) && to.index_has(anchor), "目标位置已改变，请重试");
         }
+        // Nested top-level folders (one inside the other) share their files: where it would go
+        // can be where it already is (the outer one's view of the inner one), or inside itself.
+        let (here, there) = (crate::top_folders::plain(self.abs(parent_rel(&m.rel)).fs_canonicalize().unwrap_or_default()), crate::top_folders::plain(to.abs(&parent.and_then(|p| to.index.get(p)).map(|p| p.rel.clone()).unwrap_or_default()).fs_canonicalize().unwrap_or_default()));
+        anyhow::ensure!(here != there || here.as_os_str().is_empty(), "已在这个文件夹里");
+        anyhow::ensure!(m.folder.is_none() || !there.starts_with(here.join(base_name(&m.rel))), "不能移动到自身或后代文件夹中");
         self.clear_moving();
         to.clear_moving();
         // What goes: `id`, and for a folder all that is in it (its files of kinds this build does not know too).

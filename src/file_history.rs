@@ -5,7 +5,10 @@ use std::collections::{HashMap, VecDeque};
 #[derive(Clone)]
 struct Record { token: u64, label: &'static str, changes: Vec<FileDelta>, entries: Vec<(Option<Entry>, Option<Entry>)>,
     /// Pages this step moved into another top-level folder: undone by moving them back (`Store::move_across`).
-    across: Vec<Across> }
+    across: Vec<Across>,
+    /// Top-level folders this step took off the sidebar with their folder (deleted through the one
+    /// holding them): back on it when undone, off again when redone.
+    tops: Vec<fdl_core::top_folders::TopFolderEntry> }
 
 /// A change as the window's rows have it, at a top-level folder's top level (under its row), not as its library does.
 fn rows_only(c: &FileDelta) -> bool {
@@ -18,7 +21,7 @@ struct Across { id: String, from: String, to: String, before: FileState, after: 
 #[derive(Default)]
 pub(crate) struct FileHistory {
     undo: Vec<Record>, redo: Vec<Record>, next: u64,
-    pub prefer_files: bool, pub busy: bool,
+    pub busy: bool,
     requests: VecDeque<bool>,
 }
 impl Workspace {
@@ -116,9 +119,9 @@ impl Workspace {
         if changes.is_empty() { return 0; }
         self.file_history.next += 1;
         let token = self.file_history.next;
-        self.file_history.undo.push(Record { token, label, changes, entries, across: vec![] });
+        self.file_history.undo.push(Record { token, label, changes, entries, across: vec![], tops: vec![] });
         if self.file_history.undo.len() > 100 { self.file_history.undo.remove(0); }
-        self.file_history.redo.clear(); self.file_history.prefer_files = true;
+        self.file_history.redo.clear();
         token
     }
 
@@ -136,15 +139,41 @@ impl Workspace {
         record.changes = merged; record.entries = entries;
     }
 
+    /// Step `token` also took top-level folders `tops` off the sidebar (`delete_docs`).
+    pub(crate) fn file_change_took_tops(&mut self, token: u64, tops: Vec<fdl_core::top_folders::TopFolderEntry>) {
+        if let Some(r) = self.file_history.undo.iter_mut().find(|r| r.token == token) { r.tops = tops; }
+    }
+
     pub(crate) fn forget_file_change(&mut self, token: u64) {
         self.file_history.undo.retain(|r| r.token != token);
         self.file_history.redo.retain(|r| r.token != token);
     }
 
+    /// 撤销 / 重做 in the Edit menu: the folders' next steps by name while ⌘Z is theirs (`capture_file_history`);
+    /// none (plain 撤销 / 重做) while it is a page's, whose steps have no names.
+    pub(crate) fn undo_menu_names(&self, window: &Window, cx: &App) -> (Option<String>, Option<String>) {
+        let doc_keys = self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).holds_focus(window, cx));
+        if !files_take_undo(self.rename.is_some() || self.search_open || self.move_dlg.is_some(), doc_keys) { return (None, None) }
+        let name = |r: &Record, redo: bool| {
+            // one page or folder: its title too
+            let title = match &r.entries[..] { [(a, b)] => b.as_ref().or(a.as_ref()).map(|e| crate::settings::display_title(&e.title)), _ => None };
+            match (title, redo) {
+                (Some(t), false) => crate::localized_format!("撤销{}「{}」", "Undo {} “{}”", r.label, t),
+                (Some(t), true) => crate::localized_format!("重做{}「{}」", "Redo {} “{}”", r.label, t),
+                (None, false) => crate::localized_format!("撤销{}", "Undo {}", r.label),
+                (None, true) => crate::localized_format!("重做{}", "Redo {}", r.label),
+            }
+        };
+        (self.file_history.undo.last().map(|r| name(r, false)), self.file_history.redo.last().map(|r| name(r, true)))
+    }
+
+    /// ⌘Z / ⌘⇧Z, caught on the way down: the folders' history (创建副本, 移动, 删除…) only while the keys are
+    /// in the sidebar or a folder's page. With the open document holding them it is that document's own, even
+    /// with nothing left to undo there (as in Notion and 飞书: undo in a page never undoes the sidebar).
     pub(crate) fn capture_file_history(&mut self, redo: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.agent.read(cx).is_focused(window, cx) { return }
-        if self.rename.is_some() || self.search_open || self.move_dlg.is_some()
-            || (!self.file_history.prefer_files && self.view == View::Doc) { return; }
+        let doc_keys = self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).holds_focus(window, cx));
+        if !files_take_undo(self.rename.is_some() || self.search_open || self.move_dlg.is_some(), doc_keys) { return; }
         cx.stop_propagation();
         self.file_history.requests.push_back(redo);
         self.run_file_history(window, cx);
@@ -228,6 +257,7 @@ impl Workspace {
             let _ = this.update_in(cx, |w, window, cx| {
                 let mut entries = vec![];
                 for (key, n, writer, listed) in lists { entries = w.store.adopt_written(&key, n, writer, listed); }
+                w.tops_moved(cx);
                 if !record.across.is_empty() {
                     w.store.moved_across();
                     for a in &record.across { let (from, to) = if redo { (&a.from, &a.to) } else { (&a.to, &a.from) }; w.moved_open_document(&a.id, from, to); }
@@ -235,6 +265,13 @@ impl Workspace {
                 w.file_history.busy = false;
                 match result {
                     Ok(()) => {
+                        // Top-level folders deleted with a folder of another: back with it, or off again.
+                        if !record.tops.is_empty() {
+                            if redo { let dirs: Vec<std::path::PathBuf> = record.tops.iter().map(|t| t.path.clone()).collect(); let _ = w.store.take_tops_within(&dirs); }
+                            else { w.store.put_back(record.tops.clone()); }
+                            w.tops_changed(cx);
+                        }
+                        let entries = if record.tops.is_empty() { entries } else { w.store.list() };
                         w.entries.set(entries);
                         if redo { w.file_history.redo.pop(); w.file_history.undo.push(record.clone()); }
                         else { w.file_history.undo.pop(); w.file_history.redo.push(record.clone()); }
@@ -255,10 +292,42 @@ impl Workspace {
                         w.show_toast_kind(crate::ui::ToastKind::Error, &e.to_string(), cx);
                     }
                 }
-                w.file_history.prefer_files = true; w.sort();
+                w.sort();
                 w.run_file_history(window, cx); cx.notify();
             });
         }).detach();
         cx.notify();
+    }
+}
+
+/// Whose ⌘Z it is: the folders', unless a field of the workspace's own (重命名, 搜索, 移动到) or the open
+/// document has the keys.
+fn files_take_undo(field: bool, doc_keys: bool) -> bool { !field && !doc_keys }
+
+#[cfg(test)]
+mod tests {
+    // (`test` here is GPUI's, through the glob)
+    use super::*;
+
+    /// The report (2026-11-27): 创建副本 of a 数据表 on a folder's page, the copy opened and a cell edited,
+    /// ⌘Z undid the 创建副本. Whatever the folders did last, the document's keys keep its ⌘Z, its own
+    /// history spent or not; back in the sidebar or a folder's page, ⌘Z is the folders' again.
+    #[core::prelude::v1::test]
+    fn the_folders_undo_only_without_the_document() {
+        let mut h = FileHistory::default();
+        h.undo.push(Record { token: 1, label: "创建副本", changes: vec![], entries: vec![], across: vec![], tops: vec![] });
+        let mut table = fdl_core::table::Doc::new(fdl_core::table::Base::blank_seeded(0, 2));
+        let (t, f) = (table.base.tables[0].id, table.base.tables[0].fields[0].id);
+        let r = table.base.tables[0].records[0].id;
+        assert!(table.set_cells(t, vec![(r, f, fdl_core::table::Value::Text("改过".into()))]));
+        // in the table: its ⌘Z, the cell back, the folders' step still there
+        assert!(!files_take_undo(false, true));
+        assert!(table.undo());
+        assert_eq!(h.undo.len(), 1);
+        // its history spent: still not the folders'
+        assert!(!files_take_undo(false, true) && !table.undo());
+        // the sidebar or the folder's page: the folders'; a field of the workspace's own keeps its keys
+        assert!(files_take_undo(false, false));
+        assert!(!files_take_undo(true, false));
     }
 }

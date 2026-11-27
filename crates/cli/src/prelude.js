@@ -47,6 +47,8 @@ class Doc {
   rename(title) { this._call("rename", { title }); }
   moveTo(folder) { this._call("mv", { folder: folder ?? "/" }); }
   trash() { this._call("trash"); }
+  pin(on = true) { this._call(on ? "pin" : "unpin"); }
+  duplicate(title) { this._call("duplicate", { title }); }
   links() { return this._call("links"); }
   table(o = {}) { return this._call("table", { ...__t(o), view: o.view, where: o.where, any: o.any, sort: o.sort, group: o.group, fields: o.fields, stats: o.stats, as: o.as, limit: o.limit, offset: o.offset }); }
   addRows(rows, o = {}) { return this._call("table_add", { rows, at: __anchor(o.at), table: o.table }).added; }
@@ -77,7 +79,7 @@ class Doc {
 globalThis.lib = {
   ls(folder, o = {}) { if (typeof folder === "object" && folder) { o = folder; folder = o.folder; } return __call("ls", { folder, recursive: o.recursive, kind: o.kind }); },
   find(query, o = {}) { return __call("find", { query, folder: o.folder ?? o.in, limit: o.limit }); },
-  doc(path, o = {}) { return new Doc(__call("open", { doc: path, rev: o.rev })); },
+  doc(path, o = {}) { return new Doc(__call("load", { doc: path, rev: o.rev })); },
   create(title, o = {}) { const r = __call("create", { title, folder: o.folder ?? o.in, md: o.md, markdown: o.markdown, kind: o.kind, csv: o.csv, fields: o.fields }); return r.key ? new Doc(r) : r; },
   mkdir(name, o = {}) { return __call("mkdir", { name, folder: o.folder ?? o.in }); },
   check() { return __call("check"); },

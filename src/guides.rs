@@ -27,6 +27,9 @@ pub(crate) fn seeded(root: &Path) -> std::io::Result<bool> {
 
 /// A guide document (not an asset or the index).
 fn is_doc(name: &str) -> bool { !name.starts_with('.') && name.ends_with(".xml") }
+/// A page of the guides: a document, the Markdown example, the 画板 or the 数据表.
+#[cfg(test)]
+fn is_page(name: &str) -> bool { !name.starts_with('.') && fdl_core::store::DocKind::of_name(name).is_some() }
 
 /// Mac-only passages of the guides and what Windows reads instead; key
 /// combinations go through `shortcuts::windows_keys` afterwards.
@@ -77,9 +80,8 @@ pub fn for_windows(xml: &str) -> String {
     crate::shortcuts::windows_keys(&text)
 }
 
-pub fn initialize(root: &Path) -> anyhow::Result<()> {
-    seed(root, crate::settings::prefs().lang() == crate::settings::Lang::Zh)
-}
+/// The guides into a new library at `root`, in Chinese or else English.
+pub fn initialize(root: &Path, chinese: bool) -> anyhow::Result<()> { seed(root, chinese) }
 
 fn seed(root: &Path, chinese: bool) -> anyhow::Result<()> {
     fs::create_dir_all(root)?;
@@ -144,11 +146,11 @@ mod tests {
     #[test]
     fn existing_library_is_never_reseeded() {
         let root = fdl_core::vfs::temp_dir().join(format!("qmd-guides-{}", uuid::Uuid::new_v4()));
-        super::initialize(&root).unwrap();
+        super::initialize(&root, false).unwrap();
         let all = docs(&root);
         let first = all[0].clone();
         fdl_core::vfs::write(&first, "<title>mine</title>").unwrap();
-        super::initialize(&root).unwrap();
+        super::initialize(&root, false).unwrap();
         assert_eq!(fdl_core::vfs::read_to_string(&first).unwrap(), "<title>mine</title>");
         // Every note and folder deleted: `.quiet/` still says it is a library.
         for e in fdl_core::vfs::read_dir(&root).unwrap() {
@@ -156,7 +158,7 @@ mod tests {
             if p.file_name().unwrap().to_string_lossy().starts_with('.') { continue; }
             if p.fs_is_dir() { fdl_core::vfs::remove_dir_all(p).unwrap(); } else { fdl_core::vfs::remove_file(p).unwrap(); }
         }
-        super::initialize(&root).unwrap();
+        super::initialize(&root, false).unwrap();
         assert_eq!(docs(&root).len(), 0);
         fdl_core::vfs::remove_dir_all(&root).unwrap();
     }
@@ -176,14 +178,17 @@ mod tests {
         let list = store.list();
         assert!(store.warnings.is_empty(), "{:?}", store.warnings);
         let docs: Vec<_> = list.iter().filter(|e| e.meta.folder.is_none()).collect();
-        assert_eq!(docs.len(), super::files(chinese).iter().filter(|(n, _)| super::is_doc(n)).count());
+        assert_eq!(docs.len(), super::files(chinese).iter().filter(|(n, _)| super::is_page(n)).count());
+        // The examples beside the guides are files of their own kinds.
+        use fdl_core::store::DocKind;
+        assert!(docs.iter().any(|e| e.meta.markdown) && docs.iter().any(|e| e.meta.kind == DocKind::Board) && docs.iter().any(|e| e.meta.kind == DocKind::Table));
         assert!(list.iter().filter(|e| e.meta.folder.is_some()).count() >= 2);
         assert!(docs.iter().any(|e| e.meta.parent.is_some()));
         let ids: std::collections::HashSet<&str> = list.iter().map(|e| e.id.as_str()).collect();
         let links: Vec<_> = docs.iter().flat_map(|e| e.links.iter()).collect();
         assert!(!links.is_empty());
         for l in links { assert!(ids.contains(l.target.as_str()), "unresolved link {}", l.target); }
-        for e in &docs {
+        for e in docs.iter().filter(|e| !e.meta.named_by_file()) {
             let name = store.file_path(&e.id).unwrap().file_stem().unwrap().to_string_lossy().into_owned();
             assert_eq!(name, crate::store::file_name_for(&e.title), "build.py names {} differently", e.title);
         }
@@ -237,7 +242,7 @@ mod tests {
     #[test]
     fn simultaneous_first_launches() {
         let root = fdl_core::vfs::temp_dir().join(format!("fdl-guides-{}", uuid::Uuid::new_v4()));
-        let runs: Vec<_> = (0..4).map(|_| { let root = root.clone(); std::thread::spawn(move || super::initialize(&root)) }).collect();
+        let runs: Vec<_> = (0..4).map(|_| { let root = root.clone(); std::thread::spawn(move || super::initialize(&root, false)) }).collect();
         for r in runs { r.join().unwrap().unwrap(); }
         let count = super::FILES.iter().filter(|(n, _)| super::is_doc(n)).count();
         assert!(count > 0);
@@ -245,7 +250,7 @@ mod tests {
         assert!(!root.join(".guides-pending").fs_exists());
         // A library with content is never reseeded.
         for p in docs(&root) { fdl_core::vfs::remove_file(p).unwrap(); }
-        super::initialize(&root).unwrap();
+        super::initialize(&root, false).unwrap();
         assert_eq!(docs(&root).len(), 0);
         let _ = fdl_core::vfs::remove_dir_all(&root);
     }

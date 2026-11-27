@@ -31,7 +31,7 @@ struct Row { entry: Rc<Entry>, depth: usize }
 /// expanded folders stay as they were: building them
 /// walks every entry, most of a frame in a vault of 15,000 notes.
 #[derive(Default)]
-struct RowCache { key: u64, order: Option<crate::home::Order>, expanded: HashSet<String>, rows: Vec<Row>, parents: HashSet<String> }
+struct RowCache { key: u64, order: Option<crate::folder_page::Order>, expanded: HashSet<String>, rows: Vec<Row>, parents: HashSet<String> }
 
 /// A row whose middle a drop goes into: a plain folder. A document, one with child pages (#357)
 /// too, only opens a slot before or after it (#418): dropping on a page reorders, never nests.
@@ -211,7 +211,7 @@ impl SidebarDrag {
 }
 
 /// A row's face without its controls: the drag ghost and rows on their way out. Folders keep one glyph, open or not.
-fn row_face(e: &Entry) -> Div {
+pub(crate) fn row_face(e: &Entry) -> Div {
     div().h(px(crate::sidebar::ROW_H)).w_full().pl(px(6.)).flex().items_center()
         .child(div().size(px(20.)).flex_none().flex().items_center().justify_center().map(|d| match &e.icon {
             _ if e.meta.folder.is_some() && e.note.is_none() => d.child(icon("folder", crate::sidebar::ROW_ICON, Theme::icon())),
@@ -230,7 +230,7 @@ fn faded(shadows: Vec<BoxShadow>, a: f32) -> Vec<BoxShadow> {
 
 impl Workspace {
     fn drag_rows(&self) -> Vec<Row> {
-        let (key, order) = (self.entries.generation(), self.home.order());
+        let (key, order) = (self.entries.generation(), self.folder_page.order());
         let mut c = self.folder_drag.rows.borrow_mut();
         if c.key != key || c.order != Some(order) || c.expanded != self.expanded {
             c.rows = crate::tree::Tree::with_order(&self.entries, Some(order)).rows(|id| self.expanded.contains(id)).into_iter()
@@ -355,7 +355,7 @@ impl Workspace {
     pub(crate) fn end_folder_drag(&mut self, cancel: bool, cx: &mut Context<Self>) {
         let rows = self.drag_rows();
         // 自动排序 decides the order among siblings: a drop that only reorders them springs back.
-        let sorted = self.home.order().field != crate::home::HomeSort::Manual;
+        let sorted = self.folder_page.order().field != crate::folder_page::PageSort::Manual;
         let held = self.folder_drag.active.as_ref().and_then(|d| self.entries.iter().find(|e| e.id == d.id)).map(|e| e.meta.parent.clone());
         let Some(d) = self.folder_drag.active.as_mut() else { return };
         if !d.started { self.folder_drag.active = None; cx.notify(); return; }
@@ -402,6 +402,19 @@ impl Workspace {
     /// Put `id` last in `folder` (a drop on a folder card), saved like a sidebar drop.
     pub(crate) fn move_into_folder(&mut self, id: &str, folder: &str, cx: &mut Context<Self>) {
         let mut movement = PendingMove { id: id.to_string(), parent: Some(folder.to_string()), before: None, history: 0, joined: false };
+        let file_before = self.entries.to_vec();
+        self.apply_tree_move(&movement);
+        movement.history = self.remember_tree_move(file_before, crate::settings::tr("拖拽移动", "Drag move"));
+        self.queue_tree_write(TreeWrite::Move(movement), cx);
+        self.sync_sub_pages(cx);
+        cx.notify();
+    }
+
+    /// 手动排序 on a folder's page: `id` put before `before` among its siblings (`None`: last),
+    /// saved and undone like a sidebar drop.
+    pub(crate) fn reorder_page_item(&mut self, id: &str, before: Option<String>, cx: &mut Context<Self>) {
+        let parent = self.entries.iter().find(|e| e.id == id).and_then(|e| e.meta.parent.clone());
+        let mut movement = PendingMove { id: id.to_string(), parent, before, history: 0, joined: false };
         let file_before = self.entries.to_vec();
         self.apply_tree_move(&movement);
         movement.history = self.remember_tree_move(file_before, crate::settings::tr("拖拽移动", "Drag move"));
@@ -766,7 +779,7 @@ impl Workspace {
                     cx.notify();
                 }))
                 .when(lift > 0.005, |d| d.child(div().absolute().inset_0().rounded(radius)
-                    .bg(theme::raised(Theme::bg_body()).opacity(lift)).shadow(faded(theme::shadow_panel(), lift))))
+                    .bg(theme::raised(Theme::bg_body()).opacity(lift)).shadow(faded(crate::design::shadow::toast(), lift))))
                 .when(fx.glow.unit() > 0.005, |d| d.child(div().absolute().inset_0().rounded(radius).bg(Theme::sidebar_landed().opacity(fx.glow.unit()))))
                 .when(hover > 0.005, |d| d.child(div().absolute().inset_0().rounded(radius).bg(Theme::sidebar_hover().opacity(hover))))
                 .child(self.doc_row(&r.entry, "doc", 0, r.entry.meta.folder.is_some(), cx));
@@ -842,7 +855,7 @@ impl Workspace {
             let l = d.lift.p.max(0.);
             let inside = d.excluded.len().saturating_sub(1);
             layer = layer.child(div().absolute().left(px(x - 3. * l)).top(px(y - l)).w(px(width + 6. * l)).h(px(crate::sidebar::ROW_H)).pr(px(6.)).rounded(px(crate::sidebar::ROW_R))
-                .bg(theme::raised(Theme::bg_body())).shadow(faded(theme::shadow_panel(), l.min(1.))).flex().items_center().text_color(Theme::text())
+                .bg(theme::raised(Theme::bg_body())).shadow(faded(crate::design::shadow::toast(), l.min(1.))).flex().items_center().text_color(Theme::text())
                 .child(row_face(e).flex_1().min_w_0().pl(px(6. + 3. * l)))
                 .when(inside > 0, |g| g.child(div().flex_none().h(px(18.)).min_w(px(18.)).px(px(5.)).rounded(px(9.)).flex().items_center().justify_center()
                     .bg(Theme::sidebar_drop_slot()).text_size(px(11.)).text_color(Theme::sidebar_text()).font_weight(FontWeight::MEDIUM)

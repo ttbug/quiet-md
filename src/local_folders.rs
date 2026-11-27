@@ -7,10 +7,10 @@ use crate::app::{RowMenu, View, Workspace};
 use crate::theme::Theme;
 use crate::settings::tr;
 use crate::ui::ToastKind;
-use fdl_core::home::{AddError, RenameError};
+use fdl_core::top_folders::{AddError, RenameError};
 use fdl_core::shown::Survey;
 use gpui::{prelude::FluentBuilder, *};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// "在访达中显示", in the system's words.
 pub(crate) fn show_in_files() -> &'static str {
@@ -46,7 +46,10 @@ impl Workspace {
     /// added for the first time is looked at first, off the main thread: a code
     /// project or a very big one is added only once the user says so (`Confirm::AddFolder`).
     pub(crate) fn add_folders(&mut self, dirs: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
-        let dirs = dirs.to_vec();
+        // A disk's top, the home folder or a system folder is refused before it is looked through (it would be asked about as a very big one).
+        let mut refused = None;
+        let dirs: Vec<PathBuf> = dirs.iter().filter(|d| match self.store.check_folder(d) { Err(e @ (AddError::TooBroad | AddError::System)) => { refused = Some(e); false } _ => true }).cloned().collect();
+        if let Some(e) = refused { self.add_failed(e, cx); }
         let task = cx.background_executor().spawn(async move {
             dirs.into_iter().map(|d| { let s = if d.join(crate::store::INTERNAL).exists() { Survey::Plain } else { fdl_core::shown::survey(&d) }; (d, s) }).collect::<Vec<_>>()
         });
@@ -77,7 +80,7 @@ impl Workspace {
                     let msg = crate::localized_format!("已打开「{}」：在原位置使用，没有复制", "Opened “{}”: used where it is, not copied", self.folder_name(&key));
                     self.show_toast(&msg, cx);
                 }
-                Err(e) => self.add_failed(d, e, window, cx),
+                Err(e) => self.add_failed(e, cx),
             }
         }
     }
@@ -95,32 +98,22 @@ impl Workspace {
         cx.notify();
     }
 
-    /// A folder that is already open, or inside one: shown there instead.
-    fn add_failed(&mut self, dir: &Path, e: AddError, window: &mut Window, cx: &mut Context<Self>) {
+    /// A folder that is already open: shown there instead.
+    fn add_failed(&mut self, e: AddError, cx: &mut Context<Self>) {
         match e {
             AddError::Open(key) => { self.folded_tops.remove(&key); cx.notify(); }
-            AddError::Inside(key) => {
-                self.folded_tops.remove(&key);
-                self.entries.set(self.store.list());
-                self.sort();
-                let found = self.entries.iter().find(|e| e.top == key && e.meta.folder.is_some() && self.store.folder_dir(Some(&e.id)).is_some_and(|p| p == dir)).map(|e| e.id.clone());
-                if let Some(id) = found { self.reveal_in_tree(&id); self.open_folder(&id, window, cx); }
-                self.show_toast(tr("这个文件夹已经在侧栏的文件夹里", "This folder is already inside a folder in the sidebar"), cx);
-            }
-            AddError::Holds(key) => {
-                let name = self.store.top_folders().into_iter().find(|r| r.0 == key).map(|r| r.1).unwrap_or_default();
-                self.show_toast_kind(ToastKind::Error, &crate::localized_format!("这个文件夹里有已经打开的「{}」，先把它从侧栏移除再打开", "This folder holds “{}”, which is already open; remove it from the sidebar first", name), cx);
-            }
+            AddError::TooBroad => self.show_toast_kind(ToastKind::Error, tr("请分别添加文稿、桌面等文件夹", "Add Documents, Desktop and other folders one at a time"), cx),
+            AddError::System => self.show_toast_kind(ToastKind::Error, tr("请添加存放笔记的文件夹", "Add the folder your notes are in"), cx),
             AddError::Other(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法添加文件夹：{}", "Could not add folder: {}", crate::settings::diagnostic(&e)), cx),
         }
     }
 
-    /// 从侧栏移除: the top-level folder leaves the sidebar; its folder stays as it is.
-    pub(crate) fn remove_folder(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+    /// What this window shows from top-level folder `key` closes, the open document saved
+    /// first; false while that save waits (`then` runs once it is done).
+    fn leave_folder(&mut self, key: &str, cx: &mut Context<Self>, then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static) -> bool {
         let inside = |w: &Self, id: &Option<String>| id.as_deref().is_some_and(|id| w.store.top_of(id).as_deref() == Some(key));
         if inside(self, &self.current) {
-            let retry = key.to_string();
-            if !self.save_before(cx, move |w, window, cx| w.remove_folder(&retry, window, cx)) { return; }
+            if !self.save_before(cx, then) { return false; }
             self.current = None;
             self.editor = None;
             self.editor_sub = None;
@@ -130,10 +123,26 @@ impl Workspace {
             self.folder_current = None;
             if self.view == View::Folder { self.view = View::Default; }
         }
+        cx.notify();
+        true
+    }
+
+    /// 从侧栏移除: the top-level folder leaves the sidebar; its folder stays as it is.
+    pub(crate) fn remove_folder(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let retry = key.to_string();
+        if !self.leave_folder(key, cx, move |w, window, cx| w.remove_folder(&retry, window, cx)) { return; }
         let _ = window;
         if let Err(e) = self.store.remove_folder(key) { self.show_toast_kind(ToastKind::Error, &crate::settings::diagnostic(&e.to_string()), cx); }
         cx.defer(crate::settings::top_switched);
         self.entries.set(self.store.list());
+        self.trash = self.store.list_trash();
+        self.sort();
+        cx.notify();
+    }
+
+    /// The rows again after top-level folders came or went outside this window.
+    fn folders_relisted(&mut self, entries: Vec<crate::store::Entry>, cx: &mut Context<Self>) {
+        self.entries.set(entries);
         self.trash = self.store.list_trash();
         self.sort();
         cx.notify();
@@ -182,6 +191,34 @@ impl Workspace {
     }
 
     /// Top-level folder `key` has a new name on disk: its row says so now.
+    /// Top-level folders taken off the sidebar or put back with a folder of another (deleted
+    /// through the one holding them, 撤销): every window's rows again; one showing a page or
+    /// folder of a top-level folder no longer open leaves it.
+    pub(crate) fn tops_changed(&mut self, cx: &mut Context<Self>) {
+        self.left_tops(cx);
+        for peer in Self::other_workspaces(cx) { peer.update(cx, |w, cx| w.left_tops(cx)); }
+        cx.defer(crate::settings::top_switched);
+    }
+
+    fn left_tops(&mut self, cx: &mut Context<Self>) {
+        let gone = |w: &Self, id: &Option<String>| id.as_deref().is_some_and(|id| w.store.top_of(id).is_none_or(|k| w.store.top_path(&k).is_none()));
+        if gone(self, &self.current) { self.current = None; self.editor = None; self.editor_sub = None; self.unsaved = false; self.save_task = None; if self.view == View::Doc { self.view = View::Default; } }
+        if gone(self, &self.folder_current) { self.folder_current = None; if self.view == View::Folder { self.view = View::Default; } }
+        self.entries.set(self.store.listed_rows());
+        self.trash = self.store.list_trash();
+        self.sort();
+        cx.notify();
+    }
+
+    /// Top-level folders whose own folder was renamed or moved through the one holding them
+    /// (`SharedStore::follow`): every window shows them by their new name.
+    pub(crate) fn tops_moved(&mut self, cx: &mut Context<Self>) {
+        for k in self.store.take_moved() {
+            self.top_renamed(&k, cx);
+            for peer in Self::other_workspaces(cx) { peer.update(cx, |w, cx| w.top_renamed(&k, cx)); }
+        }
+    }
+
     fn top_renamed(&mut self, key: &str, cx: &mut Context<Self>) {
         let row = crate::shared_store::top_row(key);
         if let Some(name) = self.store.top_folders().into_iter().find(|r| r.0 == key).map(|r| r.1) && let Some(e) = self.entries.edit().iter_mut().find(|e| e.id == row) {
@@ -201,7 +238,7 @@ impl Workspace {
         let (name, path, missing) = open.map(|r| (r.1, r.2, r.3.is_some())).unwrap_or_default();
         let (doc, folder, rename, k1, k2, k3, top_row) = (m.id.clone(), m.id.clone(), m.id.clone(), key.to_string(), key.to_string(), key.to_string(), m.id.clone());
         // from its page's header "…": 批量管理 over that page, as its header's own button did
-        let page = m.from.as_deref() == Some(crate::home::header::TB_MORE);
+        let page = m.from.as_deref() == Some(crate::folder_page::header::TB_MORE);
         let mut menu = crate::design::Popover::new("top-row-menu").menu().w(px(crate::design::menu_w::SM))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.row_menu = None; cx.notify(); }));
         if missing {
@@ -223,7 +260,7 @@ impl Workspace {
                 .child(row("rr-batch", "batch", crate::settings::text("批量管理")).on_click(cx.listener(move |w, _, _, cx| {
                     w.row_menu = None;
                     w.batch = Some(vec![]);
-                    w.home.view_menu = false;
+                    w.folder_page.view_menu = false;
                     if page { w.batch_top = None } else { w.batch_top = Some(k3.clone()); w.expanded.insert(top_row.clone()); }
                     cx.notify();
                 })))
@@ -242,7 +279,7 @@ impl Workspace {
     }
 
     /// The sidebar with no top-level folder open: a way to open one (a new one is made in the open panel).
-    pub(crate) fn empty_home(&self, cx: &mut Context<Self>) -> Div {
+    pub(crate) fn empty_sidebar(&self, cx: &mut Context<Self>) -> Div {
         let button = |id: &'static str, label: &'static str| crate::design::MenuItem::new(id).label(label);
         div().flex().flex_col().gap(px(2.)).px(px(4.)).pt(px(12.))
             .child(div().px(px(8.)).pb(px(6.)).text_size(px(crate::theme::ui_font())).line_height(px(crate::theme::ui_font() + 7.)).text_color(Theme::text_caption())
@@ -261,7 +298,7 @@ impl Workspace {
 
     /// What the top of the tree is called where nothing names a top-level folder: the
     /// one top-level folder's folder name, else the top-level folder in front's.
-    pub(crate) fn home_name(&self) -> String {
+    pub(crate) fn front_top_name(&self) -> String {
         let tops = self.store.top_folders();
         let key = if tops.len() == 1 { Some(tops[0].0.clone()) } else { self.store.active_top() };
         key.and_then(|k| tops.into_iter().find(|r| r.0 == k)).map(|r| r.1).unwrap_or_else(|| tr("我的文档", "My documents").to_string())
@@ -272,6 +309,47 @@ impl Workspace {
         self.store.top_folders().into_iter().find(|r| r.0 == key).map(|r| r.1).unwrap_or_default()
     }
 
+}
+
+/// The sidebar follows `folders.json`: a top-level folder another program (`quiet folders
+/// add` / `remove`) put on the list or took off it comes into every window or leaves it
+/// within a couple of seconds, as if added or removed here. The list is read off the main
+/// thread; a test run's fixed list (`QUIET_MD_HOME`) follows nothing.
+pub(crate) fn follow_folder_list(cx: &mut App) {
+    if cfg!(target_family = "wasm") { return }
+    cx.spawn(async move |cx| loop {
+        cx.background_executor().timer(std::time::Duration::from_secs(2)).await;
+        let Some(now) = cx.background_executor().spawn(async { fdl_core::top_folders::TopFolders::listed_now() }).await else { continue };
+        cx.update(|cx| {
+            let mut store = cx.global::<crate::shared_store::SharedStore>().clone();
+            if store.file_task_busy() || store.loading() { return }
+            let (added, removed) = store.changed_elsewhere(&now);
+            if added.is_empty() && removed.is_empty() { return }
+            let windows: Vec<WindowHandle<Workspace>> = cx.windows().into_iter().filter_map(|w| w.downcast::<Workspace>()).collect();
+            crate::logging::write(&format!("folders.json changed elsewhere: {} added, {} removed", added.len(), removed.len()));
+            // Added first: taking one off writes the list, which must still hold them.
+            let added = store.adopt_folders(added);
+            let mut gone = false;
+            for k in &removed {
+                // Every window lets go of what it shows from there (saved first; the next look retries meanwhile).
+                let left: Vec<bool> = windows.iter().map(|h| h.update(cx, |w, _, cx| w.leave_folder(k, cx, |_, _, _| {})).unwrap_or(true)).collect();
+                if !left.iter().all(|l| *l) { crate::logging::write(&format!("folders.json: {k} waits for a window ({left:?})")); continue }
+                if let Err(e) = store.remove_folder(k) { crate::logging::write(&format!("folders.json: could not remove {k}: {e:#}")); }
+                gone = true;
+            }
+            if gone {
+                let entries = store.list();
+                for h in &windows { let _ = h.update(cx, |w, _, cx| w.folders_relisted(entries.clone(), cx)); }
+            }
+            // Listed as a folder added here is: at once when quick, else every window takes it when done.
+            for k in added {
+                if let Some(entries) = crate::loading::begin_added(&mut store, &k, cx) {
+                    for h in &windows { let _ = h.update(cx, |w, _, cx| w.folders_relisted(entries.clone(), cx)); }
+                }
+            }
+            crate::settings::top_switched(cx);
+        });
+    }).detach();
 }
 
 #[cfg(test)]

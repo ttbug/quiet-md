@@ -179,7 +179,7 @@ fn assets_above(blocks: &mut [Block], dir: &Path, root: Option<&Path>) {
 }
 
 /// One scanned folder as a library folder under `parent`; its id. Needs no
-/// window, so 欢迎页 can import on a background thread before the main window.
+/// window, so it can run on a background thread.
 pub(crate) fn import_tree(store: &mut crate::store::Store, t: &Scanned, parent: Option<&str>, failed: &mut usize) -> Option<String> {
     tree(store, t, &t.dir, parent, failed)
 }
@@ -709,7 +709,7 @@ impl Workspace {
     pub(crate) fn place_name(&self, parent: Option<&str>) -> String {
         match parent {
             Some(p) => self.entries.iter().find(|e| e.id == p).map(|e| if crate::shared_store::top_of_row(&e.id).is_some() { self.folder_name(&e.top) } else { crate::settings::display_title(&e.title) }).unwrap_or_default(),
-            None => self.home_name(),
+            None => self.front_top_name(),
         }
     }
 
@@ -931,7 +931,7 @@ impl Workspace {
             // 导入 copies: say what went where, and that the original stayed as it was.
             let (name, place) = (crate::settings::display_title(&e.title), self.place_name(e.meta.parent.as_deref()));
             self.show_toast(&crate::localized_format!("已复制「{}」到「{}」，原文件夹未改动", "Copied “{}” into “{}”; the original folder is untouched", name, place), cx);
-        } else if self.toast.as_ref().is_some_and(|t| matches!(t.0, ToastKind::Info) && t.1.as_ref() == crate::settings::tr("正在导入…", "Importing…")) { self.toast = None; }
+        } else if self.toast.as_ref().is_some_and(|t| matches!(t.kind, ToastKind::Info) && t.msg.as_ref() == crate::settings::tr("正在导入…", "Importing…")) { self.toast = None; }
         cx.notify();
     }
 
@@ -1210,7 +1210,7 @@ mod tests {
 
     #[test]
     fn a_folder_import_keeps_each_files_times() {
-        // 导入文件夹, a dropped folder, and 欢迎页's Obsidian / Typora import (import_tree).
+        // 导入文件夹, a dropped folder, and 从其他应用导入's Obsidian / Typora import (import_tree).
         let (tmp, from, mut store) = places("folder");
         aged(&from.join("vault/a.md"), "a", THEN);
         aged(&from.join("vault/sub/b.md"), "b", THEN + 60);
