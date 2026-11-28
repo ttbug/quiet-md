@@ -1,7 +1,8 @@
 """数据表's 笔记 column, end to end, in a scratch library.
 
-A table file of its own gets a 笔记 column; an empty cell makes a note
-(titled as its record, in 「书单 · 笔记」 beside the table, which stays where it is) and opens it in 记录详情, where it is written in and
+A table file of its own gets a 笔记 column; an empty cell opened shows the
+picker and makes nothing until its 新建笔记 is picked (Esc or a click away
+leave no file; F2 then Enter makes one); 新建笔记 makes a note (titled as its record, in 「书单 · 笔记」 beside the table, which stays where it is) and opens it in 记录详情, where it is written in and
 saved; undo and redo take the note to the 回收站 and back; deleting the
 record asks about its note and undo restores both; a cell is pointed at a
 note there already is; a new title renames the note's file and the cell
@@ -40,10 +41,6 @@ db.commit()
 db.close()
 
 # where things are in a 1300×850 window (light theme, Chinese); the sheet starts at the header's foot (48)
-ADD_FIELD = "828 103"            # 「+」: a 文本 column at once, its name ready to type
-NEW_TYPE = "845 103"            # the new column's type, after its name: its settings
-TYPE_BOX = "1002 249"
-TYPE_NOTE = "897 551"           # 笔记, the type list scrolled to its end
 NOTE_1, NOTE_2 = "845 141", "845 177"   # the 笔记 cells of rows 1 and 2
 PANEL_CLOSE = "1265 116"
 NOTE_BODY, NOTE_TITLE = "885 573", "830 215"
@@ -53,27 +50,11 @@ UNDO = "720 69"                 # the table's own ↶ (⌘Z after a rename in th
 OPEN = f"""row 书单
 wait 1200
 """
-ADD_COLUMN = f"""click {ADD_FIELD}
-wait 500
-type 读书笔记
-key enter
-wait 300
-click {NEW_TYPE}
-wait 500
-click {TYPE_BOX}
-wait 300
-move 1002 404
-wheel 1002 404 600
-wait 100
-wheel 1002 404 600
-wait 300
-shot types
-click {TYPE_NOTE}
-wait 300
-key enter
-wait 500
-"""
 WRITE = f"""dclick {NOTE_1}
+wait 600
+move 1200 800
+shot pick-new
+row 新建笔记
 wait 1200
 move 1200 800
 shot note-new
@@ -117,8 +98,38 @@ def trashed(lib):
     return sorted(p.read_text().split("</title>")[0].removeprefix("<title>") for p in (lib / ".quiet" / "trash").rglob("*.xml"))
 
 
+# the 笔记 column, added with the CLI (`quiet table field add`) in the library as the app first
+# writes it (the field settings' type list doesn't scroll to 笔记 under a scripted wheel)
+source = run("column", OPEN, source)
+cli = Path(os.environ.get("FDL_BIN") or here.parent.parent / "target" / "release" / "quiet_md").with_name("quiet")
+subprocess.run([str(cli), "table", "field", "add", "书单", "读书笔记", "--type", "note", "--after", "作者"], env=dict(os.environ, QUIET_MD_HOME=str(source)), check=True, capture_output=True)
+
+# 0. an empty cell opened: the picker, and nothing made by Esc or a click away; F2 then Enter makes one
+stray = run("stray", OPEN + f"""dclick {NOTE_1}
+wait 600
+key escape
+wait 300
+dclick {NOTE_2}
+wait 600
+click 400 500
+wait 600
+move 1200 800
+shot stray
+""", source)
+assert cells(stray) == [("三体", None), ("球状闪电", None), (None, None)], cells(stray)
+assert notes(stray) == ["已有的笔记.xml"] and not (stray / "书单 · 笔记").exists(), notes(stray)
+entered = run("enter", OPEN + f"""click {NOTE_2}
+wait 200
+key f2
+wait 600
+key enter
+wait 1500
+""", source)
+assert cells(entered) == [("三体", None), ("球状闪电", "书单 · 笔记/球状闪电.xml"), (None, None)], cells(entered)
+assert notes(entered) == ["书单 · 笔记/球状闪电.xml", "已有的笔记.xml"], notes(entered)
+
 # 1. a column, a note made for an empty cell in 「书单 · 笔记」 beside the table, written in, saved
-lib = run("write", OPEN + ADD_COLUMN + WRITE, source)
+lib = run("write", OPEN + WRITE, source)
 assert cells(lib) == [("三体", "书单 · 笔记/三体.xml"), ("球状闪电", None), (None, None)], cells(lib)
 assert notes(lib) == ["书单 · 笔记/三体.xml", "已有的笔记.xml"], notes(lib)
 assert (lib / "书单 · 笔记" / "三体.xml").read_text() == "<title>三体</title>\n<p>黑暗森林法则</p>\n<p>第二段 </p>\n", (lib / "书单 · 笔记" / "三体.xml").read_text()
@@ -138,13 +149,13 @@ key escape
 assert cells(again) == cells(lib) and notes(again) == notes(lib)
 
 # 3. undo empties the cell and the note goes to the 回收站; redo brings both back
-undone = run("undo", OPEN + ADD_COLUMN + WRITE + """click 400 500
+undone = run("undo", OPEN + WRITE + """click 400 500
 key cmd-z
 wait 900
 """, source)
 assert cells(undone)[0] == ("三体", None), cells(undone)
 assert notes(undone) == ["已有的笔记.xml"] and trashed(undone) == ["三体"], (notes(undone), trashed(undone))
-redone = run("redo", OPEN + ADD_COLUMN + WRITE + """click 400 500
+redone = run("redo", OPEN + WRITE + """click 400 500
 key cmd-z
 wait 900
 key cmd-shift-z
@@ -164,16 +175,16 @@ shot ask
 click 797 464
 wait 900
 """
-gone = run("delete", OPEN + ADD_COLUMN + WRITE + DELETE, source)
+gone = run("delete", OPEN + WRITE + DELETE, source)
 assert [r[0] for r in cells(gone)] == ["球状闪电", None], cells(gone)
 assert notes(gone) == ["已有的笔记.xml"] and trashed(gone) == ["三体"], (notes(gone), trashed(gone))
-back = run("undelete", OPEN + ADD_COLUMN + WRITE + DELETE + """key cmd-z
+back = run("undelete", OPEN + WRITE + DELETE + """key cmd-z
 wait 1200
 """, source)
 assert cells(back)[0] == ("三体", "书单 · 笔记/三体.xml") and notes(back) == ["书单 · 笔记/三体.xml", "已有的笔记.xml"] and trashed(back) == [], (cells(back), notes(back), trashed(back))
 
 # 5. a cell pointed at a note there already is; a new title renames the file and the cell follows; 整页打开
-more = run("point", OPEN + ADD_COLUMN + WRITE + f"""click {NOTE_2}
+more = run("point", OPEN + WRITE + f"""click {NOTE_2}
 wait 200
 rclick {NOTE_2}
 wait 400
@@ -206,7 +217,7 @@ assert (more / "已有的笔记.xml").read_text() == "<title>已有的笔记</ti
 # 6. the note renamed in the sidebar while the table is open: the cell follows, and the undo of another
 #    edit (the table's own ↶), then of the cell following, leaves the note where it is
 # 「书单 · 笔记」's icon (its fold on hover) is the first row under 「lib」; its 三体 and the menu's 重命名 found by name
-kept = run("rename", OPEN + ADD_COLUMN + WRITE + f"""hoverrow 书单 · 笔记
+kept = run("rename", OPEN + WRITE + f"""hoverrow 书单 · 笔记
 wait 700
 click 30 90
 wait 1000
@@ -240,7 +251,7 @@ with sqlite3.connect(kept / "书单.sqlite") as c:
 shots = os.environ.get("TABLE_NOTE_SHOTS")
 if shots:
     Path(shots).mkdir(parents=True, exist_ok=True)
-    for case in ("write", "reopen", "delete", "point", "rename"):
+    for case in ("stray", "write", "reopen", "delete", "point", "rename"):
         for png in (work / case).glob("*.png"):
             if png.name != "end.png": shutil.copy(png, Path(shots) / f"{case}-{png.name}")
 print("table notes ok:", work)

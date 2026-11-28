@@ -104,10 +104,13 @@ impl Math {
                     let _ = line.paint(point(origin.x + px(*x), origin.y + px(*y) - line.ascent), lh, TextAlign::Left, None, window, cx);
                 }
                 Item::Rect { x, y, w, h, color } => {
-                    window.paint_quad(fill(
-                        Bounds::new(point(origin.x + px(*x), origin.y + px(*y)), size(px(*w), px(*h))),
-                        *color,
-                    ));
+                    // a rule (a fraction's bar, 0.04em: under a pixel) lies on whole device pixels, at least one:
+                    // a quad fills only the pixels whose centres it covers, so a thinner one or one between two
+                    // rows vanished, by where the equation sat (`\frac{N}{2}` with no bar, `\frac{n}{2}` with one)
+                    let s = window.scale_factor();
+                    let (x0, x1) = on_pixels(f32::from(origin.x) + x, *w, s);
+                    let (y0, y1) = on_pixels(f32::from(origin.y) + y, *h, s);
+                    window.paint_quad(fill(Bounds::new(point(px(x0), px(y0)), size(px(x1 - x0), px(y1 - y0))), *color));
                 }
                 Item::Svg { x, y, w, h, path, color } => {
                     let b = Bounds::new(point(origin.x + px(*x), origin.y + px(*y)), size(px(*w), px(*h)));
@@ -116,6 +119,14 @@ impl Math {
             }
         }
     }
+}
+
+/// `[at, at + len)` in px moved onto device pixels (`scale` of them to a px): its edges rounded to
+/// the nearest, at least one pixel long, as browsers lay borders.
+fn on_pixels(at: f32, len: f32, scale: f32) -> (f32, f32) {
+    let a = (at * scale).round();
+    let b = ((at + len) * scale).round().max(a + 1.);
+    (a / scale, b / scale)
 }
 
 type Key = (String, bool, u32, u32, u32);
@@ -1083,7 +1094,7 @@ impl Engine<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_block, parse, render_html};
+    use super::{is_block, on_pixels, parse, render_html, snap, FONT_PX};
 
     #[test]
     fn block_detection() {
@@ -1126,5 +1137,33 @@ mod tests {
         assert!(root.find("katex-html").is_some());
         assert!(root.find("frac-line").is_some());
         assert!(render_html("\\frac{a", false).is_none());
+    }
+
+    /// A fraction's bar (0.04em, half a pixel once snapped) is drawn whole device pixels thick
+    /// wherever the equation sits: the numerator's height (`N`, `N^2`, `\sqrt{N}`, a fraction in it)
+    /// moves it by any part of a pixel, and none of those may lose it.
+    #[test]
+    fn a_fraction_bar_is_always_on_a_pixel() {
+        for src in ["\\frac{n}{2}", "\\frac{N}{2}", "\\frac{N^2}{2}", "\\frac{\\sqrt{N}}{2}", "\\frac{\\frac{N}{2}}{3}", "\\frac{A_1}{B}"] {
+            let root = parse(&render_html(src, false).unwrap()).unwrap();
+            let bar = root.find("frac-line").unwrap_or_else(|| panic!("{src}: no bar"));
+            assert_eq!(bar.style("border-bottom-width"), Some("0.04em"), "{src}");
+        }
+        let h = snap(0.04 * FONT_PX);
+        assert_eq!(h, 0.5);
+        for scale in [1., 1.5, 2., 3.] {
+            for i in 0..400 {
+                let y = 30. + i as f32 / 97.;
+                let (a, b) = on_pixels(y, h, scale);
+                let (da, db) = (a * scale, b * scale);
+                assert!((da - da.round()).abs() < 1e-3 && (db - db.round()).abs() < 1e-3, "{y} at {scale}x: {da}..{db}");
+                assert!(db - da >= 0.999, "{y} at {scale}x: {da}..{db}");
+                // never more than half a device pixel from where it was laid out
+                assert!((da - y * scale).abs() <= 0.5 + 1e-3, "{y} at {scale}x");
+            }
+        }
+        // a wider rect keeps its length to within a device pixel
+        let (a, b) = on_pixels(10.3, 7.4, 2.);
+        assert!(((b - a) - 7.4).abs() <= 0.5);
     }
 }

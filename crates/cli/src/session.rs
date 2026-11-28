@@ -75,6 +75,8 @@ pub(crate) enum Pending {
     Duplicate { id: String, title: String },
     Untrash { top: String, id: String, title: String },
     Import { top: String, path: PathBuf, folder: Option<String> },
+    /// 导入最新的开始指南: this build's guides as a new folder at `top`'s top.
+    ImportGuides { top: String, chinese: bool },
     RestoreTable { id: String, version: String },
 }
 
@@ -144,7 +146,11 @@ impl Session {
         let tops = match library {
             Some(dir) => {
                 let dir = PathBuf::from(dir);
-                if !Store::is_library(&dir) {
+                // A `.quiet` folder without its format file is a library Quiet.md
+                // began and never wrote into (an earlier version stopped at its
+                // first-launch pages): the app opens it, so does the CLI. A plain
+                // folder is no library, and the CLI never makes one of it.
+                if !Store::is_library(&dir) && !dir.join(fdl_core::store::INTERNAL).is_dir() {
                     return Err(fail("no_library", format!("{} is not a Quiet.md library", dir.display())).hint("pass a folder Quiet.md has open, or leave out --library to use every folder it has open"));
                 }
                 if Store::flat_at(&dir) {
@@ -528,6 +534,7 @@ impl Session {
             "trash_list" => self.trash_list(),
             "untrash" => self.untrash(a),
             "import" => self.import(a),
+            "guide_import" => self.guide_import(a),
             "table_add" => self.table_add(a),
             "table_update" => self.table_update(a),
             "table_delete" => self.table_delete(a),
@@ -846,7 +853,7 @@ impl Session {
                 (Some(c), _) => c.to_string(),
                 (None, Some(Value::Array(l))) => l.iter().filter_map(Value::as_str).map(|f| if f.contains([',', '"']) { format!("{:?}", f) } else { f.to_string() }).collect::<Vec<_>>().join(",") + "\n",
                 (None, Some(Value::String(f))) => format!("{f}\n"),
-                _ => return Err(fail("bad_args", "a new 数据表 needs its columns: csv (with a header row) or fields")),
+                _ => return Err(fail("bad_args", "a new 数据库 needs its columns: csv (with a header row) or fields")),
             };
             self.pending.push(Pending::CreateTable { top, title, folder, csv });
             return Ok(json!({ "path": path, "kind": "table", "new": true }));
@@ -1017,7 +1024,9 @@ impl Session {
                 }
                 Pending::Pin { id, on } => {
                     let path = self.entry_by_id(&id).map(|e| self.label(e)).unwrap_or_default();
-                    self.lib_of(&id)?.set_pinned(&id, on).map_err(|e| fail("io", format!("{e:#}")))?;
+                    // on top of 置顶, as the app pins (`fdl_core::pins`)
+                    let pin = on.then(|| Some(fdl_core::pins::top_key(&fdl_core::pins::sorted(&self.entries))));
+                    self.lib_of(&id)?.set_pin(&id, pin).map_err(|e| fail("io", format!("{e:#}")))?;
                     self.refresh();
                     report.push(json!({ "path": path, "action": if on { "pinned" } else { "unpinned" } }));
                 }
@@ -1041,6 +1050,12 @@ impl Session {
                     let rel = self.entry_by_id(&id).map(|e| e.meta.rel.clone()).unwrap_or_default();
                     report.push(json!({ "path": self.full_path(&top, &rel), "action": "imported", "source": path.display().to_string() }));
                 }
+                Pending::ImportGuides { top, chinese } => {
+                    let files: Vec<_> = fdl_core::guides::files(chinese).into_iter().map(|(n, b)| (n, std::borrow::Cow::Borrowed(b))).collect();
+                    let id = self.lib(&top)?.import_guides(&files, fdl_core::guides::folder_name(chinese)).map_err(|e| fail("io", format!("{e:#}")))?;
+                    self.refresh();
+                    report.push(json!({ "path": self.entry_by_id(&id).map(|e| self.label(e)).unwrap_or_default(), "action": "imported the guide" }));
+                }
                 Pending::RestoreTable { id, version } => {
                     self.lib_of(&id)?.restore_version(&id, &version).map_err(|e| fail("io", format!("{e:#}")))?;
                     let path = self.entry_by_id(&id).map(|e| e.meta.rel.clone()).unwrap_or_default();
@@ -1063,7 +1078,7 @@ impl Session {
         let rel = |id: &str| self.entry_by_id(id).map(|e| self.label(e)).unwrap_or_default();
         Some(match p {
             Pending::Create { .. } => return None,
-            Pending::CreateTable { top, title, folder, .. } => json!({ "path": self.full_path(top, &join(folder.as_deref().unwrap_or(""), title)), "action": "would create 数据表" }),
+            Pending::CreateTable { top, title, folder, .. } => json!({ "path": self.full_path(top, &join(folder.as_deref().unwrap_or(""), title)), "action": "would create 数据库" }),
             Pending::Mkdir { top, name, folder } => json!({ "path": self.full_path(top, &join(&self.folder_rel(folder.as_deref()), name)), "action": "would create folder" }),
             Pending::Rename { id, title } => json!({ "path": rel(id), "action": "would rename", "to": title }),
             Pending::Move { id, folder } => json!({ "path": rel(id), "action": "would move", "to": self.entry_by_id(id).map(|e| self.full_path(&e.top, &self.folder_rel(folder.as_deref()))).unwrap_or_default() }),
@@ -1072,6 +1087,7 @@ impl Session {
             Pending::Pin { id, on } => json!({ "path": rel(id), "action": if *on { "would pin" } else { "would unpin" } }),
             Pending::Duplicate { id, title } => json!({ "path": rel(id), "action": "would duplicate", "to": title }),
             Pending::Import { top, path, folder } => json!({ "path": path.display().to_string(), "action": "would import", "to": self.full_path(top, folder.as_deref().unwrap_or("")) }),
+            Pending::ImportGuides { top, chinese } => json!({ "path": self.full_path(top, fdl_core::guides::folder_name(*chinese)), "action": "would import the guide" }),
             Pending::RestoreTable { id, version } => json!({ "path": rel(id), "action": "would restore version", "to": version }),
         })
     }

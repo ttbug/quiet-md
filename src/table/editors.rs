@@ -55,6 +55,7 @@ pub(crate) fn aux_event(v: &mut TableView, ev: TextFieldEvent, window: &mut Wind
             back_to_options(v, window, cx);
         }
         (Some((_, Popup::Select { editing: Some(_), .. })), TextFieldEvent::Cancel) => back_to_options(v, window, cx),
+        (Some((_, Popup::NotePick { rec, field, new })), TextFieldEvent::Submit) => { let (cell, new) = ((*rec, *field), *new); super::notes::pick_first(v, cell, new, window, cx); }
         (Some(_), TextFieldEvent::Cancel) => v.close_popup(window, cx),
         _ => cx.notify(),
     }

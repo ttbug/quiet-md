@@ -177,7 +177,7 @@ pub(crate) fn popup(v: &TableView, base: &Base, t: &Table, view: &View, _window:
         Popup::Date { rec, field, year, month } => editors::date_popup(v, t, *rec, *field, *year, *month, cx),
         Popup::Links { rec, field } => editors::links_popup(v, base, t, *rec, *field, cx),
         Popup::Files { rec, field } => editors::files_popup(v, t, *rec, *field, cx),
-        Popup::NotePick { rec, field } => notes::pick_popup(v, *rec, *field, cx),
+        Popup::NotePick { rec, field, new } => notes::pick_popup(v, *rec, *field, *new, cx),
         Popup::Panel(panel) => panels::render(v, base, t, view, panel, cx),
         Popup::More => more_menu(v, cx),
     };
@@ -276,7 +276,7 @@ fn cell_menu(v: &TableView, t: &Table, view: &View, rec: RecId, cx: &Context<Tab
         // on a 笔记 cell: point it at a note the library has
         .when_some(v.sel.map(|s| s.head).filter(|c| c.0 == rec && t.field(c.1).is_some_and(|f| f.ty == FieldType::Note) && notes::allowed(v, cx)), |d, cell| {
             let at = v.popup.as_ref().map(|p| p.0).unwrap_or_default();
-            d.child(menu_item("tb-cm-note", "link", label("指向已有笔记"), false).on_click(cx.listener(move |v, _, window, cx| notes::open_pick(v, cell, at, window, cx))))
+            d.child(menu_item("tb-cm-note", "link", label("指向已有笔记"), false).on_click(cx.listener(move |v, _, window, cx| notes::open_pick(v, cell, at, false, window, cx))))
         })
         .child(menu_item("tb-cm-copy", "copy", label("复制"), false).on_click(cx.listener(|v, _, window, cx| { keys::copy(v, false, cx); v.close_popup(window, cx); })))
         .child(menu_item("tb-cm-paste", "file-text", label("粘贴"), false).on_click(cx.listener(|v, _, window, cx| { keys::paste(v, cx); v.close_popup(window, cx); })))

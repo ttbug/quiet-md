@@ -217,24 +217,33 @@ pub(crate) fn typing(v: &TableView, window: &Window, cx: &App) -> bool {
     v.notes.open.as_ref().is_some_and(|o| o.editor.read(cx).focus.contains_focused(window, cx))
 }
 
-/// A 笔记 cell was opened (a click on the selected cell, a double click, Enter, its row in 记录详情):
-/// its note shows in 记录详情, made first if the cell is empty.
+/// A 笔记 cell was opened (a click on the selected cell, a double click, F2, its row in 记录详情):
+/// its note shows in 记录详情. An empty one opens the picker instead, 新建笔记 its first row (as
+/// 飞书's 关联文档 cell does): nothing is made until that is picked, so a stray double click leaves no file.
 pub(crate) fn open_cell(v: &mut TableView, cell: CellId, at: Point<Pixels>, window: &mut Window, cx: &mut Context<TableView>) {
     refresh(v, cx);
-    // a table that got its 笔记 column before tables had folders moves into one now
-    let Some(h) = ensure_folder(v, cx) else { return };
-    let got = v.state.read(cx).doc.base.table(v.table).and_then(|t| Some((t.record(cell.0)?.get(cell.1).clone(), t.title(t.record(cell.0)?))));
-    let Some((val, title)) = got else { return };
-    let id = match &val {
-        Value::Text(href) => info(v, href).map(|n| n.id.clone()),
-        _ => make(v, &h, cell, &title, cx),
-    };
+    if v.notes.place.is_none() { return }
+    let Some(val) = v.state.read(cx).doc.base.table(v.table).and_then(|t| Some(t.record(cell.0)?.get(cell.1).clone())) else { return };
+    let Value::Text(href) = &val else { return open_pick(v, cell, at, true, window, cx) };
+    let id = info(v, href).map(|n| n.id.clone());
     record::open(v, cell.0, window, cx);
     match id {
         Some(id) => show(v, cell, &id, window, cx),
         // 找不到笔记: point the cell at another
-        None => { close(v, cx); open_pick(v, cell, at, window, cx); }
+        None => { close(v, cx); open_pick(v, cell, at, false, window, cx); }
     }
+}
+
+/// 新建笔记 picked for an empty cell: a note titled as its record, opened in 记录详情. Only a new
+/// note needs the notes folder: a cell pointing at a document elsewhere makes none.
+fn create(v: &mut TableView, cell: CellId, window: &mut Window, cx: &mut Context<TableView>) {
+    v.close_popup(window, cx);
+    let got = v.state.read(cx).doc.base.table(v.table).and_then(|t| { let r = t.record(cell.0)?; matches!(r.get(cell.1), Value::Empty).then(|| t.title(r)) });
+    let Some(title) = got else { return };
+    let Some(h) = ensure_folder(v, cx) else { return };
+    let Some(id) = make(v, &h, cell, &title, cx) else { return };
+    record::open(v, cell.0, window, cx);
+    show(v, cell, &id, window, cx);
 }
 
 /// A new note beside the table, titled as the record is, for an empty cell. Undo empties the cell
@@ -351,42 +360,79 @@ fn open_full(v: &mut TableView, id: String, cx: &mut Context<TableView>) {
 
 // ---- 指向已有笔记 ----
 
-pub(crate) fn open_pick(v: &mut TableView, cell: CellId, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<TableView>) {
+pub(crate) fn open_pick(v: &mut TableView, cell: CellId, pos: Point<Pixels>, new: bool, window: &mut Window, cx: &mut Context<TableView>) {
     refresh(v, cx);
     v.aux.update(cx, |t, cx| { t.size = text_sm(); t.line_height = 20.; t.set_placeholder(label("搜索笔记"), cx); t.set_text("", cx); });
     window.focus(&v.aux.focus_handle(cx), cx);
     v.rename = None;
-    v.open_popup(pos, Popup::NotePick { rec: cell.0, field: cell.1 }, cx);
+    v.open_popup(pos, Popup::NotePick { rec: cell.0, field: cell.1, new }, cx);
 }
 
-/// The library's documents, narrowed by what is typed; a click points the cell at one.
-pub(crate) fn pick_popup(v: &TableView, rec: RecId, fid: FieldId, cx: &Context<TableView>) -> AnyElement {
-    let query = v.aux.read(cx).text.trim().to_lowercase();
-    let mut notes: Vec<(&String, &NoteInfo)> = v.notes.index.iter().filter(|(_, n)| query.is_empty() || n.title.to_lowercase().contains(&query)).collect();
+/// A row of the picker: 新建笔记, or a note by its path from the library's top.
+#[derive(Clone, PartialEq, Debug)]
+enum Choice { New, Note(String) }
+
+/// The picker's rows for what is typed: 新建笔记 first when an empty cell opened it (`new`), then the
+/// notes whose titles have it, by title.
+fn choices(index: &HashMap<String, NoteInfo>, query: &str, new: bool) -> Vec<Choice> {
+    let query = query.trim().to_lowercase();
+    let mut notes: Vec<(&String, &NoteInfo)> = index.iter().filter(|(_, n)| query.is_empty() || n.title.to_lowercase().contains(&query)).collect();
     notes.sort_by(|a, b| field::text_cmp(&a.1.title, &b.1.title).then(a.0.cmp(b.0)));
+    new.then_some(Choice::New).into_iter().chain(notes.into_iter().take(200).map(|(rel, _)| Choice::Note(rel.clone()))).collect()
+}
+
+/// The row Enter takes (marked in the list): with something typed, the first note found; with nothing
+/// typed, 新建笔记 when it is there (Enter twice on an empty cell makes one; Esc or a click away, nothing).
+fn first<'a>(rows: &'a [Choice], query: &str) -> Option<&'a Choice> {
+    let typed = !query.trim().is_empty();
+    rows.iter().find(|c| typed == matches!(c, Choice::Note(_)))
+}
+
+fn take(v: &mut TableView, cell: CellId, c: Choice, window: &mut Window, cx: &mut Context<TableView>) {
+    let rel = match c { Choice::New => return create(v, cell, window, cx), Choice::Note(rel) => rel };
+    let (Some(h), Some(id)) = (v.notes.place.clone(), v.notes.index.get(&rel).map(|n| n.id.clone())) else { return };
+    let tid = v.table;
+    v.edit(cx, |d| d.set_cells(tid, vec![(cell.0, cell.1, Value::Text(field::note_href(&h.rel, &rel)))]));
+    v.notes.ids.insert(cell, id.clone());
+    v.close_popup(window, cx);
+    if v.expanded == Some(cell.0) { show(v, cell, &id, window, cx); }
+}
+
+/// Enter in the picker's search box.
+pub(crate) fn pick_first(v: &mut TableView, cell: CellId, new: bool, window: &mut Window, cx: &mut Context<TableView>) {
+    let query = v.aux.read(cx).text.clone();
+    let rows = choices(&v.notes.index, &query, new);
+    if let Some(c) = first(&rows, &query).cloned() { take(v, cell, c, window, cx); }
+}
+
+/// The library's documents, narrowed by what is typed; a click points the cell at one. Opened from an
+/// empty cell, 新建笔记 heads the list.
+pub(crate) fn pick_popup(v: &TableView, rec: RecId, fid: FieldId, new: bool, cx: &Context<TableView>) -> AnyElement {
+    let query = v.aux.read(cx).text.clone();
+    let rows = choices(&v.notes.index, &query, new);
+    let hit = first(&rows, &query).cloned();
     let mut list = crate::design::scroll::make_room(div().id("tb-note-list").max_h(px(320.)).overflow_y_scroll().track_scroll(&crate::design::scroll::handle("tb-note-list")).flex().flex_col(), "tb-note-list", crate::design::menu::PAD);
-    let none = notes.is_empty();
-    for (i, (rel, n)) in notes.into_iter().take(200).enumerate() {
-        let (rel, id) = (rel.clone(), n.id.clone());
-        // which folder it is in, for notes of one name
-        let place = rel.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
-        list = list.child(list_row(("tb-note", i))
-            .child(icon("doc", 14., Theme::icon()))
-            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(title_of(n))))
-            .when(!place.is_empty(), |d| d.child(div().flex_none().max_w(px(120.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(12.)).text_color(Theme::text_placeholder()).child(ui_text(place.clone()))))
-            .on_click(cx.listener(move |v, _, window, cx| {
-                let Some(h) = v.notes.place.clone() else { return };
-                let tid = v.table;
-                v.edit(cx, |d| d.set_cells(tid, vec![(rec, fid, Value::Text(field::note_href(&h.rel, &rel)))]));
-                v.notes.ids.insert((rec, fid), id.clone());
-                v.close_popup(window, cx);
-                if v.expanded == Some(rec) { show(v, (rec, fid), &id, window, cx); }
-            })));
+    let none = !rows.iter().any(|c| matches!(c, Choice::Note(_)));
+    for (i, c) in rows.into_iter().enumerate() {
+        let on = hit.as_ref() == Some(&c);
+        let row = match &c {
+            Choice::New => list_row("tb-note-new").icon("plus").label(label("新建笔记")),
+            Choice::Note(rel) => {
+                let Some(n) = v.notes.index.get(rel) else { continue };
+                // which folder it is in, for notes of one name
+                let place = rel.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
+                list_row(("tb-note", i))
+                    .child(icon("doc", 14., Theme::icon()))
+                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(title_of(n))))
+                    .when(!place.is_empty(), |d| d.child(div().flex_none().max_w(px(120.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(12.)).text_color(Theme::text_placeholder()).child(ui_text(place.clone()))))
+            }
+        };
+        list = list.child(row.selected(on).on_click(cx.listener(move |v, _, window, cx| take(v, (rec, fid), c.clone(), window, cx))));
     }
     if none { list = list.child(div().px(px(12.)).py(px(10.)).text_color(Theme::text_placeholder()).child(label("没有笔记"))); }
     crate::design::Popover::new("tb-note-pick").occlude().w(px(320.)).py(px(6.))
         .on_mouse_down_out(cx.listener(|v, _, window, cx| v.close_popup(window, cx)))
-        .child(div().px(px(12.)).pb(px(6.)).text_size(px(12.)).text_color(Theme::text_caption()).child(label("指向已有笔记")))
+        .when(!new, |d| d.child(div().px(px(12.)).pb(px(6.)).text_size(px(12.)).text_color(Theme::text_caption()).child(label("指向已有笔记"))))
         .child(div().px(px(8.)).pb(px(6.)).child(input_box("tb-note-search").child(icon("search", 14., Theme::text_placeholder())).gap(px(6.)).child(div().flex_1().child(v.aux.clone()))))
         .child(list.child(crate::design::scroll::bar("tb-note-list", &crate::design::scroll::handle("tb-note-list"), 0.)))
         .into_any_element()
@@ -460,7 +506,7 @@ pub(crate) fn pane(v: &TableView, rec: RecId, cx: &Context<TableView>) -> Option
     let actions = div().flex_none().h(px(crate::app::HEADER_ACTIONS_H)).flex().items_center().gap(px(4.))
         .child(seg("tb-note-point", "link").tip(&label("指向已有笔记"), None).on_click(cx.listener(move |v, ev: &ClickEvent, window, cx| {
             let p = ev.position();
-            open_pick(v, cell, point(p.x - px(280.), p.y + px(18.)), window, cx);
+            open_pick(v, cell, point(p.x - px(280.), p.y + px(18.)), false, window, cx);
         })))
         .child(seg("tb-note-full", "expand").tip(&label("整页打开"), None).on_click(cx.listener(move |v, _, _, cx| open_full(v, id.clone(), cx))))
         .child(seg("tb-rec-close", "x").tip(&label("关闭"), None).on_click(cx.listener(|v, _, window, cx| record::close(v, window, cx))));
@@ -683,6 +729,31 @@ mod tests {
         assert_eq!(target(&n, cell, Some("书单/三体.xml")), None);
         n.gone.insert("a".into());
         assert_eq!(target(&n, cell, Some("书单/三体.xml")), Some(&"a".to_string()));
+    }
+
+    /// An empty cell opened: 新建笔记 heads the picker and Enter takes it only with nothing typed;
+    /// with a word typed, the first note whose title has it. 指向已有笔记 offers no 新建笔记.
+    #[core::prelude::v1::test]
+    fn the_picker_makes_nothing_unasked() {
+        let titled = |id: &str, t: &str| NoteInfo { id: id.into(), title: t.into(), empty: false };
+        let index = HashMap::from([("b.xml".to_string(), titled("b", "黑暗森林")), ("a.xml".to_string(), titled("a", "三体")), ("c/a.xml".to_string(), titled("c", "三体"))]);
+        let note = |rel: &str| Choice::Note(rel.into());
+        let rows = choices(&index, "", true);
+        assert_eq!(rows, vec![Choice::New, note("a.xml"), note("c/a.xml"), note("b.xml")]);
+        assert_eq!(first(&rows, ""), Some(&Choice::New));
+        assert_eq!(first(&rows, "  "), Some(&Choice::New));
+        let rows = choices(&index, "森林", true);
+        assert_eq!(rows, vec![Choice::New, note("b.xml")]);
+        assert_eq!(first(&rows, "森林"), Some(&note("b.xml")));
+        // nothing found: Enter makes nothing either
+        let rows = choices(&index, "球状闪电", true);
+        assert_eq!(rows, vec![Choice::New]);
+        assert_eq!(first(&rows, "球状闪电"), None);
+        // 指向已有笔记: no 新建笔记, and with nothing typed Enter takes no note either
+        let rows = choices(&index, "", false);
+        assert!(!rows.contains(&Choice::New) && rows.len() == 3);
+        assert_eq!(first(&rows, ""), None);
+        assert_eq!(first(&choices(&index, "三体", false), "三体"), Some(&note("a.xml")));
     }
 
     /// Only the step that takes the last cell off a note sends it away, only the one that gives it one brings it back.

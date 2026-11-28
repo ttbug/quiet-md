@@ -6,7 +6,7 @@ The Cargo workspace contains three crates:
 
 - **`crates/core` (`fdl_core`, about 36,000 lines, including 20,000 for whiteboards)** contains the document model, DocxXML, editing and undo, the on-disk library, Markdown and HTML import, Markdown export, and whiteboard models and algorithms. It builds and tests independently of GPUI with `cargo test -p fdl_core`. The fuzzer lives here too.
 - **The root crate (`quiet_md`)** owns windows, views, rendering, menus and overlays. `main.rs` re-exports the core modules at the crate root, and `editor/mod.rs` re-exports `editor::core` and `editor::table_ops`. The application can therefore use paths such as `crate::model` and `super::core`.
-- **`crates/cli` (`quiet_cli`, the `quiet` binary)** is the library from the command line, for people and agents. Each command is one operation of `Session` (`session.rs`) with JSON in and out: documents and blocks there, 数据表 rows in `tables.rs`, boards in `boards.rs`, versions, the trash and import in `library.rs`. `quiet run` gives the same operations to a JavaScript script in an embedded QuickJS (`js.rs`, `prelude.js`) with no files or network; `quiet mcp` (`mcp.rs`) serves them as two MCP tools. Changes stay in memory until the command or script ends, then are written in one commit through `Store` (its write lock, versions and link rewriting); a file changed on disk in the meantime stops the commit. Edits go through `editor::Core`, as in the app. Block refs carry a fingerprint of the block (`#3~k7f2`) so a ref from an earlier read finds its block or fails. The agent skill lives at the top of the repository in `skills/quiet-md/` (installed with `npx skills add s1dashu/quiet-md`); its `references/guide.md` is compiled in and printed by `quiet guide`; `help.rs` holds each command's help. See [the CLI design](design/CLI.md).
+- **`crates/cli` (`quiet_cli`, the `quiet` binary)** is the library from the command line, for people and agents. Each command is one operation of `Session` (`session.rs`) with JSON in and out: documents and blocks there, 数据库 rows in `tables.rs`, boards in `boards.rs`, versions, the trash and import in `library.rs`. `quiet run` gives the same operations to a JavaScript script in an embedded QuickJS (`js.rs`, `prelude.js`) with no files or network; `quiet mcp` (`mcp.rs`) serves them as two MCP tools. Changes stay in memory until the command or script ends, then are written in one commit through `Store` (its write lock, versions and link rewriting); a file changed on disk in the meantime stops the commit. Edits go through `editor::Core`, as in the app. Block refs carry a fingerprint of the block (`#3~k7f2`) so a ref from an earlier read finds its block or fails. The agent skill lives at the top of the repository in `skills/quiet-md/` (installed with `npx skills add s1dashu/quiet-md`); its `references/guide.md` is compiled in and printed by `quiet guide`; `help.rs` holds each command's help. See [the CLI design](design/CLI.md).
 
 Dependencies flow from the application and the CLI to core. Within the workspace, core may reference only core modules.
 
@@ -99,6 +99,7 @@ This approach copies the entire document at each history step. A historical benc
 
 - A shared cache protects document images visible in any window. Above 64 MiB of offscreen decoded images it evicts the least recently used first. Other offscreen entries expire after 30 seconds. A sweep every two seconds also cleans the GPU atlas. Up to two decodes run concurrently and stale queued requests are skipped. Original images retain full resolution and animated images keep their decoding and playback behavior.
 - Images with explicit dimensions start loading when actually painted in the visible region. Images clipped out of folder page cards avoid early decoding. Folder pages cache up to 128 recently used document previews.
+- A 数据库 on a folder page's card (a table file, or a block in a page) is the top-left of its grid in miniature (`table/still.rs`): `table::Still` holds only the rows and columns a card can show (the linked tables cut to the records named), read on the background executor and kept until the file changes (`folder_page::card_grid`, the 128 last asked for, as many as the previews); its grid is laid out once into fills, lines and shaped text in the grid's tokens and measures, and each frame paints that list where the card is, so scrolling a page of database cards costs no more than one of documents.
 - The parse cache, window lists and file history share full-text search strings via `Arc<str>`. After a successful save when switching documents, the app releases the old document's full XML conflict-detection baseline if no other window uses it. Reopening reestablishes the baseline.
 - Metal and DirectX allocate intermediate path textures on demand and reclaim them on subsequent frames without paths. Apple GPUs use on-chip memory for multisampling at the same antialiasing sample count.
 
@@ -112,7 +113,9 @@ This approach copies the entire document at each history step. A historical benc
 | `docxml.rs` | DocxXML parsing and serialization, including `to_inline` for inline objects |
 | `store.rs` | Library I/O, index recovery, trash, settings and `image_path` |
 | `shown.rs` | What a folder shows: the files it lists (`LIBRARY_FILES`, checked by content for `.xml` and `.sqlite`), the folders the scan does not go into (`skips_dir`), the `.gitignore` subset (`Ignore`) and the look before 添加文件夹 (`survey`). See FORMAT.md, "What a folder shows" |
+| `guides.rs` / `guide_import.rs` | The 开始指南 built into the binaries (`build.rs` embeds `shared-mock/library` and `library-zh`), and `Store::import_guides`: 设置 › 关于 › 导入最新的开始指南 and `quiet guide import`, the guides as a new folder at a library's top with ids of their own, their pictures beside the ones there (`.assets/guides-2/` and what names them rewritten when a file of the same name differs) |
 | `across.rs` | A page or folder moved into another top-level folder (`Store::move_across`): files renamed or copied over, ids and index fields kept, pictures copied into the target's `.assets/`, mentions across the edge written by id; see the last section |
+| `pins.rs` | 置顶's own order across every top-level folder: each pin's `pin_order` key, new pins on top, keys for a drag that move only the moved pin. See docs/FORMAT.md |
 | `top_folders.rs` | `TopFolders`: the top-level folders the sidebar lists (`TopFolder`, each its own `Store` and `.quiet/`), this computer's list of them (`folders.json`), nesting checks and ids unique across them. See docs/design/workspaces.md |
 | `paste.rs` | HTML and Markdown to blocks, shared by paste and import |
 | `markdown.rs` | Markdown export |
@@ -146,7 +149,7 @@ Whiteboard and history modules in core:
 | Module | Contents |
 |---|---|
 | `main.rs` | Entry point, `FDL_SCRIPT` mode (devtools builds only), `--self-test` and core module re-exports |
-| `guides.rs` | Seeds an empty library with the bundled Getting Started guides once |
+| `guides.rs` | Seeds an empty library with the bundled Getting Started guides once (core's `guides`), and gives 导入最新的开始指南 (`transfer.rs`) the documents as this system reads them |
 | `app.rs` | `Workspace`, the two-pane window, open/create/save/delete actions, save state and reminder scheduling |
 | `entries.rs` | `Entries`, the window's pages and folders: read as a slice, changed only through `set` / `edit` / `take`, which move its `generation`; the sidebar's rows and the folder page's cards are rebuilt when it moves |
 | `shared_store.rs` | The `TopFolders` the windows share: each call goes to the top-level folder a document is in; each folder, one or many, shows as a row of the sidebar tree and a card on a folder page (`top_row`) |
@@ -158,10 +161,9 @@ Whiteboard and history modules in core:
 | `search.rs` | Search dialog and advanced search |
 | `docmenu.rs` / `docinfo.rs` / `modes.rs` | More menu, document information, edit/read mode switch and shortcut panel |
 | `theme.rs` | `craft` scale, semantic `Theme::*` colors, named display colors, type scale and note panel dimensions |
-| `design/` | Quiet.md's design system (shadcn/ui: Nova's colours, Vega's geometry). `mod.rs` holds the tokens (neutral ramp, semantic colours with light and dark values, option colours, radii, sizes, type, the shadows' elevation ladder); `button`, `menu`, `field`, `control`, `badge`, `dialog`, `card` the components, all shown live in the 组件库 panel (`gallery/`, `quiet_md --components`). Used across the app's controls, menus and dialogs (`table/style.rs` forwards to it for the 数据表) |
-| `ui.rs` / `input.rs` | Shared menu shells and rows, white pill buttons, hints, toasts and single-line input |
+| `design/` | Quiet.md's design system (shadcn/ui: Nova's colours, Vega's geometry). `mod.rs` holds the tokens (neutral ramp, semantic colours with light and dark values, option colours, radii, sizes, type, the shadows' elevation ladder); `button`, `menu`, `field`, `control`, `badge`, `dialog`, `card`, `toast` (each window's stack of toasts) the components, all shown live in the 组件库 panel (`gallery/`, `quiet_md --components`). Used across the app's controls, menus and dialogs (`table/style.rs` forwards to it for the 数据库) |
+| `ui.rs` / `input.rs` | Shared menu shells and rows, white pill buttons, hints and single-line input |
 | `highlight.rs` | Code highlighting |
-| `mermaid.rs` | Mermaid code blocks drawn as diagrams: merman (pure Rust) writes the SVG on a background thread, coloured from the Theme tokens, text measured by GPUI's resvg; cached in memory by source and theme |
 | `assets.rs` | Embedded icons, fonts and cover gallery |
 | `fonts.rs` / `font_classes.rs` / `font_downloads.rs` | Installed families for the font settings and what each is (黑体, 宋体 …, scripts covered: read from the font files); fonts fetched on demand (the board's Xiaolai, downloadable document fonts). See [Downloadable fonts](FONTS.md). |
 | `devtools.rs` | Script driver compiled with `--features devtools`. See tools/harness/README.md. |
@@ -199,7 +201,7 @@ User titles, body text, attachment names and saved button labels are user conten
 
 ## Undo for folders and file operations
 
-Folders are `Meta::folder` index entries. Only folders can be parents. Core's `store/folders.rs` handles legacy tree migration, hierarchy checks and sibling order. The app's `folders.rs`, `sidebar_drag.rs` and `folder_card.rs` implement folder pages, dragging and animation.
+Folders are `Meta::folder` index entries. Only folders can be parents. Core's `store/folders.rs` handles legacy tree migration, hierarchy checks and sibling order. The app's `folders.rs`, `sidebar_drag.rs` and `folder_card.rs` implement folder pages, dragging and animation; a top-level folder's heading drags among the others (`TopFolders::arrange`, folders.json), and `pin_drag.rs` drags 置顶's rows (core's `pins.rs`).
 
 Create, duplicate, rename, move, delete and restore operations have their own undo history. Under the write lock, the store records successful file operations so changes from other instances stay outside the current operation. After an asynchronous drop or rename reaches disk, the actual record replaces the preview record. Undo checks file state and hierarchy and reads current content from disk, leaving older body snapshots out of file-operation undo. When a management action changes a title, it adjusts caret boundaries in the editor and its history snapshots.
 

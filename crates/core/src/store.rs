@@ -38,6 +38,14 @@ pub struct Meta {
     pub modified: u64,
     #[serde(default)]
     pub pinned: bool,
+    /// Its place in 置顶, a fractional index across every top-level folder (`pins`);
+    /// `None` for a pin from before there was one (or another build's), placed by `pinned_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_order: Option<String>,
+    /// When a pin without `pin_order` was made (ms): the stamp of its `pinned`, or an older
+    /// build's 收藏时间. Read, never written.
+    #[serde(skip)]
+    pub pinned_at: u64,
     /// Last time the document was opened, for 最近访问 (this computer only).
     #[serde(default)]
     pub opened: u64,
@@ -67,6 +75,10 @@ pub struct Meta {
     /// 隐藏引用列表 (the "…" menu's 显示引用列表 switch off).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub refs_hidden: bool,
+    /// A folder emptied here (what was in it moved or deleted in Quiet.md): shown
+    /// while empty, as one made here is, and as the Finder shows it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kept: bool,
     /// A Markdown file, edited as Markdown.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub markdown: bool,
@@ -98,7 +110,7 @@ impl Meta {
     pub fn named_by_file(&self) -> bool { self.markdown || !self.kind.is_doc() }
     /// An older build's 收藏 is 置顶 (the maintainer, 2026-11-26): the next
     /// write says `pinned` and drops `starred`, so taking it again changes nothing.
-    pub(crate) fn take_star(&mut self) { if self.starred > 0 { self.pinned = true; self.starred = 0; } }
+    pub(crate) fn take_star(&mut self) { if self.starred > 0 { if !self.pinned { self.pinned_at = self.starred; } self.pinned = true; self.starred = 0; } }
 }
 
 /// What a library file holds. Whatever is not a document still lives in the
@@ -142,10 +154,10 @@ fn catalogue_closed_default() -> bool { true }
 impl Default for Meta {
     fn default() -> Self {
         Self {
-            folder: None, top_order: None, created: 0, modified: 0, pinned: false, opened: 0,
+            folder: None, top_order: None, created: 0, modified: 0, pinned: false, pin_order: None, pinned_at: 0, opened: 0,
             width: PageWidth::default(), catalogue_closed: true,
             parent: None, order: 0, starred: 0, reading: false,
-            info: InfoRow::default(), refs_hidden: false,
+            info: InfoRow::default(), refs_hidden: false, kept: false,
             markdown: false, path: None, name: None, rel: String::new(), kind: DocKind::Doc,
         }
     }
@@ -410,6 +422,8 @@ pub struct Store {
     /// FORMAT 5: the library as `load_meta` last took it in or `save_meta`
     /// last wrote it (`None`: since then not known).
     synced: std::cell::RefCell<Option<Synced>>,
+    /// A 数据库 file as last found the same as its newest version (by name), or made into it.
+    tables_kept: std::cell::RefCell<HashMap<String, (meta::Seen, String)>>,
     /// `save_editor_naming_later` while it saves: whether the title asks for
     /// another file name, which it leaves to `follow_name` (`None`: every
     /// other save follows the title itself).
@@ -420,6 +434,8 @@ pub struct Store {
     /// until the first `list` is done, so it is not on the way to the first
     /// frame; `Some(true)` then, and the next `list` does it.
     clean_due: Option<bool>,
+    /// 收藏时间 by id from the FORMAT 4 index it was upgraded from (`index.json.v4`), read once (`date_pins`).
+    v4_stars: std::cell::OnceCell<HashMap<String, u64>>,
 }
 
 /// What `load_meta` would take in again is already in memory while no device
@@ -566,6 +582,8 @@ mod folders;
 mod subdocs;
 #[path = "across.rs"]
 mod across;
+#[path = "guide_import.rs"]
+mod guide_import;
 pub use across::Place;
 
 #[derive(Serialize, Deserialize)]
@@ -592,6 +610,11 @@ struct Attached {
     pinned: bool,
     #[serde(default, skip_serializing_if = "is_zero")]
     starred: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pin_order: Option<String>,
+    /// `Meta::pinned_at`, carried along; never on disk.
+    #[serde(skip)]
+    pinned_at: u64,
     #[serde(default, skip_serializing_if = "is_zero")]
     order: u64,
     #[serde(default, rename = "root_order", skip_serializing_if = "Option::is_none")]
@@ -606,19 +629,22 @@ struct Attached {
     info: InfoRow,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     refs_hidden: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    kept: bool,
 }
 
 type DiskIndex = BTreeMap<String, Attached>;
 
 impl Attached {
     fn of(id: &str, m: &Meta) -> Self {
-        Attached { id: id.to_string(), created: m.created, modified: m.modified, pinned: m.pinned, starred: 0, order: m.order, top_order: m.top_order,
-            width: m.width, catalogue_closed: m.catalogue_closed, reading: m.reading, info: m.info, refs_hidden: m.refs_hidden }
+        Attached { id: id.to_string(), created: m.created, modified: m.modified, pinned: m.pinned, starred: 0, pin_order: m.pin_order.clone(), pinned_at: m.pinned_at, order: m.order, top_order: m.top_order,
+            width: m.width, catalogue_closed: m.catalogue_closed, reading: m.reading, info: m.info, refs_hidden: m.refs_hidden, kept: m.kept }
     }
     /// `starred` is read (`take_star`), and `of` writes it no more: saving drops it from the disk.
     fn meta(&self) -> Meta {
-        Meta { created: self.created, modified: self.modified, pinned: self.pinned || self.starred > 0, order: self.order, top_order: self.top_order,
-            width: self.width, catalogue_closed: self.catalogue_closed, reading: self.reading, info: self.info, refs_hidden: self.refs_hidden, ..Default::default() }
+        Meta { created: self.created, modified: self.modified, pinned: self.pinned || self.starred > 0, pin_order: self.pin_order.clone(),
+            pinned_at: if self.pinned_at > 0 || self.pinned { self.pinned_at } else { self.starred }, order: self.order, top_order: self.top_order,
+            width: self.width, catalogue_closed: self.catalogue_closed, reading: self.reading, info: self.info, refs_hidden: self.refs_hidden, kept: self.kept, ..Default::default() }
     }
 }
 
@@ -1139,7 +1165,7 @@ impl Store {
             #[cfg(not(target_family = "wasm"))]
             return crate::table::sqlite::all_text(path);
             #[cfg(target_family = "wasm")]
-            anyhow::bail!("{} is a 数据表, not readable here", path.display())
+            anyhow::bail!("{} is a 数据库, not readable here", path.display())
         }
         let flat = Self::flat_at(&root);
         let internal = if flat { root.clone() } else { root.join(INTERNAL) };
@@ -1473,7 +1499,7 @@ impl Store {
         let v5 = !flat && Self::format_at(&root) >= 5;
         let v6 = v5 && Self::format_at(&root) >= 6;
         let mut store = Store { file_changes: vec![], top_dir: root, index: HashMap::new(), foreign: DiskIndex::new(), trash, flat, warnings, migrated: None, loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), inodes: Default::default(), inodes_due: Default::default(), writes: Default::default(), batch: Default::default(), view: Default::default(),
-            v5, me, clock: Default::default(), seen: Default::default(), merged: Default::default(), key: key.to_string(), place_by_hand: true, v6, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
+            v5, me, clock: Default::default(), seen: Default::default(), merged: Default::default(), key: key.to_string(), place_by_hand: true, v6, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), tables_kept: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None, v4_stars: Default::default() };
         if flat {
             store.index = load_json(&base.join("index.json"), "文档索引", &mut store.warnings);
             store.index.values_mut().for_each(Meta::take_star);
@@ -1588,6 +1614,28 @@ impl Store {
         }
         *self.seen.get_mut() = seen;
         *self.merged.get_mut() = merged;
+        let mut index = std::mem::take(&mut self.index);
+        self.date_pins(&mut index);
+        self.index = index;
+    }
+
+    /// When each pin without a `pin_order` was made (`Meta::pinned_at`), so 置顶 lists them newest
+    /// first as before: an older build's 收藏时间 (on disk still, or in the FORMAT 4 index this
+    /// library was upgraded from, 0.1.14's), else the stamp of its `pinned`. Pins 0.1.14 had share
+    /// the upgrade's stamp, later than any 收藏时间 then: they come first, the former 收藏 after.
+    fn date_pins(&self, index: &mut HashMap<String, Meta>) {
+        // the placed too: one put back where it was by 撤销 is placed by it again
+        let undated = |m: &Meta| m.pinned && m.pinned_at == 0;
+        if !index.values().any(undated) { return }
+        let merged = self.merged.borrow();
+        let none = HashMap::new();
+        let stars = if !index.values().any(|m| undated(m) && m.pin_order.is_none()) { self.v4_stars.get().unwrap_or(&none) } else { self.v4_stars.get_or_init(|| {
+            let disk: DiskIndex = reread(&self.top_dir.join(INTERNAL).join("index.json.v4")).unwrap_or_default();
+            disk.into_iter().filter(|(_, a)| a.starred > 0 && !a.pinned).map(|(k, a)| (if a.id.is_empty() { meta::path_id(&k) } else { a.id }, a.starred)).collect()
+        }) };
+        for (id, m) in index.iter_mut().filter(|(_, m)| undated(m)) {
+            m.pinned_at = stars.get(id).copied().or_else(|| merged.items.get(id)?.get("pinned").map(|w| w.ts)).unwrap_or(0);
+        }
     }
 
     /// Whether `load_meta` has nothing to take in: no device file changed
@@ -1617,6 +1665,8 @@ impl Store {
         let absent = self.synced.borrow().as_ref().map(|s| s.absent.clone()).unwrap_or_default();
         disk.retain(|k, _| listed(k) && !absent.contains(k));
         let mut fresh = self.from_disk(&disk, &self.read_local());
+        drop(merged);
+        self.date_pins(&mut fresh);
         // `begin_write` puts back the times not written yet either way.
         for (id, t) in &self.view.borrow().opened { if let Some(m) = fresh.get_mut(id) { m.opened = m.opened.max(*t); } }
         let shape = |index: &HashMap<String, Meta>| {
@@ -1630,6 +1680,8 @@ impl Store {
                 *n += 1;
                 let placed = m.top_order.is_some() || m.order > 0;
                 (m.top_order, m.order, m.parent) = (None, if placed { *n } else { 0 }, None);
+                // made here or read back: either is when it was pinned, give or take the write
+                m.pinned_at = 0;
                 (k, (parent, m))
             }).collect::<BTreeMap<_, _>>()
         };
@@ -1641,6 +1693,11 @@ impl Store {
     fn mark_synced(&self, whole: bool, absent: HashSet<String>) {
         let read = self.merged.borrow().read;
         *self.synced.borrow_mut() = Some(Synced { read, local: self.local_stamp(), index: self.index.clone(), foreign: self.foreign.clone(), trash: self.trash.clone(), whole, absent });
+    }
+
+    /// This computer's file just written from memory: memory still holds what the disk says.
+    fn local_written(&self) {
+        if let Some(s) = self.synced.borrow_mut().as_mut() { s.local = self.local_stamp(); }
     }
 
     /// This computer's file about the library as `meta::files` sees a device file.
@@ -2106,9 +2163,14 @@ impl Store {
         // A library file's pictures are written relative to its folder too, never as absolute paths.
         let file = self.path(id);
         let dir = file.parent().filter(|_| base.is_none());
+        // Mentions as links relative to the file (a folder's with a closing `/`), as a DocxXML page writes them (#471).
+        let from = self.doc_dir(id);
+        let mention = |to: &str| self.index.get(to).filter(|m| !m.local() && !m.rel.is_empty())
+            .map(|m| format!("{}{}", layout::relative(&from, &m.rel), if m.folder.is_some() { "/" } else { "" }));
+        let mentions: Option<&dyn Fn(&str) -> Option<String>> = (base.is_none() && !self.flat).then_some(&mention);
         let out = crate::markdown::write_file_with(doc, front, &crate::markdown::Options {
             library_dir: Some(&self.top_dir), base: base.as_deref(), name: name.as_deref(), copied: copied.get(id), original: disk,
-            wiki: wiki.as_ref().map(|(d, v)| (d.as_path(), Some(v.as_path()))), dir, ..Default::default()
+            wiki: wiki.as_ref().map(|(d, v)| (d.as_path(), Some(v.as_path()))), dir, mentions, ..Default::default()
         });
         let bom = if disk.is_some_and(|d| d.starts_with('\u{feff}')) { "\u{feff}" } else { "" };
         (format!("{bom}{}", out.text), out.files)
@@ -2167,7 +2229,7 @@ impl Store {
         let scroll = std::mem::take(&mut self.view.get_mut().scroll);
         // The times stay pending until written: `begin_write` puts them back on the re-read index.
         let opened = if self.view.get_mut().opened.is_empty() { Ok(()) } else {
-            self.begin_write().and_then(|_lock| if self.flat { self.save_index() } else { self.save_local(&self.local_state()) })
+            self.begin_write().and_then(|_lock| if self.flat { self.save_index() } else { self.save_local(&self.local_state()).map(|()| self.local_written()) })
                 .map(|()| self.view.get_mut().opened.clear())
         };
         if scroll.is_empty() { return opened }
@@ -2372,6 +2434,7 @@ impl Store {
     /// that pointed at them or out of them, so no mention breaks.
     fn relocate(&mut self, moves: &[(String, String)]) -> Result<()> {
         anyhow::ensure!(!self.flat, "旧格式的文档库没有真实文件夹");
+        let left: Vec<String> = moves.iter().filter_map(|(id, _)| self.index.get(id)?.parent.clone()).collect();
         let mut new_rel: HashMap<String, String> = HashMap::new();
         let mut dirs: Vec<(String, &str)> = vec![];
         for (id, to) in moves {
@@ -2485,14 +2548,26 @@ impl Store {
                     let new = layout::relative(to, &moved(&target).unwrap_or(target));
                     (new != href).then_some(new)
                 });
-                if let Err(e) = r { self.warnings.push(format!("未能更新数据表中的笔记路径（{now}）：{e}")); }
+                if let Err(e) = r { self.warnings.push(format!("未能更新数据库中的笔记路径（{now}）：{e}")); }
             }
         }
         #[cfg(unix)]
         for dir in &synced { crate::vfs::File::open(dir).and_then(|f| f.sync_all())?; }
         #[cfg(not(unix))]
         drop(synced);
+        self.keep_emptied(left);
         self.save_index()
+    }
+
+    /// The folders (`parents`, by id) a move or deletion made here left with nothing in
+    /// them are `kept`: still shown, as the Finder shows them. The caller writes the index.
+    fn keep_emptied(&mut self, parents: impl IntoIterator<Item = String>) {
+        if self.flat { return }
+        for p in parents {
+            let Some(dir) = self.index.get(&p).filter(|m| m.folder.is_some() && !m.local() && !m.kept).map(|m| format!("{}/", m.rel)) else { continue };
+            if self.index.values().any(|m| !m.local() && m.rel.starts_with(&dir)) { continue }
+            if let Some(m) = self.index.get_mut(&p) { m.kept = true; }
+        }
     }
 
     /// A title change renames the file (and keeps the links to it); outside
@@ -2669,8 +2744,8 @@ impl Store {
         keys.extend(found.docs.iter().cloned());
         keys.extend(found.pending.iter().cloned());
         // A folder with nothing listed in it shows only when the user made it here (or
-        // pinned or renamed it): a found one has the id its path gives.
-        let users = |k: &str, a: &Attached| !self.v5 || a.id != meta::path_id(k) || a.pinned;
+        // pinned or renamed it, or emptied it here: `Meta::kept`): a found one has the id its path gives.
+        let users = |k: &str, a: &Attached| !self.v5 || a.id != meta::path_id(k) || a.pinned || a.kept;
         for d in &found.empty {
             let k = format!("{d}/");
             if !disk.get(&k).is_some_and(|a| users(&k, a)) { continue }
@@ -2821,18 +2896,23 @@ impl Store {
     /// document's file holds. Safe whatever was written meanwhile: whether
     /// the next write reads the device files again is decided from the disk.
     pub fn adopt(&mut self, mut from: Store) {
-        use std::mem::take;
-        (self.index, self.foreign, self.trash) = (take(&mut from.index), take(&mut from.foreign), take(&mut from.trash));
-        for (id, c) in from.parsed.drain() { self.parsed.entry(id).or_insert(c); }
+        use std::mem::{replace, take};
+        // What is replaced is freed off this thread (`drop_later`); the writer, emptied, here
+        // (its `Drop` writes what it kept of the views).
+        let old = (replace(&mut self.index, take(&mut from.index)), replace(&mut self.foreign, take(&mut from.foreign)), replace(&mut self.trash, take(&mut from.trash)));
+        let mut spare = vec![];
+        for (id, c) in from.parsed.drain() { match self.parsed.entry(id) { std::collections::hash_map::Entry::Vacant(v) => { v.insert(c); } _ => spare.push(c) } }
         self.checked.extend(from.checked.drain());
         self.inodes.extend(std::mem::take(&mut from.inodes));
         from.inodes_due.set(false);
         self.inodes_due.set(true);
-        (self.seen, self.merged, self.synced, self.seen_trash, self.here) = (take(&mut from.seen), take(&mut from.merged), take(&mut from.synced), take(&mut from.seen_trash), take(&mut from.here));
+        let old_meta = (replace(&mut self.seen, take(&mut from.seen)), replace(&mut self.merged, take(&mut from.merged)), replace(&mut self.synced, take(&mut from.synced)),
+            replace(&mut self.seen_trash, take(&mut from.seen_trash)), replace(&mut self.here, take(&mut from.here)));
         self.clock.set(self.clock.get().max(from.clock.get()));
         // A writer that began before this one (a listing, another window's move) read an older
         // library: taking it over afterwards would put the old paths back.
         self.writes.set(self.writes.get() + 1);
+        crate::drop_later::drop_later((old, old_meta, spare));
     }
 
     /// FORMAT 6: the files `list` found here noted in `meta::Here` (a
@@ -2924,7 +3004,7 @@ impl Store {
     fn read_doc_text(&self, id: &str) -> Result<String> {
         let p = self.path(id);
         // a 数据表 is not text: the table reads its own file
-        if self.kind(id) == DocKind::Table { anyhow::ensure!(p.fs_exists(), "数据表文件已不在原处，可能已被移动或删除"); return Ok(String::new()); }
+        if self.kind(id) == DocKind::Table { anyhow::ensure!(p.fs_exists(), "数据库文件已不在原处，可能已被移动或删除"); return Ok(String::new()); }
         anyhow::ensure!(!crate::vfs::is_dataless(&p), NOT_DOWNLOADED);
         match crate::vfs::read_to_string(&p) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && layout::placeholder(&p).is_some_and(|ph| ph.fs_exists()) => {
@@ -3231,7 +3311,7 @@ impl Store {
     /// `base` (`Base::blank_named`, or an imported CSV). Only in the folder layout.
     #[cfg(not(target_family = "wasm"))]
     pub fn create_table_in(&mut self, title: &str, base: &crate::table::Base, parent: Option<&str>) -> Result<String> {
-        anyhow::ensure!(!self.flat, "旧格式的文档库不能新建数据表");
+        anyhow::ensure!(!self.flat, "旧格式的文档库不能新建数据库");
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
@@ -3249,7 +3329,7 @@ impl Store {
     /// 创建副本 of a 数据表 (`duplicate`): its file copied under `title` into folder `parent`.
     #[cfg(not(target_family = "wasm"))]
     pub(super) fn copy_table_in(&mut self, src: &str, title: &str, parent: Option<&str>) -> Result<String> {
-        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据表");
+        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据库");
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
@@ -3269,7 +3349,7 @@ impl Store {
     /// 另存副本 of a 数据表's version: the snapshot's file as a new 数据表 named `title`, beside the original.
     #[cfg(not(target_family = "wasm"))]
     pub fn copy_table_version(&mut self, src: &str, name: &str, title: &str) -> Result<String> {
-        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据表");
+        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据库");
         let bytes = crate::versions::read_bytes(&self.history_base(), src, name, false)?;
         let parent = self.index.get(src).and_then(|m| m.parent.clone());
         let id = uuid::Uuid::new_v4().to_string();
@@ -3433,6 +3513,7 @@ impl Store {
             targets.push(target);
         }
         crate::vfs::create_dir_all(self.trash_dir())?;
+        let left: Vec<String> = items.iter().filter_map(|(id, _)| self.index.get(id)?.parent.clone()).collect();
         // Persist destination metadata before moving content. An interrupted
         // move leaves extra index entries, never an unindexed trashed file.
         self.write_trash(&trash)?;
@@ -3453,6 +3534,7 @@ impl Store {
             for (id, _) in &items[*n..] { self.trash.remove(id); }
             let _ = self.save_trash();
         }
+        self.keep_emptied(left);
         // Content has moved: cleanup failure must not report deletion as failed.
         if (failed.is_none() || failed.as_ref().is_some_and(|(n, _)| *n > 0)) && let Err(e) = self.save_index() {
             self.warnings.push(format!("文档已移入回收站，文档索引清理失败：{e}"));
@@ -3780,12 +3862,23 @@ impl Store {
     /// the same file as the newest version still adds nothing).
     #[cfg(not(target_family = "wasm"))]
     pub fn snapshot_table(&self, id: &str, force: bool) -> Result<bool> {
-        anyhow::ensure!(self.kind(id) == DocKind::Table, "不是数据表");
-        let bytes = crate::vfs::read(self.path(id))?;
+        anyhow::ensure!(self.kind(id) == DocKind::Table, "不是数据库");
+        let path = self.path(id);
         let before = self.versions(id).first().map(|v| v.name.clone());
+        // The file and its newest version as they were when last found the same: nothing to
+        // read (a 数据库 of 24 MB and its version were read whole on every open, 90-150 ms).
+        if let Some(newest) = &before && self.tables_kept.borrow().get(id).is_some_and(|(seen, name)| name == newest && meta::still(&path, &Some(seen.clone()))) { return Ok(false) }
+        let seen = meta::seen_now(&path);
+        let bytes = crate::vfs::read(&path)?;
         crate::versions::snapshot_bytes(&self.history_base(), id, "sqlite", &bytes, crate::time::now_ms(), self.settings().history_limit(), force)?;
-        Ok(self.versions(id).first().map(|v| v.name.clone()) != before)
+        let after = self.versions(id).first().map(|v| v.name.clone());
+        // Forced, the newest version is now the file as read: the same or just made from it.
+        if force && let (Some(seen), Some(name)) = (seen, &after) { self.tables_kept.borrow_mut().insert(id.to_string(), (seen, name.clone())); }
+        Ok(after != before)
     }
+    /// The web build has no 数据表 (no SQLite).
+    #[cfg(target_family = "wasm")]
+    pub fn snapshot_table(&self, _id: &str, _force: bool) -> Result<bool> { anyhow::bail!("数据表 isn't available here") }
 
     /// The text a version's changes are counted on: a 数据表's rows as lines.
     fn version_body(&self, id: &str, name: Option<&str>) -> Result<String> {
@@ -3933,9 +4026,14 @@ impl Store {
     /// next [`Self::flush_view_state`] or with any other write of the index.
     pub fn touch(&mut self, id: &str) -> Option<Meta> {
         let m = self.index.get_mut(id)?;
+        let was = m.clone();
         m.opened = now();
         let m = m.clone();
         self.view.get_mut().opened.insert(id.to_string(), m.opened);
+        // Reading the disk again would give this time back too (`begin_write` lays the pending
+        // times on what it read): memory is still what the disk says, and the next write reads
+        // nothing (it read every device's file again, 25-85 ms for 15,000 notes, on every open).
+        if let Some(s) = self.synced.get_mut().as_mut() && s.index.get(id) == Some(&was) { s.index.insert(id.to_string(), m.clone()); }
         Some(m)
     }
 
@@ -3945,10 +4043,20 @@ impl Store {
         Ok(self.index[id].clone())
     }
 
+    /// 置顶 on or off; on, placed by when (`Meta::pinned_at`), as a pin from before 置顶 had an order.
     pub fn set_pinned(&mut self, id: &str, pinned: bool) -> Result<()> {
+        self.set_pin(id, pinned.then_some(None))
+    }
+
+    /// 置顶 `id` at `pin` (`Some(key)`: its `pin_order`, `Some(None)`: none, placed by when),
+    /// or off (`None`), in one write. A pin's place alone changes the same way.
+    pub fn set_pin(&mut self, id: &str, pin: Option<Option<String>>) -> Result<()> {
         let _lock = self.begin_write()?;
         if let Some(m) = self.index.get_mut(id) {
-            m.pinned = pinned;
+            // its stamp, give or take the write (`date_pins` reads that back); a place alone keeps it
+            if pin.is_none() { m.pinned_at = 0 } else if !m.pinned { m.pinned_at = meta::now_ms() }
+            m.pinned = pin.is_some();
+            m.pin_order = pin.flatten();
         }
         self.save_index()
     }
@@ -5016,10 +5124,60 @@ mod tests {
         assert_eq!(loads(), n + 1);
     }
 
+    /// Opening pages (`touch`) and writing what was opened when (`flush_view_state`) leave
+    /// memory as the disk says: the writes after them read no device's file again.
+    #[test]
+    fn opening_pages_reads_nothing_again() {
+        let lib = Lib::new("meta-touch");
+        let mut a = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("aaaa")).unwrap();
+        let (x, y) = (a.create_from(&doc("甲")).unwrap(), a.create_from(&doc("乙")).unwrap());
+        a.list();
+        let n = loads();
+        for _ in 0..3 {
+            a.touch(&x).unwrap();
+            a.flush_view_state().unwrap();
+            a.touch(&y).unwrap();
+            a.set_width(&y, PageWidth::Wide).unwrap();
+            a.flush_view_state().unwrap();
+        }
+        assert_eq!(loads(), n, "opening pages: nothing read again");
+        // The times are written: a store opened afresh has them.
+        let opened = a.list().into_iter().find(|e| e.id == y).unwrap().meta.opened;
+        let mut b = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("aaaa")).unwrap();
+        assert_eq!(b.list().into_iter().find(|e| e.id == y).unwrap().meta.opened, opened);
+    }
+
     /// A code folder lists its notes only (docs/FORMAT.md, "What a folder shows"):
     /// not what is in dependency and build folders or ignored by git, not another
     /// program's `.xml` or `.sqlite`, not folders without notes; and none of that
     /// gets an entry written down.
+    /// A folder found with pages in it (its id the one its path gives) and emptied here,
+    /// by a move or a deletion, still shows, also once opened again; one never shown does not.
+    #[test]
+    fn a_folder_emptied_here_stays() {
+        let lib = Lib::new("emptied");
+        let mut s = lib.open();
+        let w = |rel: &str| { let p = lib.0.join(rel); crate::vfs::create_dir_all(p.parent().unwrap()).unwrap(); crate::vfs::write(p, "# x\n").unwrap(); };
+        w("指南/甲.md");
+        w("指南/乙.md");
+        w("旧/丙.md");
+        crate::vfs::create_dir_all(lib.0.join("Untitled")).unwrap();
+        let list = s.list();
+        let id = |rel: &str| list.iter().find(|e| e.meta.rel == rel).unwrap().id.clone();
+        let (guide, old, a, b, c) = (id("指南"), id("旧"), id("指南/甲.md"), id("指南/乙.md"), id("旧/丙.md"));
+        assert_eq!(guide, meta::path_id("指南/"));
+        s.move_in_tree(&a, None, None).unwrap();
+        assert!(!s.index[&guide].kept, "not empty yet");
+        s.move_in_tree(&b, None, None).unwrap();
+        s.delete(&c, None).unwrap();
+        let shown = |s: &mut Store| { let mut v: Vec<String> = s.list().iter().filter(|e| e.meta.folder.is_some()).map(|e| e.meta.rel.clone()).collect(); v.sort(); v };
+        assert_eq!(shown(&mut s), ["指南", "旧"]);
+        assert!(lib.0.join("指南").fs_is_dir() && lib.0.join("旧").fs_is_dir());
+        let mut again = lib.open();
+        assert_eq!(shown(&mut again), ["指南", "旧"]);
+        assert!(again.index[&guide].kept && again.index[&old].kept);
+    }
+
     #[test]
     fn a_code_folder_lists_its_notes_only() {
         let lib = Lib::new("code-folder");
@@ -5892,6 +6050,75 @@ mod tests {
         STAY_4.with(|k| k.set(false));
     }
 
+    /// 置顶's order (`crate::pins`). A 0.1.14 library (FORMAT 4): its pins first, as 0.1.14 listed them
+    /// (last changed first), then its 收藏, latest first, also once the 收藏时间 are written away
+    /// (read again from `index.json.v4`). A new pin goes on top; a place is a key of the moved pin's
+    /// own, which another device reads the same; 取消置顶 drops it.
+    #[test]
+    fn pins_keep_an_order_of_their_own() {
+        let lib = Lib::new("pin-order");
+        STAY_4.with(|k| k.set(true));
+        let mut s = lib.open();
+        let [p1, p2, st1, st2, both, n] = ["钉一", "钉二", "藏一", "藏二", "都有", "新的"].map(|t| s.create_from(&doc(t)).unwrap());
+        drop(s);
+        let file = lib.0.join(".quiet/index.json");
+        let mut disk: serde_json::Value = reread(&file).unwrap();
+        for (_, e) in disk.as_object_mut().unwrap() {
+            let id = e["id"].as_str().unwrap().to_string();
+            // p2 changed last; st2 starred later than st1
+            let (pin, star, modified) = [(&p1, true, 0, 10), (&p2, true, 0, 20), (&st1, false, 1_600_000_000_000u64, 30), (&st2, false, 1_650_000_000_000, 5), (&both, true, 1_000, 15)]
+                .into_iter().find(|r| *r.0 == id).map_or((false, 0, 1), |r| (r.1, r.2, r.3));
+            e["pinned"] = pin.into(); e["modified"] = modified.into();
+            if star > 0 { e["starred"] = star.into(); }
+        }
+        crate::vfs::write(&file, serde_json::to_vec(&disk).unwrap()).unwrap();
+        STAY_4.with(|k| k.set(false));
+        let order = |s: &mut Store| crate::pins::sorted(&s.list()).into_iter().map(|e| e.id.clone()).collect::<Vec<String>>();
+        let mut s = lib.open();
+        assert_eq!(order(&mut s), [p2.clone(), both.clone(), p1.clone(), st2.clone(), st1.clone()]);
+        // the next write drops `starred`: the order stands, from `index.json.v4`
+        s.set_width(&n, PageWidth::Wide).unwrap();
+        assert!(meta::load(&lib.0, "", &mut vec![]).get(&st1, "starred").is_none());
+        drop(s);
+        let mut s = lib.open();
+        assert_eq!(order(&mut s), [p2.clone(), both.clone(), p1.clone(), st2.clone(), st1.clone()]);
+        // a new pin: on top
+        let list = s.list();
+        let key = crate::pins::top_key(&crate::pins::sorted(&list));
+        s.set_pin(&n, Some(Some(key))).unwrap();
+        assert_eq!(order(&mut s), [n.clone(), p2.clone(), both.clone(), p1.clone(), st2.clone(), st1.clone()]);
+        // st1 dragged under n: the first place among the unplaced places them all, in the order shown
+        let list = s.list();
+        let shown: Vec<(&str, Option<&str>)> = [&n, &st1, &p2, &both, &p1, &st2].iter().map(|id| { let e = list.iter().find(|e| &e.id == *id).unwrap(); (e.id.as_str(), e.meta.pin_order.as_deref()) }).collect();
+        let writes = crate::pins::keys_for(&shown);
+        assert_eq!(writes.len(), 5, "n keeps its key");
+        for (id, k) in writes { s.set_pin(&id, Some(Some(k))).unwrap(); }
+        assert_eq!(order(&mut s), [n.clone(), st1.clone(), p2.clone(), both.clone(), p1.clone(), st2.clone()]);
+        // then one move writes the moved pin alone
+        let list = s.list();
+        let shown: Vec<(&str, Option<&str>)> = [&n, &st1, &both, &p2, &p1, &st2].iter().map(|id| { let e = list.iter().find(|e| &e.id == *id).unwrap(); (e.id.as_str(), e.meta.pin_order.as_deref()) }).collect();
+        let writes = crate::pins::keys_for(&shown);
+        assert_eq!(writes.len(), 1);
+        let before = view(&lib);
+        for (id, k) in writes { s.set_pin(&id, Some(Some(k))).unwrap(); }
+        let after = view(&lib);
+        let changed: Vec<(&String, &String)> = after.iter().flat_map(|(id, f)| f.iter().map(move |(k, w)| (id, k, w))).filter(|(id, k, w)| before.get(*id).and_then(|b| b.get(*k)) != Some(*w)).map(|(id, k, _)| (id, k)).collect();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        assert_eq!(changed[0].1, "pin_order");
+        // another device, and this one again: the same order
+        let mut b = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("bbbb")).unwrap();
+        assert_eq!(order(&mut b), [n.clone(), st1.clone(), both.clone(), p2.clone(), p1.clone(), st2.clone()]);
+        drop(s);
+        let mut s = lib.open();
+        assert_eq!(order(&mut s), [n.clone(), st1.clone(), both.clone(), p2.clone(), p1.clone(), st2.clone()]);
+        // 取消置顶 drops its place; pinned again it is new, on top
+        s.set_pinned(&p1, false).unwrap();
+        assert!(meta::load(&lib.0, "", &mut vec![]).get(&p1, "pin_order").is_none());
+        let key = crate::pins::top_key(&crate::pins::sorted(&s.list()));
+        s.set_pin(&p1, Some(Some(key))).unwrap();
+        assert_eq!(order(&mut b), [p1.clone(), n.clone(), st1.clone(), both.clone(), p2.clone(), st2.clone()]);
+    }
+
     /// The old layout's `index.json` (FORMAT 3), moved to real folders: the same.
     #[test]
     fn a_format_3_star_is_a_pin() {
@@ -6277,7 +6504,7 @@ mod tests {
         let index = crate::vfs::read(trash.join("index.json")).unwrap();
         crate::vfs::rename(&trash, lib.0.join(".quiet/trash-away")).unwrap();
         crate::vfs::write(&trash, b"").unwrap();
-        let mut s = Store { file_changes: vec![], top_dir: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), inodes: Default::default(), inodes_due: Default::default(), writes: Default::default(), batch: Default::default(), view: Default::default(), v5: false, me: device(), clock: Default::default(), seen: Default::default(), merged: Default::default(), key: library_key(&lib.0), place_by_hand: true, v6: false, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
+        let mut s = Store { file_changes: vec![], top_dir: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), inodes: Default::default(), inodes_due: Default::default(), writes: Default::default(), batch: Default::default(), view: Default::default(), v5: false, me: device(), clock: Default::default(), seen: Default::default(), merged: Default::default(), key: library_key(&lib.0), place_by_hand: true, v6: false, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), tables_kept: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None, v4_stars: Default::default() };
         assert_eq!(s.list_trash().len(), 1);
         assert_eq!(s.trash.len(), 1);
     }
@@ -6632,6 +6859,25 @@ mod tests {
         s.apply_file_history(&changes, false).unwrap();
         assert!(s.abs("新夹/乙.xml").fs_is_file() && !s.abs("乙.xml").fs_exists());
         assert!(crate::vfs::read_to_string(s.abs("丙.xml")).unwrap().contains("href=\"新夹/乙.xml\""));
+    }
+
+    /// #471: an `@` mention in a Markdown page is a link to the page or folder,
+    /// relative to the file, so it comes back from disk as a link, not as its title alone.
+    #[test]
+    fn markdown_mentions_stay_links() {
+        let lib = Lib::new("md-mention");
+        let mut s = lib.open();
+        let f = s.create_folder("命令 集", None).unwrap();
+        let g = s.create_folder("Bash", None).unwrap();
+        let a = s.create_from_in(&doc("甲 乙"), Some(&f)).unwrap();
+        let m = s.create_markdown_in(&doc("笔记"), "", Some(&g)).unwrap();
+        s.save(&m, &linking("笔记", &[(&f, "命令 集"), (&a, "甲 乙"), ("no-such-id", "别处")])).unwrap();
+        let text = crate::vfs::read_to_string(s.file_path(&m).unwrap()).unwrap();
+        assert!(text.contains("见 [命令 集](../命令%20集/)") && text.contains("见 [甲 乙](../命令%20集/甲%20乙.xml)"), "{text}");
+        assert!(text.contains("见 别处\n") || text.ends_with("见 别处\n"), "a mention of nothing keeps its title: {text}");
+        let back = s.load(&m).unwrap();
+        let links: Vec<Option<String>> = back.blocks.iter().flat_map(|b| b.text.spans().map(|(_, k)| k.link.clone())).flatten().map(Some).collect();
+        assert_eq!(links, [Some("../命令%20集/".to_string()), Some("../命令%20集/甲%20乙.xml".to_string())]);
     }
 
     /// 重命名 made off the window's thread (`src/tree_writes.rs`): a writer renames the folder
@@ -7303,6 +7549,34 @@ mod tests {
         crate::vfs::create_dir_all(lib.0.join("板")).unwrap();
         crate::vfs::write(lib.0.join("板/板.excalidraw"), crate::whiteboard::Board::default().file_json()).unwrap();
         assert!(s.list().iter().find(|e| e.meta.rel == "板").unwrap().note.is_none());
+    }
+
+    /// Opening a 数据库 keeps the file as a version unless the newest is the same: a file
+    /// and newest version unchanged since they were found the same are not read again, and
+    /// anything that changes either (a write, the version removed) compares again.
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn a_table_unchanged_since_its_version_is_not_read_again() {
+        let lib = Lib::new("table-kept");
+        let mut s = lib.open();
+        let t = s.create_table_in("书单", &crate::table::Base::blank(0), None).unwrap();
+        let names = |s: &Store| s.versions(&t).into_iter().map(|v| v.name).collect::<Vec<_>>();
+        assert!(s.snapshot_table(&t, true).unwrap());
+        assert!(!s.snapshot_table(&t, true).unwrap());
+        assert!(s.tables_kept.borrow().contains_key(&t));
+        // Written: compared again and kept as a new version.
+        let path = s.path(&t);
+        let mut bytes = crate::vfs::read(&path).unwrap();
+        bytes.extend_from_slice(b"changed");
+        crate::vfs::write(&path, &bytes).unwrap();
+        assert!(s.snapshot_table(&t, true).unwrap());
+        assert_eq!(names(&s).len(), 2);
+        assert!(!s.snapshot_table(&t, true).unwrap());
+        // Its newest version removed: the file is kept again.
+        let newest = names(&s)[0].clone();
+        crate::versions::remove(&s.history_base(), &t, &newest, false).unwrap();
+        assert!(s.snapshot_table(&t, true).unwrap());
+        assert_eq!(names(&s).len(), 2);
     }
 
     /// A 数据表 with 笔记 columns lives in a folder of its name with its notes
@@ -8213,7 +8487,7 @@ mod tests {
     }
 
     /// 创建副本 of a folder (批量管理): the folder with everything in it, each
-    /// page as its kind, links still pointing where they did; one undo takes
+    /// page as its kind, links out of it still pointing where they did; one undo takes
     /// the whole copy away and leaves the original as it was.
     #[test]
     fn duplicating_a_folder_copies_everything_in_it() {
@@ -8247,6 +8521,78 @@ mod tests {
         assert!(s.abs("资料 副本/子夹/乙.xml").fs_is_file() && s.abs("资料 副本/书单.sqlite").fs_is_file());
     }
 
+    /// A folder's copy links within itself (BATCH_FOLDERS.md「后续」): a mention, a plain link to
+    /// a file and a 数据表's 笔记 cell that point at a page copied with it point at the copy, in
+    /// a folder inside it too; what points outside the folder points where it did. One undo.
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn a_folders_copy_links_to_its_own_pages() {
+        use crate::table::{sqlite, Doc, FieldOpts, FieldType, Value};
+        let lib = Lib::new("dup-links");
+        let mut s = lib.open();
+        let other = s.create_from(&doc("其他")).unwrap();
+        let f = s.create_folder("资料", None).unwrap();
+        let b = s.create_from_in(&doc("乙"), Some(&f)).unwrap();
+        let sub = s.create_folder("子夹", Some(&f)).unwrap();
+        let c = s.create_from_in(&linking("丙", &[(&b, "乙")]), Some(&sub)).unwrap();
+        s.create_from_in(&linking("甲", &[(&b, "乙"), (&c, "丙"), (&other, "其他")]), Some(&f)).unwrap();
+        let linked = |title: &str, hrefs: &[&str]| {
+            let mut d = doc(title);
+            for h in hrefs {
+                let mut b = crate::model::Block::text("");
+                b.text.push(h, crate::model::Marks { link: Some(h.to_string()), ..Default::default() });
+                d.blocks.push(b);
+            }
+            d
+        };
+        // Markdown and DocxXML pages link to files by path, `../资料/…` the long way round too.
+        s.create_markdown_in(&linked("笔记", &["乙.xml", "子夹/丙.xml", "../其他.xml"]), "", Some(&f)).unwrap();
+        s.create_from_in(&linked("文件", &["../资料/子夹/丙.xml", "../其他.xml"]), Some(&f)).unwrap();
+        // A 数据表 with its notes (its folder, `table_folder`), and one pointing out of it.
+        let table = s.create_table_in("书单", &crate::table::Base::blank(0), Some(&f)).unwrap();
+        let tf = s.table_folder(&table).unwrap();
+        s.create_from_in(&doc("三体"), Some(&tf)).unwrap();
+        let rel = "资料/书单/书单.sqlite";
+        let mut d = Doc::new(sqlite::load(&s.abs(rel)).unwrap());
+        let t = d.base.tables[0].id;
+        let nf = d.add_field(t, None, "读书笔记", FieldType::Note, FieldOpts::default()).unwrap();
+        let rows: Vec<_> = d.base.tables[0].records.iter().map(|r| r.id).collect();
+        d.set_cells(t, vec![(rows[0], nf, Value::Text("三体.xml".into())), (rows[1], nf, Value::Text("../乙.xml".into())), (rows[2], nf, Value::Text("../../其他.xml".into()))]);
+        sqlite::save(&s.abs(rel), &d.base, &d.dirty).unwrap();
+        let cells = |s: &Store, rel: &str| -> Vec<String> {
+            let t = &sqlite::load(&s.abs(rel)).unwrap().tables[0];
+            let f = t.fields.iter().find(|f| f.ty == FieldType::Note).unwrap().id;
+            t.records.iter().filter_map(|r| match r.get(f) { Value::Text(h) => Some(h.clone()), _ => None }).collect()
+        };
+        let journal = s.track_file_changes();
+        let copy = s.duplicate(&f, "资料 副本").unwrap();
+        let changes = journal.take();
+        let read = |s: &Store, rel: &str| crate::vfs::read_to_string(s.abs(rel)).unwrap();
+        let id_of = |s: &Store, rel: &str| s.index.iter().find(|(_, m)| m.rel == rel).unwrap().0.clone();
+        let targets = |s: &Store, rel: &str| s.load(&id_of(s, rel)).unwrap().doc_links().into_iter().map(|l| l.target).collect::<Vec<_>>();
+        let (b2, c2) = (id_of(&s, "资料 副本/乙.xml"), id_of(&s, "资料 副本/子夹/丙.xml"));
+        // Mentions: as paths on disk, and as the copies' ids once read.
+        let a2 = read(&s, "资料 副本/甲.xml");
+        assert!(a2.contains("href=\"乙.xml\"") && a2.contains("href=\"子夹/丙.xml\"") && a2.contains("href=\"../其他.xml\""), "{a2}");
+        assert_eq!(targets(&s, "资料 副本/甲.xml"), [b2.clone(), c2, other.clone()]);
+        assert_eq!(targets(&s, "资料 副本/子夹/丙.xml"), [b2], "out of a folder inside, to the copy");
+        let md = read(&s, "资料 副本/笔记.md");
+        assert!(md.contains("(乙.xml)") && md.contains("(子夹/丙.xml)") && md.contains("(../其他.xml)"), "{md}");
+        let file = read(&s, "资料 副本/文件.xml");
+        assert!(file.contains("href=\"子夹/丙.xml\"") && file.contains("href=\"../其他.xml\""), "{file}");
+        assert_eq!(cells(&s, "资料 副本/书单/书单.sqlite"), ["三体.xml", "../乙.xml", "../../其他.xml"]);
+        // The original as it was.
+        assert!(!read(&s, "资料/文件.xml").contains("副本") && !read(&s, "资料/笔记.md").contains("副本"));
+        assert_eq!(targets(&s, "资料/甲.xml"), [b, c, other]);
+        // 撤销 takes the copy away in one step; 重做 brings it back linked to itself.
+        s.apply_file_history(&changes, false).unwrap();
+        assert!(!s.abs("资料 副本").fs_exists() && s.abs("资料/子夹/丙.xml").fs_is_file());
+        s.apply_file_history(&changes, true).unwrap();
+        assert!(read(&s, "资料 副本/文件.xml").contains("href=\"子夹/丙.xml\""));
+        assert_eq!(targets(&s, "资料 副本/子夹/丙.xml"), [id_of(&s, "资料 副本/乙.xml")]);
+        assert_eq!(s.index[&copy].parent, None);
+    }
+
     /// A folder's 正文 follows the copy's name, so the copy is a document with
     /// child pages too; the 正文 copied alone goes beside its folder.
     #[test]
@@ -8255,11 +8601,15 @@ mod tests {
         let mut s = lib.open();
         let outer = s.create_folder("外", None).unwrap();
         let plan = s.create_from_in(&doc("方案"), Some(&outer)).unwrap();
-        s.create_child(&plan, &doc("子页")).unwrap();
+        s.create_child(&plan, &linking("子页", &[(&plan, "方案")])).unwrap();
         let folder = s.folder_of_note(&plan).unwrap();
         let copy = s.duplicate(&folder, "方案 副本").unwrap();
         assert!(s.abs("外/方案 副本/方案 副本.xml").fs_is_file() && s.abs("外/方案 副本/子页.xml").fs_is_file());
-        assert!(s.note_of(&copy).is_some());
+        let note = s.note_of(&copy).unwrap();
+        // The child page mentions its 正文: the copy's, under its new name.
+        assert!(crate::vfs::read_to_string(s.abs("外/方案 副本/子页.xml")).unwrap().contains("href=\"方案 副本.xml\""));
+        let child = s.index.iter().find(|(_, m)| m.rel == "外/方案 副本/子页.xml").unwrap().0.clone();
+        assert_eq!(s.load(&child).unwrap().doc_links()[0].target, note);
         let alone = s.duplicate(&plan, "方案 副本 2").unwrap();
         assert_eq!(s.index[&alone].parent.as_deref(), Some(outer.as_str()), "beside its folder, not a child page of it");
         assert!(s.abs("外/方案 副本 2.xml").fs_is_file());

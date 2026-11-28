@@ -57,7 +57,7 @@
   <img src="docs/images/readme-write.webp" width="100%" alt="Une longue note ouverte dans Quiet.md, avec des titres, des formules en ligne et un tableau de concentrations ioniques.">
 </p>
 
-Titres, listes, tâches, citations, encadrés, colonnes, tableaux avec cellules fusionnées, code avec coloration syntaxique, formules LaTeX, images, fichiers et couvertures. Les raccourcis Markdown fonctionnent pendant la frappe, et le menu `/` propose tout le reste. Mentionnez une autre note pour y faire un lien ; elle affichera ses rétroliens. Les blocs de code Mermaid s'affichent en diagrammes. Les tableaux de données rangent des fiches avec des champs de choix, date, nombre, formule, recherche et lien, dans des vues que vous filtrez, triez et groupez ; chaque cellule d'une colonne Notes est une vraie note. Le menu … propose Mode concentration, Mode machine à écrire et Focus sur le paragraphe, et Présentation › Zoom avant agrandit le texte seul.
+Titres, listes, tâches, citations, encadrés, colonnes, tableaux avec cellules fusionnées, code avec coloration syntaxique, formules LaTeX, images, fichiers et couvertures. Les raccourcis Markdown fonctionnent pendant la frappe, et le menu `/` propose tout le reste. Mentionnez une autre note pour y faire un lien ; elle affichera ses rétroliens. Les bases de données rangent des fiches avec des champs de choix, date, nombre, formule, recherche et lien, dans des vues que vous filtrez, triez et groupez ; chaque cellule d'une colonne Notes est une vraie note. Le menu … propose Mode concentration, Mode machine à écrire et Focus sur le paragraphe, et Présentation › Zoom avant agrandit le texte seul.
 
 ### Dessiner
 
@@ -96,7 +96,7 @@ Importer depuis une autre app… (dans le menu Fichier) cherche sur l'ordinateur
 - [x] Modes d'écriture : concentration, machine à écrire et focus sur le paragraphe
 - [x] Thèmes, mode sombre et neuf langues
 - [x] Une CLI `quiet` et une skill pour les agents d'IA
-- [ ] Tables de données (en cours)
+- [ ] Bases de données (en cours)
 - [ ] Diagrammes Mermaid (en cours)
 - [ ] Mobile : iPhone, iPad et Android (en cours)
 - [ ] Synchronisation entre appareils (en cours)
@@ -154,28 +154,37 @@ Merci à toutes les personnes qui ont contribué à construire Quiet.md. Issues 
 
 [![Contributeurs](https://raw.githubusercontent.com/s1dashu/quiet-md/contributors-assets/docs/images/contributors.svg?v=1)](https://github.com/s1dashu/quiet-md/graphs/contributors)
 
+## Communauté
+
+Si vous utilisez WeChat, scannez le code ci-dessous pour rejoindre notre groupe d’utilisateurs. Un serveur Discord arrive bientôt.
+
+<img src="docs/images/wechat-group.webp" alt="Groupe d’utilisateurs WeChat" width="200">
+
 ## Dernières mises à jour
 
-- **0.1.14** (22 nov) : rechercher-remplacer avec des expressions régulières. Les `[[liens wiki]]` d'Obsidian ouvrent la note visée. Interface en turc, et l'arabe s'affiche de droite à gauche. Choisissez la police de l'interface et celle des documents, et retirez les images et fichiers qu'aucune note n'utilise. La recherche suit dans les grandes bibliothèques, et supprimer beaucoup de notes est plus rapide. Un réglage pour que Retour arrière revienne au titre ; sous Windows et Linux, Copier en Markdown devient Ctrl+Maj+M.
-- **0.1.13** (17 nov) : tableaux blancs portés depuis Excalidraw, comme bloc dans une note ou fichier `.excalidraw`, fluides même avec 10 000 formes. Historique des versions pour chaque note (… › Historique des versions). Interfaces en français et en arabe. Copier en Markdown, copier le chemin d'un fichier et changer de dossier de bibliothèque dans les Réglages. Les images collées depuis le web sont enregistrées dans la bibliothèque. Moins de mémoire sur les pages riches en images et un défilement plus fluide de la barre latérale.
-- **0.1.12** (14 nov) : glissez des fichiers depuis le Finder, ou un fichier de « Fichiers de cet ordinateur », directement dans un dossier de la barre latérale ou entre deux lignes. Toute la page s'illumine comme zone de dépôt. Cartes de l'accueil redessinées avec des coins arrondis continus, un menu Ouvrir dans le Finder, un fil d'Ariane qui commence à « Mes documents », une largeur minimale de fenêtre qui garde de la place pour la note, et une barre latérale opaque en plein écran. Corrige un blocage lors de la création d'un document dans un dossier.
-- **0.1.11** (13 nov) : la bibliothèque est désormais de vrais dossiers, avec des fichiers nommés d'après leur titre. Les anciennes bibliothèques migrent automatiquement, avec une sauvegarde. Un premier lancement nouveau qui règle la langue, l'emplacement de la bibliothèque et le raccourci de note rapide, et importe les notes depuis Obsidian et les autres apps Markdown. Interface en japonais, espagnol et coréen, équations en bloc dans le Markdown, documents qui se rouvrent là où vous les avez laissés, lancement plus rapide et mémoire réduite.
-- **0.1.10** (10 nov) : choix d'un type de document dans le menu Nouveau, défilement horizontal des tableaux larges, conservation de l'alignement des colonnes Markdown, et curseur toujours visible dans les champs longs.
-- **0.1.9** (8 nov) : correction de Cmd+Q sur macOS, des contrôles de fenêtre inertes sous Windows, et de la sélection de texte masquée par les couleurs de surlignage.
-- **0.1.8** (9 nov) : édition de fichiers Markdown locaux sur place, import de dossiers en conservant les `.md`, et organisation des notes en dossiers imbriqués par glisser-déposer avec annulation. Mémoire d'images et d'aperçus réduite, redimensionnement des tableaux plus stable et menus affinés. Le premier lancement choisit une langue système prise en charge. Empaquetage AppImage Linux expérimental.
-- **0.1.7** (6 nov) : enregistrement multi-fenêtres, récupération de conflits et écritures disque plus sûrs. Accès aux fichiers d'export restreint, et les exports Markdown conservent les pièces jointes en ligne. Correction de la suppression de caractères en saisie chinoise avec Weasel sous Windows.
-- **0.1.6** (6 nov) : bascule entre fenêtres et frappe plus fluides, tableaux plus larges, enregistrements réguliers pendant la saisie continue, et Option+Espace pour la note rapide globale sur macOS. Windows ajoute le collage d'images, l'export PDF et l'impression, avec une suppression de mots corrigée.
-- **0.1.5** (5 nov) : l'app s'appelle désormais Quiet.md. Votre bibliothèque et vos notes restent où elles étaient.
-  - Gérez plusieurs documents à la fois depuis l'accueil : dupliquer, déplacer ou supprimer ensemble.
-  - Videz la Corbeille en une seule étape. Les flèches parcourent les icônes du menu d'insertion, et supprimer tous les documents ne crée plus de document vide.
-  - Après une mise à jour depuis l'app, la barre latérale affiche une fois ce qui a changé dans la nouvelle version.
-  - Windows : les raccourcis et le guide intégré affichent Ctrl / Alt, et un lancement raté s'explique et laisse un journal.
-- **0.1.4** (5 nov) :
-  - Mises à jour depuis l'app : quand une nouvelle version sort, un bouton **Mettre à jour** apparaît en haut de la barre latérale. Le téléchargement est vérifié par sa signature, et un redémarrage termine l'installation. Les documents ouverts sont d'abord enregistrés. Les vérifications automatiques se désactivent dans **Réglages › Général**. Une vérification ne récupère qu'un manifeste de version et n'envoie aucune donnée. Les versions 0.1.3 et antérieures nécessitent un téléchargement manuel unique de la 0.1.4.
-  - Mode sombre : choisissez Système, Clair ou Sombre dans **Réglages › Apparence**. Les thèmes intégrés et personnalisés ont tous un habillage sombre, mais l'export et l'impression restent clairs.
-- **0.1.3** (4 nov) : le texte de la barre latérale est de nouveau lisible quand macOS est en mode sombre.
-- **0.1.2** (4 nov) : les menus et raccourcis macOS standard (Masquer, Placer dans le Dock, Zoom, Plein écran). Cliquer sur l'icône du Dock rouvre une fenêtre après la fermeture de la dernière. Correction de certains caractères chinois rendus avec les mauvais glyphes.
-- **0.1.1** (3 nov) : première version Windows x64, installée par utilisateur, qui conserve vos notes à la désinstallation. Interface chinoise et anglaise et guide intégré peaufinés.
+- **0.2.0** (28 nov) : une interface plus simple bâtie sur un seul système de design, les bases de données pour tous, trois modes d'écriture et une ligne de commande que votre agent IA peut utiliser.
+  - **Les dossiers sont le niveau supérieur** : il n'y a plus de page d'accueil séparée. La barre latérale regroupe les dossiers de premier niveau sous des en-têtes repliables, et le menu … de chaque en-tête propose Gérer, Afficher dans le Finder et Retirer de la barre latérale. Ajouter un dossier utilise le dossier là où il se trouve. « Mes documents » et « Fichiers de cet ordinateur » disparaissent : un fichier Markdown ouvert seul a sa propre fenêtre, et les dossiers ouverts auparavant deviennent des dossiers de premier niveau. Glissez une page ou un dossier dans un autre dossier de premier niveau, ou utilisez Déplacer vers ; ses images, liens et historique des versions le suivent, et l'opération peut être annulée. Les Favoris rejoignent les Épinglés.
+  - **Un seul système de design** : menus, boutons, boîtes de dialogue, interrupteurs, infobulles et barres de défilement forment un seul jeu de composants inspiré de shadcn/ui, avec des coins continus (squircle) sur macOS, un fin anneau et une ombre douce autour des popovers, une seule échelle d'ombres et des icônes Nucleo partout. Les menus trop longs défilent, et se diriger vers un sous-menu n'allume plus les lignes traversées. L'en-tête affiche + · Rechercher · … sur chaque page (+ · Afficher · Rechercher · … sur les dossiers), et le fil d'Ariane s'aligne sur les boutons de fenêtre d'après la hauteur des capitales.
+  - **Bases de données** : créez-en une depuis le menu Nouveau, le menu `/` ou un fichier CSV. Les champs comprennent texte, sélection unique et multiple, date, nombre, formule, recherche et lien ; les vues filtrent, trient, regroupent et colorent les lignes selon des règles, avec une hauteur de ligne Ajuster au contenu. Chaque cellule d'une colonne Note est une vraie note de votre bibliothèque.
+  - **Modes d'écriture**, dans le menu … du document : Mode concentration (⌘.) laisse le document seul dans sa fenêtre ; Mode machine à écrire (⌘⇧T) garde au milieu la ligne en cours ; Focus sur le paragraphe (⌘⇧F) garde le paragraphe courant net et estompe le reste. Afficher › Zoom avant / Zoom arrière (⌘+ / ⌘−) agrandit seulement le texte de la note, titres, tableaux, code et équations compris.
+  - **Ligne de commande et agents** : le nouvel outil `quiet` liste, recherche, lit et modifie notes et bases de données depuis un terminal, ajoute et retire des dossiers de la barre latérale, et ouvre un document sur un bloc donné. Réglages › Connecteur d’agent configure Claude Code, Codex et d'autres agents en une commande ; `quiet` est livré avec l'app et rejoint votre PATH (Installer la commande sur macOS, l'installateur sous Windows).
+  - **Un mode sombre plus lisible** : liens, couleurs de texte, surlignages, dates de rappel, comptes à rebours et libellés de boutons atteignent un contraste lisible ; la barre latérale est plus claire, et ⌃⌘D bascule entre sombre et clair.
+  - **Aussi** : les sous-pages reviennent ; coller depuis Word, un navigateur ou Feishu conserve la mise en forme sous Windows et Linux ; import des espaces de travail SiYuan, avec SiYuan, Obsidian, Typora et les dossiers Markdown réunis sous Importer depuis une autre app… ; la Corbeille se vide d'elle-même après 1 à 30 jours ; tout raccourci peut être effacé ; Ouvrir dans une nouvelle fenêtre reprend la taille et la barre latérale de la fenêtre principale ; renommer ou déplacer un dossier s'affiche aussitôt, pendant que les fichiers suivent en arrière-plan ; le premier lancement ouvre directement Documents › Quiet Notes et les guides regroupés, avec des fichiers d'exemple Markdown, tableau blanc et base de données ; un comptage anonyme de l'usage quotidien, désactivable dans Réglages › Général.
+  - **Format de bibliothèque** : ouvrir une bibliothèque la fait passer au FORMAT 6, après quoi la 0.1.14 et les versions antérieures ne peuvent plus l'ouvrir. Les bibliothèques dans iCloud et autres dossiers synchronisés ne sont pas mises à niveau pour l'instant.
+- **0.1.14** (22 nov) : rechercher-remplacer avec des expressions régulières ; les `[[liens wiki]]` d'Obsidian ouvrent leur note ; interfaces en turc et en arabe de droite à gauche ; choix des polices de l'interface et des documents ; nettoyage des images et fichiers inutilisés ; recherche et suppression groupée plus rapides dans les grandes bibliothèques.
+- **0.1.13** (17 nov) : tableaux blancs portés depuis Excalidraw, dans une note ou en fichier `.excalidraw` ; historique des versions pour chaque note ; interfaces en français et en arabe ; Copier en Markdown ; les images collées depuis le web sont enregistrées dans la bibliothèque.
+- **0.1.12** (14 nov) : glissez des fichiers depuis le Finder directement dans les dossiers de la barre latérale ; cartes de l'accueil aux coins continus ; Ouvrir dans le Finder ; une largeur minimale de fenêtre qui garde de la place pour la note.
+- **0.1.11** (13 nov) : la bibliothèque devient de vrais dossiers avec des fichiers nommés d'après leur titre, migrée automatiquement avec une sauvegarde ; un nouveau premier lancement avec import depuis Obsidian ; interfaces en japonais, espagnol et coréen ; équations en bloc dans le Markdown ; lancement plus rapide et moins de mémoire.
+- **0.1.10** (10 nov) : choix d'un type de document dans le menu Nouveau ; les tableaux larges défilent horizontalement ; le Markdown conserve l'alignement des colonnes.
+- **0.1.9** (8 nov) : corrections pour Cmd+Q sur macOS, les boutons de fenêtre sous Windows et les sélections masquées par les surlignages.
+- **0.1.8** (9 nov) : édition sur place des fichiers Markdown locaux ; dossiers imbriqués avec glisser-déposer et annulation ; moins de mémoire pour les images ; une AppImage Linux expérimentale.
+- **0.1.7** (6 nov) : enregistrement multi-fenêtres et récupération de conflits plus sûrs ; les exports Markdown conservent les pièces jointes en ligne.
+- **0.1.6** (6 nov) : frappe et changement de fenêtre plus fluides, tableaux plus larges, ⌥ Space pour la note rapide sur macOS ; collage d'images, export PDF et impression sous Windows.
+- **0.1.5** (5 nov) : l'app devient Quiet.md ; gestion de plusieurs documents à la fois ; la Corbeille se vide en une étape.
+- **0.1.4** (5 nov) : mises à jour depuis l'app, vérifiées par signature ; mode sombre pour chaque thème.
+- **0.1.3** (4 nov) : texte de la barre latérale lisible quand macOS est en mode sombre.
+- **0.1.2** (4 nov) : les menus et raccourcis standard de macOS ; l'icône du Dock rouvre une fenêtre.
+- **0.1.1** (3 nov) : première version Windows x64.
 
 Les notes complètes de chaque version sont sur [Releases](https://github.com/s1dashu/quiet-md/releases).
 
@@ -187,3 +196,12 @@ Les éléments suivants ne sont pas couverts par la licence MIT et doivent être
 
 - Les icônes Nucleo de `assets/icons/` (82) et de `assets/editor-icons/` (24) sont sous une licence Nucleo commerciale. Ne les extrayez pas et ne les redistribuez pas seules.
 - Le nom « Quiet.md » et l'icône de l'app.
+
+## Star History
+
+<a href="https://www.star-history.com/#s1dashu/quiet-md&type=date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=s1dashu/quiet-md&type=date&theme=dark" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=s1dashu/quiet-md&type=date" />
+  </picture>
+</a>

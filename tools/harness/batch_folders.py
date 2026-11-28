@@ -7,7 +7,9 @@ a temporary library and checks the files on disk:
 
   grid      the grid: a folder card and a document card checked (the folder not
             dimmed, its box where a card's is); 创建副本 copies the folder with its
-            subfolders and pages beside it, in the background; ⌘Z takes the copies away
+            subfolders and pages beside it, in the background, the mentions between
+            its pages pointing at the copies and the one out of it where it did;
+            ⌘Z takes the copies away
   list      the list: a folder and a document checked; 移动到 another folder takes
             the folder's pages along, its links following; ⌘Z puts them back
   sidebar   the sidebar: a folder and a page inside it checked (Shift-click); 删除
@@ -15,6 +17,8 @@ a temporary library and checks the files on disk:
             ⌘Z brings it all back
   sidebar_copy  the same pick duplicated: the page inside is copied once, with its
             folder (上层优先), not again beside itself
+  emptied   the list: Other's only page moved out with 移动到; Other, empty now, still
+            shows in the sidebar and on Project's folder page, also after a relaunch
 
 Everything happens in a temporary library; no system clipboard or user
 library is accessed. Pass case names to run only those. Screenshots of each
@@ -33,15 +37,17 @@ PREFS = json.dumps({"appearance": "light", "english": True, "language": "en", "s
 
 
 def library(root):
-    """Project/{Alpha, Beta, Sub/{Inner, Deep/Leaf}, Other/Keep}, and Outside, which Inner links to."""
+    """Project/{Alpha, Beta, Sub/{Inner, Deep/Leaf}, Other/Keep}, and Outside. Inner mentions
+    Outside, Alpha (out of Sub) and Leaf (in Sub), Leaf mentions Inner."""
     (root / ".quiet").mkdir(parents=True)
     (root / ".quiet" / "preferences.json").write_text(PREFS)
     (root / "Project" / "Sub" / "Deep").mkdir(parents=True)
     (root / "Project" / "Other").mkdir(parents=True)
     (root / "Project" / "Alpha.xml").write_text("<title>Alpha</title>\n<p>alpha</p>\n")
     (root / "Project" / "Beta.xml").write_text("<title>Beta</title>\n<p>beta</p>\n")
-    (root / "Project" / "Sub" / "Inner.xml").write_text('<title>Inner</title>\n<p>To <cite type="doc" href="../../Outside.xml" file-type="docx">Outside</cite></p>\n')
-    (root / "Project" / "Sub" / "Deep" / "Leaf.xml").write_text("<title>Leaf</title>\n<p>leaf</p>\n")
+    cite = lambda href, title: f'<p>To <cite type="doc" href="{href}" file-type="docx">{title}</cite></p>\n'
+    (root / "Project" / "Sub" / "Inner.xml").write_text("<title>Inner</title>\n" + cite("../../Outside.xml", "Outside") + cite("../Alpha.xml", "Alpha") + cite("Deep/Leaf.xml", "Leaf"))
+    (root / "Project" / "Sub" / "Deep" / "Leaf.xml").write_text("<title>Leaf</title>\n" + cite("../Inner.xml", "Inner"))
     (root / "Project" / "Other" / "Keep.xml").write_text("<title>Keep</title>\n<p>keep</p>\n")
     (root / "Outside.xml").write_text("<title>Outside</title>\n<p>outside</p>\n")
     return root
@@ -71,7 +77,11 @@ def grid():
     project = lib / "Project"
     assert (project / "Sub copy" / "Inner.xml").is_file() and (project / "Sub copy" / "Deep" / "Leaf.xml").is_file(), names(project)
     assert (project / "Alpha copy.xml").is_file(), names(project)
-    assert 'href="../../Outside.xml"' in (project / "Sub copy" / "Inner.xml").read_text(), "the copy's link no longer reaches Outside"
+    inner = (project / "Sub copy" / "Inner.xml").read_text()
+    assert 'href="../../Outside.xml"' in inner and 'href="../Alpha.xml"' in inner, f"the copy's links out of the folder no longer reach the originals:\n{inner}"
+    # Within the copy, to the copies (they would read ../../Sub/Deep/Leaf.xml and ../../Sub/Inner.xml otherwise).
+    assert 'href="Deep/Leaf.xml"' in inner and 'href="../Inner.xml"' in (project / "Sub copy" / "Deep" / "Leaf.xml").read_text(), f"the copy's links within it point at the originals:\n{inner}"
+    assert 'href="Deep/Leaf.xml"' in (project / "Sub" / "Inner.xml").read_text(), "the original's link changed"
     assert (project / "Sub" / "Deep" / "Leaf.xml").is_file(), "the original moved"
     # ⌘Z: one step takes every copy away.
     lib, log = run("grid-undo", script + "key cmd-z\nwait 2500\nshot undone\n")
@@ -119,7 +129,25 @@ def sidebar_copy():
     assert not (project / "Sub" / "Inner copy.xml").exists(), "a page inside a picked folder was copied twice"
 
 
-CASES = {"grid": grid, "list": list_, "sidebar": sidebar, "sidebar_copy": sidebar_copy}
+# A folder emptied here stays (docs/FORMAT.md, What a folder shows): `hoverrow` and `moveat`
+# end the run with exit code 3 when the row or the list row is not there.
+SEE_OTHER = "row Project\nwait 800\nshowing Project\nanchor page-view\nwait 300\nrow List\nwait 500\nmoveat list:Other\nwait 300\nhoverrow Other\nwait 300\nshot emptied\n"
+
+
+def emptied():
+    script = ("row Project\nwait 600\nrow Other\nwait 800\nshowing Other\nanchor page-view\nwait 300\nrow List\nwait 500\nanchor tb-more\nwait 300\nrow Manage\nwait 400\n"
+              "anchor list:Keep\nwait 300\nanchor page-batch-move\nwait 600\ntype Project\nwait 400\nanchor move:Project\nwait 300\nanchor move-ok\nwait 2500\nshot moved\nkey escape\nwait 300\n" + SEE_OTHER)
+    lib, log = run("emptied", script)
+    assert (lib / "Project" / "Keep.xml").is_file() and (lib / "Project" / "Other").is_dir(), names(lib / "Project")
+    assert names(lib / "Project" / "Other") == [], names(lib / "Project" / "Other")
+    # Opened again: still there.
+    out = work / "emptied-again"
+    (work / "emptied-again.txt").write_text("resize 1300 850\nwait 300\nmove 700 500\nwait 1200\n" + SEE_OTHER)
+    r = subprocess.run([sys.executable, str(here / "run.py"), str(work / "emptied-again.txt"), str(lib), str(out)], env=dict(os.environ, FDL_NOBLINK="1"), timeout=180)
+    assert r.returncode == 0, (out / "log").read_text(errors="replace")[-800:]
+
+
+CASES = {"grid": grid, "list": list_, "sidebar": sidebar, "sidebar_copy": sidebar_copy, "emptied": emptied}
 
 if __name__ == "__main__":
     for name in sys.argv[1:] or list(CASES):

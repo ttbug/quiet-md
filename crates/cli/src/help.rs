@@ -25,7 +25,7 @@ pub const HELP: &str = "quiet — read, search, edit and script a Quiet.md libra
   quiet duplicate DOC [TITLE]            a copy beside it (\"TITLE 副本\")
   quiet pin|unpin DOC                    the sidebar's 置顶 list
 
-  quiet table DOC[#REF] [--view V] [--where 'F OP V']…   a 数据表's rows, filtered
+  quiet table DOC[#REF] [--view V] [--where 'F OP V']…   a 数据库's rows, filtered
   quiet table add|update|delete|import …  rows;  table field|view|new|rename|remove … its shape
   quiet board DOC[#REF]                  a 画板's elements; board add|rm …
   quiet history DOC [VERSION]            saved versions, or what changed since one
@@ -40,6 +40,7 @@ pub const HELP: &str = "quiet — read, search, edit and script a Quiet.md libra
   quiet call OP [JSON]                   any operation by name (what run's lib calls)
   quiet mcp                              serve these as MCP tools on stdio
   quiet guide                            the full guide for agents (script API included)
+  quiet guide import [--in FOLDER] [--lang zh|en]   the 开始指南 as a new folder
   quiet help COMMAND                     one command in detail
   quiet telemetry [on|off|status]        the anonymous daily usage counts
 
@@ -110,7 +111,7 @@ gone, empty documents, pictures and files no document uses."),
 --open shows it in Quiet.md once written, as 新建 there does (`quiet open`).
 
 A new document (DocxXML; --kind md or --markdown for a .md file), its body
-from Markdown; an empty board; or a 数据表 with the columns --fields names,
+from Markdown; an empty board; or a 数据库 with the columns --fields names,
 or from CSV text whose first row names them (types guessed from the values).
 
   quiet new 会议纪要 --in 会议 --md '# 议题\\n- [ ] 预算'
@@ -172,7 +173,7 @@ quiet table view rename DOC NAME NEW  |  quiet table view delete DOC NAME
 quiet table new DOC NAME [--fields A,B | --csv FILE|-]   another table in the file
 quiet table rename DOC NAME NEW  |  quiet table remove DOC NAME [--force]
 
-A 数据表 file, or the 数据表 block REF in a document; --table picks one of
+A 数据库 file, or the 数据库 block REF in a document; --table picks one of
 its tables (the first by default). Rows have ids that last (r12).
 
 Reading: every row in the table's order, or with --view a view's 筛选, 排序,
@@ -250,7 +251,7 @@ Brings the document called NAME (or with that id) back from the trash, to where 
     (&["import"], "quiet import FILE… [--in FOLDER]
 
 Copies files into the library: Markdown (.md, .txt; pictures beside it are
-copied in), DocxXML (.xml), CSV/TSV (as a 数据表), .excalidraw (as a 画板).
+copied in), DocxXML (.xml), CSV/TSV (as a 数据库), .excalidraw (as a 画板).
 The originals are left alone."),
     (&["run"], "quiet run [FILE|-] [-e CODE] [--timeout SECS] [--dry-run]
 
@@ -308,7 +309,7 @@ link goes to the installed Quiet.md (a development preview does not take them). 
   quiet open --folder 工作/项目"),
     (&["duplicate", "cp"], "quiet duplicate DOC [TITLE]
 
-创建副本: a copy of the document (a 画板, a 数据表, a folder's 正文 too) beside
+创建副本: a copy of the document (a 画板, a 数据库, a folder's 正文 too) beside
 it, titled TITLE or \"<title> 副本\" as the app names it. Links inside the
 copy still point where they pointed.
 
@@ -330,10 +331,22 @@ id. Nothing is counted while DO_NOT_TRACK or QUIET_NO_TELEMETRY is set, in CI,
 or while Settings › General › Anonymous usage statistics (设置 › 通用 › 匿名使用统计)
 is off in Quiet.md (untouched, it follows Check for updates automatically)."),
     (&["guide", "skill"], "quiet guide
+quiet guide import [--in FOLDER] [--lang zh|en]
 
 The full guide for agents: addressing, every command, the script API,
 examples. It matches this quiet; the agent skill (npx skills add
-s1dashu/quiet-md) carries the same guide as its reference."),
+s1dashu/quiet-md) carries the same guide as its reference.
+
+`guide import` is Settings › About › Import the latest guide (设置 › 关于 ›
+导入最新的开始指南): the Getting started guide (开始指南) that comes with this
+version, as a new folder at the top of a top-level folder: \"Quiet.md Guide\",
+or \"Quiet.md 指南\" in Chinese, numbered when the name is taken. Nothing there
+is overwritten; pictures the library already has under another file of the
+same name go to .assets/guides-2/ (and so on). --in picks the top-level folder
+(default: the one Quiet.md first put the guide in, else the first); --lang
+the guide's language (default: Quiet.md's, Chinese for 简体中文, else English).
+
+  quiet guide import --in Quiet.md --lang en"),
 ];
 
 pub fn of(cmd: Option<&str>) -> R<String> {

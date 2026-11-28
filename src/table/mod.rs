@@ -1,4 +1,4 @@
-//! 数据表 (多维表格) view, after 飞书's: tabs for the file's tables and the
+//! 数据库 (多维表格) view, after 飞书's: tabs for the file's tables and the
 //! table's views, a toolbar (字段配置 / 筛选 / 分组 / 排序 / 行高 / 填色), and
 //! the view itself (`grid`, one 表格 per file), with 记录详情 beside it.
 //! The engine is `fdl_core::table` (re-exported here); this module is the
@@ -23,11 +23,12 @@ mod menus;
 mod notes;
 mod panels;
 mod record;
+pub mod still;
 
 pub use fdl_core::table::*;
 
 /// A new file's one blank table, it and its columns named in the interface language.
-pub fn blank_base() -> Base { Base::blank_named(field::now(), crate::settings::text("未命名数据表"), crate::settings::text("文本")) }
+pub fn blank_base() -> Base { Base::blank_named(field::now(), crate::settings::text("未命名数据库"), crate::settings::text("文本")) }
 pub use fdl_core::table::View;
 
 use crate::input::{TextField, TextFieldEvent};
@@ -81,7 +82,7 @@ impl BaseState {
         match sqlite::load_marked(&self.path) {
             // what the file lacks (sort keys of a format 1 file, rows added elsewhere) is written now
             Ok((base, dirty)) => { self.doc.replace(base); self.doc.dirty = dirty; self.error = None; self.stamp = sqlite::stamp(&self.path); self.write(); }
-            Err(e) => self.error = Some(format!("{}：{e}", crate::settings::label("无法读取数据表")).into()),
+            Err(e) => self.error = Some(format!("{}：{e}", crate::settings::label("无法读取数据库")).into()),
         }
     }
     #[cfg(target_family = "wasm")]
@@ -93,10 +94,10 @@ impl BaseState {
         self.save = None;
         if self.read_only || self.doc.dirty.is_clean() || self.path.as_os_str().is_empty() { self.doc.dirty = Dirty::default(); return; }
         // never write a new file where one was: it moved or was deleted under us
-        if !self.path.exists() { log::error!("数据表文件不在原处，未写入 {}", self.path.display()); return; }
+        if !self.path.exists() { log::error!("数据库文件不在原处，未写入 {}", self.path.display()); return; }
         match sqlite::save(&self.path, &self.doc.base, &self.doc.dirty) {
             Ok(()) => { self.doc.dirty = Dirty::default(); self.stamp = sqlite::stamp(&self.path); }
-            Err(e) => log::error!("数据表保存失败 {}: {e}", self.path.display()),
+            Err(e) => log::error!("数据库保存失败 {}: {e}", self.path.display()),
         }
     }
     #[cfg(target_family = "wasm")]
@@ -211,8 +212,8 @@ pub(crate) enum Popup {
     Date { rec: RecId, field: FieldId, year: i64, month: u32 },
     Links { rec: RecId, field: FieldId },
     Files { rec: RecId, field: FieldId },
-    /// 指向已有笔记: the library's documents, searched.
-    NotePick { rec: RecId, field: FieldId },
+    /// 指向已有笔记: the library's documents, searched; `new`: an empty cell opened, 新建笔记 first.
+    NotePick { rec: RecId, field: FieldId, new: bool },
     Panel(panels::Panel),
     /// The 「…」 menu: export, copy as Markdown.
     More,

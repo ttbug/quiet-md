@@ -130,6 +130,14 @@ impl SharedStore {
         if let Some(p) = front { Store::set_active_dir(&p); }
         r
     }
+    /// The top-level folders in the order of `keys` (`TopFolders::arrange`); the one in front stays in front.
+    pub fn arrange_tops(&self, keys: &[String]) -> Result<()> {
+        let mut sh = self.0.borrow_mut();
+        let r = sh.tops.arrange(keys);
+        let front = sh.active.clone().and_then(|k| sh.tops.folder(&k).filter(|r| r.store.is_some()).map(|r| r.path.clone())).or_else(|| sh.tops.first().map(|r| r.path.clone()));
+        if let Some(p) = front { Store::set_active_dir(&p); }
+        r
+    }
     pub fn can_rename_folder_top(&self, key: &str) -> bool { self.0.borrow().tops.can_rename(key) }
     pub fn folder_top_keeps_name(&self, key: &str) -> bool { self.0.borrow().tops.keeps_name(key) }
     /// Where a 快速笔记 goes: the top-level folder picked in Settings while it is open, else the first open one.
@@ -144,7 +152,7 @@ impl SharedStore {
     pub fn folder_of_path(&self, path: &Path) -> Option<String> { self.0.borrow().tops.folder_of_path(path).map(|r| r.key.clone()) }
 
     /// The document in front is `id`: new ones without a folder go to its
-    /// top-level folder, and images, 数据表 and 画板 resolve against it.
+    /// top-level folder, and images, 数据库 and 画板 resolve against it.
     /// True when that is another top-level folder than before (its look should take over).
     pub fn set_active(&self, id: &str) -> bool {
         let key = self.top_of(id);
@@ -275,7 +283,7 @@ impl SharedStore {
         self.with_top_rows(all)
     }
     /// The rows as last listed, each top-level folder's under its key, without reading the
-    /// disk: for a view that only looks documents up (数据表's 笔记 cells).
+    /// disk: for a view that only looks documents up (数据库's 笔记 cells).
     pub fn listed<R>(&self, f: impl FnOnce(&[(String, Vec<Entry>)]) -> R) -> R { f(&self.0.borrow().entries) }
     /// Bring a listed row up to date after a save made outside a window's own list, for `listed`'s readers.
     pub fn update_listed(&self, id: &str, f: impl FnOnce(&mut Entry)) {
@@ -357,7 +365,8 @@ impl SharedStore {
         for e in &mut fresh { e.top = key.to_string(); }
         let mut sh = self.0.borrow_mut();
         let order: Vec<String> = sh.tops.folders.iter().map(|r| r.key.clone()).collect();
-        match sh.entries.iter_mut().find(|(k, _)| k == key) { Some((_, v)) => *v = fresh, None => sh.entries.push((key.to_string(), fresh)) }
+        // (the list replaced freed off the main thread: thousands of entries take milliseconds)
+        match sh.entries.iter_mut().find(|(k, _)| k == key) { Some((_, v)) => fdl_core::drop_later::drop_later(std::mem::replace(v, fresh)), None => sh.entries.push((key.to_string(), fresh)) }
         let mut out = vec![];
         for k in order { if let Some((_, v)) = sh.entries.iter().find(|(x, _)| *x == k) { out.extend(v.iter().cloned()); } }
         drop(sh);
@@ -526,7 +535,8 @@ impl SharedStore {
         if stray || parent.is_some_and(|p| self.top_of(p) != self.top_of(id)) { anyhow::bail!("{}", crate::settings::tr("暂不支持在文件夹之间移动", "Moving between folders isn't supported yet")); }
         Ok(())
     }
-    pub fn set_pinned(&mut self, id: &str, pinned: bool) -> Result<()> { self.on_res(id, |s| s.set_pinned(id, pinned)) }
+    /// `Store::set_pin`: 置顶 at a place of its own (`fdl_core::pins`), or off.
+    pub fn set_pin(&mut self, id: &str, pin: Option<Option<String>>) -> Result<()> { self.on_res(id, |s| s.set_pin(id, pin)) }
     pub fn is_markdown(&self, id: &str) -> bool { self.on(id, |s| s.is_markdown(id)).unwrap_or(false) }
     pub fn kind(&self, id: &str) -> crate::store::DocKind { self.on(id, |s| s.kind(id)).unwrap_or_default() }
     pub fn create_markdown(&mut self, doc: &Document, front: &str) -> Result<String> { self.put(None, |s, _| s.create_markdown(doc, front)) }

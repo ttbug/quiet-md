@@ -57,7 +57,7 @@
   <img src="docs/images/readme-write.webp" width="100%" alt="A long note open in Quiet.md, with headings, inline math and a table of ion concentrations.">
 </p>
 
-Headings, lists, to-dos, quotes, callouts, columns, tables with merged cells, code with syntax highlighting, LaTeX math, images, files and covers. Markdown shortcuts work as you type, and the `/` menu has everything else. Mention another note to link it; the other note lists its backlinks. Mermaid code blocks draw as diagrams. Data tables keep records with select, date, number, formula, lookup and link fields, in views you filter, sort and group; each cell of a Notes column is a real note. The … menu has Focus Mode, Typewriter Mode and Paragraph Focus, and View › Zoom In enlarges the text alone.
+Headings, lists, to-dos, quotes, callouts, columns, tables with merged cells, code with syntax highlighting, LaTeX math, images, files and covers. Markdown shortcuts work as you type, and the `/` menu has everything else. Mention another note to link it; the other note lists its backlinks. Databases keep records with select, date, number, formula, lookup and link fields, in views you filter, sort and group; each cell of a Notes column is a real note. The … menu has Focus Mode, Typewriter Mode and Paragraph Focus, and View › Zoom In enlarges the text alone.
 
 ### Draw
 
@@ -77,7 +77,7 @@ Import from Another App… (in the File menu) finds your Obsidian, Logseq, iA Wr
 
 ### Work with agents
 
-The `quiet` command line tool lets an AI agent (Claude Code, Codex and others) read, search and edit the same library you write in. It finds blocks by outline, edits through the same engine as the app, rewrites links when notes move, adds rows to data tables and draws on boards, and refuses to overwrite what you changed since it read. A note you have open takes in the agent's edit as it lands, every save keeps the previous text as a version, and `quiet run` takes a whole JavaScript script as one change that is written in full or not at all. Settings › Agent Connector gives your agent one line to paste and, on macOS, installs the command. The [Quiet.md agent skill](#use-with-ai-agents) teaches Claude Code, Codex and other agents to reach for `quiet` whenever you ask about your notes. `quiet` counts which of its commands run each day, under a random id and never with your notes, and sends the counts once a day; `quiet telemetry off`, `DO_NOT_TRACK=1` or turning off Settings › General › Anonymous usage statistics stops it.
+The `quiet` command line tool lets an AI agent (Claude Code, Codex and others) read, search and edit the same library you write in. It finds blocks by outline, edits through the same engine as the app, rewrites links when notes move, adds rows to databases and draws on boards, and refuses to overwrite what you changed since it read. A note you have open takes in the agent's edit as it lands, every save keeps the previous text as a version, and `quiet run` takes a whole JavaScript script as one change that is written in full or not at all. Settings › Agent Connector gives your agent one line to paste and, on macOS, installs the command. The [Quiet.md agent skill](#use-with-ai-agents) teaches Claude Code, Codex and other agents to reach for `quiet` whenever you ask about your notes. `quiet` counts which of its commands run each day, under a random id and never with your notes, and sends the counts once a day; `quiet telemetry off`, `DO_NOT_TRACK=1` or turning off Settings › General › Anonymous usage statistics stops it.
 
 `quiet` ships inside the app. On macOS, put it on your PATH with `ln -s /Applications/quiet.md.app/Contents/MacOS/quiet /usr/local/bin/quiet`; on Windows it sits beside `quiet_md.exe` in the install folder. See [docs/design/CLI.md](docs/design/CLI.md).
 
@@ -102,7 +102,7 @@ The `quiet` command line tool lets an AI agent (Claude Code, Codex and others) r
 - [x] Writing modes: focus, typewriter and paragraph focus
 - [x] Themes, dark mode and nine languages
 - [x] A `quiet` CLI and skill for AI agents
-- [ ] Data tables (in progress)
+- [ ] Databases (in progress)
 - [ ] Mermaid diagrams (in progress)
 - [ ] Mobile support: iPhone, iPad and Android (in progress)
 - [ ] Sync across devices (in progress)
@@ -135,6 +135,8 @@ You can also download from [Quiet.md](https://quiet.md/?lang=en). Every release 
 On first launch, Quiet.md opens straight into a **Quiet Notes** folder in your Documents (or the `Quiet.md` folder an earlier version made there) with a **Getting started** guide — a ten-minute tour of the main features. Existing notes are never overwritten. Add other folders or bring notes from other apps whenever you like, from the File menu.
 
 ## Use with AI agents
+
+> **Requires Quiet.md 0.2.0 or later.** Agent Connector and the `quiet` commands the skill relies on arrive in 0.2.0; earlier versions may not have `quiet` at all. If `quiet` isn't found, a command is unknown, or Settings has no Agent Connector, update to the latest Quiet.md from [quiet.md](https://quiet.md).
 
 Two pieces: the `quiet` command line tool, which ships inside the Quiet.md app, and the agent skill in [`skills/quiet-md`](skills/quiet-md/SKILL.md), which teaches the agent to use it.
 
@@ -176,28 +178,37 @@ Thanks to everyone who has helped build Quiet.md. Issues and pull requests are w
 
 [![Contributors](https://raw.githubusercontent.com/s1dashu/quiet-md/contributors-assets/docs/images/contributors.svg?v=1)](https://github.com/s1dashu/quiet-md/graphs/contributors)
 
+## Community
+
+WeChat users can scan the code below to join our user group. A Discord server is coming soon.
+
+<img src="docs/images/wechat-group.webp" alt="WeChat user group" width="200">
+
 ## Recent updates
 
-- **0.1.14** (Nov 22): find and replace with regular expressions. Obsidian `[[wikilinks]]` open the note they point to. A Turkish interface, and Arabic laid out right to left. Choose the interface and document fonts, and clear out images and files no note uses. Search keeps up with large libraries, and deleting many notes is quicker. A setting for whether Backspace returns to the title; on Windows and Linux, Copy as Markdown is now Ctrl+Shift+M.
-- **0.1.13** (Nov 17): boards — a whiteboard ported from Excalidraw, as a block in a note or a standalone `.excalidraw` file, fast with 10,000 shapes. Version history for every note (… › Version history). French and Arabic interfaces. Copy as Markdown, copy a file's path, and switch the library folder in Settings. Pasted web images are saved into the library. Less memory on picture-heavy pages and smoother sidebar scrolling.
-- **0.1.12** (Nov 14): drag files from Finder, or a file from Files on this computer, straight into a sidebar folder or between rows; the whole page lights up as a drop target. Redesigned Home cards with squircle corners, an Open in Finder menu, breadcrumbs that start at My documents, a minimum window width that keeps room for the note, and a solid sidebar in full screen. Fixes a hang when creating a document in a folder.
-- **0.1.11** (Nov 13): the library is now real folders, with files named by title; older libraries move over automatically, with a backup. A new first launch that sets the language, library location and quick-note shortcut and imports notes from Obsidian and other Markdown apps. Japanese, Spanish and Korean interfaces; display math in Markdown; documents reopen where you left off; faster launch and lower memory use.
-- **0.1.10** (Nov 10): choose a document type from the New menu, scroll wide tables horizontally, preserve Markdown column alignment, and keep the caret visible in long fields.
-- **0.1.9** (Nov 8): fix Cmd+Q on macOS, unresponsive window controls on Windows, and text selection hidden by highlight colors.
-- **0.1.8** (Nov 9): edit local Markdown files in place, import folders while keeping `.md`, and organize notes in nested folders with drag and undo. Lower image and preview memory use; steadier table resizing and refined menus. First launch chooses a supported system language. Experimental Linux AppImage packaging.
-- **0.1.7** (Nov 6): safer multi-window saving, conflict recovery and disk writes; restricted export file access; Markdown exports keep inline attachments. Fixed Chinese input deletion with Weasel on Windows.
-- **0.1.6** (Nov 6): smoother window switching and typing, wider tables, regular saves during continuous typing, and Option+Space for global quick notes on macOS. Windows adds image paste, PDF export and printing, with corrected word deletion.
-- **0.1.5** (Nov 5): the app is now called Quiet.md; your library and notes stay where they were.
-  - Manage several documents at once from Home: duplicate, move or delete them together.
-  - Empty the Trash in one step; arrow keys move through the insert menu's icons; deleting every document no longer creates an empty one.
-  - After an in-app update, the sidebar shows once what changed in the new version.
-  - Windows: shortcuts and the built-in guide read Ctrl / Alt, and a failed launch explains itself and leaves a log.
-- **0.1.4** (Nov 5):
-  - In-app updates: when a new version is out, an **Update** button appears at the top of the sidebar. The download is verified against its signature, and a restart finishes the install; open documents are saved first. Automatic checks can be turned off in **Settings › General**. A check only fetches a version manifest and sends no data. Version 0.1.3 and earlier need a one-time manual download of 0.1.4.
-  - Dark mode: choose System, Light or Dark in **Settings › Appearance**. Built-in and custom themes all have a dark look; export and printing stay light.
-- **0.1.3** (Nov 4): sidebar text is readable again when macOS is in dark mode.
-- **0.1.2** (Nov 4): the standard macOS menus and shortcuts (Hide, Minimize, Zoom, Full Screen); clicking the Dock icon reopens a window after the last one was closed. Fixed some Chinese characters rendering with the wrong glyphs.
-- **0.1.1** (Nov 3): first Windows x64 release, installed per user, keeping your notes on uninstall. Polished the Chinese and English interface and the built-in guide.
+- **0.2.0** (Nov 28): a simpler interface built on one design system, databases for everyone, three writing modes and a command line your AI agent can use.
+  - **Folders are the top level**: there is no separate Home page any more. The sidebar groups top-level folders under headings that fold, and each heading's … menu has Manage, Show in Finder and Remove from sidebar. Add Folder uses a folder where it is. My documents and Files on this computer are gone: a Markdown file opened on its own gets a window of its own, and folders you opened before become top-level folders. Drag a page or folder into another top-level folder, or use Move To; its pictures, links and version history go with it, and it can be undone. Favorites fold into Pinned.
+  - **One design system**: menus, buttons, dialogs, switches, tooltips and scrollbars are one set of components after shadcn/ui, with continuous (squircle) corners on macOS, a thin ring and soft shadow around popovers, one shadow scale and Nucleo icons throughout. Menus that don't fit scroll, and moving toward a submenu no longer lights the rows you cross. The header reads + · Search · … on every page (+ · View · Search · … on folders), and the breadcrumbs line up with the window buttons by the height of their capitals.
+  - **Databases**: make one from the New menu, the `/` menu or a CSV file. Fields include text, single and multiple select, date, number, formula, lookup and link; views filter, sort, group and colour rows by rule, with a Fit to content row height. Each cell of a Notes column is a real note in your library.
+  - **Writing modes**, in the document's … menu: Focus Mode (⌘.) leaves the document alone in its window; Typewriter Mode (⌘⇧T) keeps the line you are writing in the middle; Paragraph Focus (⌘⇧F) keeps the current paragraph clear and fades the rest. View › Zoom In / Out (⌘+ / ⌘−) scales the note's text alone, headings, tables, code and equations with it.
+  - **Command line and agents**: the new `quiet` tool lists, searches, reads and edits notes and databases from a terminal, adds and removes sidebar folders, and opens a document at a given block. Settings › Agent Connector sets up Claude Code, Codex and other agents with one command; `quiet` ships with the app and joins your PATH (Install Command on macOS, the installer on Windows).
+  - **Clearer dark mode**: links, text colours, highlights, reminder dates, countdowns and button labels all reach readable contrast; the sidebar is brighter, and ⌃⌘D switches between dark and light.
+  - **Also new**: child pages are back; pasting from Word, browsers or Feishu keeps its formatting on Windows and Linux; import SiYuan workspaces, with SiYuan, Obsidian, Typora and Markdown folders under one Import from Another App…; the Trash empties itself after 1 to 30 days; any shortcut can be cleared; Open in New Window follows the main window's size and sidebar; renaming or moving a folder shows at once while the files follow in the background; first launch opens straight into Documents › Quiet Notes and the regrouped guides, with example Markdown, board and database files; anonymous daily usage counts, which you can turn off in Settings › General.
+  - **Library format**: opening a library upgrades it to FORMAT 6, after which 0.1.14 and earlier can't open it. Libraries in iCloud and other synced folders are not upgraded for now.
+- **0.1.14** (Nov 22): regular-expression find and replace; Obsidian `[[wikilinks]]` open their note; Turkish and right-to-left Arabic interfaces; choose interface and document fonts; clean up unused images and files; faster search and bulk delete in large libraries.
+- **0.1.13** (Nov 17): boards, a whiteboard ported from Excalidraw, inside a note or as a `.excalidraw` file; version history for every note; French and Arabic interfaces; Copy as Markdown; pasted web images are saved into the library.
+- **0.1.12** (Nov 14): drag files from Finder straight into sidebar folders; squircle Home cards; Open in Finder; a minimum window width that keeps room for the note.
+- **0.1.11** (Nov 13): the library became real folders with files named by title, migrated automatically with a backup; a new first launch with Obsidian import; Japanese, Spanish and Korean interfaces; display math in Markdown; faster launch and less memory.
+- **0.1.10** (Nov 10): pick a document type from the New menu; wide tables scroll sideways; Markdown keeps column alignment.
+- **0.1.9** (Nov 8): fixes for Cmd+Q on macOS, window buttons on Windows and selections hidden by highlights.
+- **0.1.8** (Nov 9): edit local Markdown files in place; nested folders with drag and undo; lower image memory; an experimental Linux AppImage.
+- **0.1.7** (Nov 6): safer multi-window saving and conflict recovery; Markdown exports keep inline attachments.
+- **0.1.6** (Nov 6): smoother typing and window switching, wider tables, ⌥ Space for quick notes on macOS; image paste, PDF export and printing on Windows.
+- **0.1.5** (Nov 5): renamed to Quiet.md; manage several documents at once; empty the Trash in one step.
+- **0.1.4** (Nov 5): in-app updates, verified by signature; dark mode for every theme.
+- **0.1.3** (Nov 4): readable sidebar text when macOS is in dark mode.
+- **0.1.2** (Nov 4): the standard macOS menus and shortcuts; the Dock icon reopens a window.
+- **0.1.1** (Nov 3): first Windows x64 release.
 
 Full notes for each version are on [Releases](https://github.com/s1dashu/quiet-md/releases).
 
@@ -209,3 +220,12 @@ The following are not covered by the MIT license and should be replaced in forks
 
 - The Nucleo icons in `assets/icons/` (82) and `assets/editor-icons/` (24) are under a commercial Nucleo license. Do not extract or redistribute them on their own.
 - The name "Quiet.md" and the app icon.
+
+## Star History
+
+<a href="https://www.star-history.com/#s1dashu/quiet-md&type=date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=s1dashu/quiet-md&type=date&theme=dark" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=s1dashu/quiet-md&type=date" />
+  </picture>
+</a>

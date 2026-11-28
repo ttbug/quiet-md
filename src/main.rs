@@ -33,6 +33,9 @@ mod devtools {
     pub fn rows_begin(_: &gpui::Window) {}
     pub fn row_probe(_: impl Into<gpui::SharedString>) -> Option<gpui::AnyElement> { None }
     pub fn anchor_probe(_: impl Into<gpui::SharedString>) -> Option<gpui::AnyElement> { None }
+    pub fn frame_begin() {}
+    pub fn frame_probe() -> Option<gpui::AnyElement> { None }
+    pub fn span(_: &'static str) -> Option<()> { None }
 }
 mod design;
 mod docinfo;
@@ -53,7 +56,6 @@ mod native_header;
 #[cfg(not(target_os = "macos"))]
 #[path = "native_header_fallback.rs"]
 mod native_header;
-mod mermaid;
 mod on_top;
 mod focus;
 mod printing;
@@ -75,6 +77,7 @@ mod sidebar_drop;
 mod folder_card;
 mod folders;
 mod file_history;
+mod pin_drag;
 mod settings;
 mod table;
 mod l10n;
@@ -177,11 +180,12 @@ pub(crate) fn open_main_window(scripted: bool, at: Option<Bounds<Pixels>>, cx: &
 }
 
 /// Everything that needs the library, then the main window.
-fn start(existed: bool, scripted: bool, opening: std::thread::JoinHandle<fdl_core::top_folders::TopFolders>, incoming: local_files::Incoming, cx: &mut App) {
+/// `opening` hands over the top-level folders: the desktop's waits for its thread.
+fn start(existed: bool, scripted: bool, opening: impl FnOnce() -> fdl_core::top_folders::TopFolders, incoming: local_files::Incoming, cx: &mut App) {
     changelog::startup(existed);
     shortcuts::init(cx);
     // No top-level folder is fatal: one that can't be opened shows as such in the sidebar.
-    let tops = opening.join().unwrap_or_else(|e| std::panic::resume_unwind(e));
+    let tops = opening();
     cx.set_global(shared_store::SharedStore::with_top_folders(tops));
     let mut moved = vec![];
     cx.global::<shared_store::SharedStore>().each(|s| moved.extend(s.migrated.take()));
@@ -254,9 +258,9 @@ fn main() {
     // A first launch goes straight in: the default library (an old `Quiet.md`
     // is kept, `Store::default_in`) gets the guides and becomes a top-level
     // folder; the window opens on its first guide (`open_start`). That and
-    // opening the top-level folders (a new library's first opening moves it to
-    // the current format, ~180 ms of fsyncs) run beside GPUI's own start-up,
-    // which takes about as long; `start` waits for them.
+    // opening the top-level folders (the guides come in the current format,
+    // so a new library has nothing to upgrade) run beside GPUI's own
+    // start-up, which takes longer; `start` waits for them.
     let seed = (fixed || !existed) && (!scripted || selftest::active());
     let first = !existed && !scripted && !fixed;
     let chinese = seed && settings::prefs().lang() == settings::Lang::Zh;
@@ -282,7 +286,7 @@ fn main() {
         set_app_icon();
         init_app(cx);
         let quick_enabled = !scripted;
-        start(existed, scripted, opening, incoming, cx);
+        start(existed, scripted, move || opening.join().unwrap_or_else(|e| std::panic::resume_unwind(e)), incoming, cx);
         cx.on_window_closed(move |cx, _| {
             if (!quick_enabled || !cfg!(target_os = "macos")) && cx.windows().is_empty() {
                 cx.quit();

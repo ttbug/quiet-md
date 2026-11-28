@@ -66,10 +66,11 @@ impl RenderOnce for Switch {
         // 0 off, 1 on; a keyed switch that just flipped is part way there
         let t = match self.key {
             Some(key) => {
-                let st = window.use_keyed_state((key, "switch"), cx, |_, _| (on, std::time::Instant::now() - SLIDE));
+                // when it last flipped; none: at rest (a browser's clock starts at 0, so no "SLIDE ago")
+                let st = window.use_keyed_state((key, "switch"), cx, |_, _| (on, None::<web_time::Instant>));
                 let (was, at) = *st.read(cx);
-                let at = if was != on { let now = std::time::Instant::now(); st.update(cx, |s, _| *s = (on, now)); now } else { at };
-                let k = (at.elapsed().as_secs_f32() / SLIDE.as_secs_f32()).min(1.);
+                let at = if was != on { let now = web_time::Instant::now(); st.update(cx, |s, _| *s = (on, Some(now))); Some(now) } else { at };
+                let k = at.map_or(1., |at| (at.elapsed().as_secs_f32() / SLIDE.as_secs_f32()).min(1.));
                 if k < 1. { window.request_animation_frame(); }
                 // ease-out, as Radix's default easing reads
                 let e = 1. - (1. - k) * (1. - k);
@@ -164,7 +165,7 @@ impl RenderOnce for Radio {
     }
 }
 
-/// A colour to pick (shadcn has none; ours: the 数据表's option colours and 填色, the board's
+/// A colour to pick (shadcn has none; ours: the 数据库's option colours and 填色, the board's
 /// colours): `fill` on a square at `rounded-sm` with a 1pt `border` hairline; picked, a 2pt `ring`.
 /// Borders, not a ring in the shadow: GPUI paints a shadow under the box too, and fills may be
 /// translucent. Its children sit on the colour (a ✓, a key, the checker of no colour).
