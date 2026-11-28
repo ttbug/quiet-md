@@ -587,7 +587,6 @@ impl Workspace {
         let workspace = cx.weak_entity();
         let agent = cx.new(|cx| crate::agent::Panel::new(workspace, cx));
         let subs = vec![
-            cx.subscribe(&agent, |_, _, _: &crate::agent::Resized, cx| cx.notify()),
             cx.subscribe(&agent, |w, panel, _: &crate::agent::Toggled, cx| {
                 if panel.read(cx).open && w.view == View::Doc
                     && let (Some(id), Some(editor)) = (w.current.clone(), w.editor.clone()) {
@@ -1879,10 +1878,6 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(crate) fn agent_header_space(&self, cx: &App) -> f32 {
-        if !self.quick_note && !self.agent.read(cx).open { 40. } else { 0. }
-    }
-
     /// `pane_w`: the width the header spans, to fold the breadcrumbs when narrow.
     fn top_bar(&self, pane_w: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let mut title = self
@@ -1991,7 +1986,7 @@ impl Workspace {
         // and the title keeps the room. Left: the sidebar's buttons when it is
         // closed; right: the three actions.
         let left = if self.sidebar_open { 18. } else { theme::TRAFFIC_LIGHTS_W + 4. + 28. + 4. + 28. + 25. };
-        let room = pane_w - left - crate::ui::header_right_inset() - self.agent_header_space(cx) - 3. * HEADER_ACTIONS_H - 8. - 16.;
+        let room = pane_w - left - crate::ui::header_right_inset() - 3. * HEADER_ACTIONS_H - 8. - 16.;
         if room < 360. && !crumbs.is_empty() {
             let path: Vec<crate::folders::Crumb> = [(start.clone(), top_target.clone())].into_iter()
                 .chain(chain.iter().map(|c| (c.1.clone(), Some(c.0.clone())))).collect();
@@ -2005,7 +2000,7 @@ impl Workspace {
             .flex_none()
             .flex()
             .items_center()
-            .pr(px(crate::ui::header_right_inset() + self.agent_header_space(cx)))
+            .pr(px(crate::ui::header_right_inset()))
             // Clear of the traffic lights, which sit over the note when the sidebar is closed.
             .pl(if self.sidebar_open { px(18.) } else { px(theme::TRAFFIC_LIGHTS_W) })
             .title_bar()
@@ -2172,10 +2167,6 @@ impl Render for Workspace {
         let row_menu = self.render_row_menu(window, cx);
         let resize = self.sidebar_open.then(|| self.render_resize_handle(window, cx));
         let resize_overlay = self.render_resize_overlay(cx);
-        let (agent_resize, agent_resize_overlay) = if !self.quick_note && self.agent.read(cx).open {
-            let (handle, overlay) = self.agent.update(cx, |p, cx| p.render_resize(window, cx));
-            (Some(handle), overlay)
-        } else { (None, None) };
         let folder_drag_overlay = self.render_folder_drag_overlay(cx);
         let card_drag_overlay = self.render_card_drag_overlay(window, cx);
         let file_drop = self.render_file_drop(window, cx);
@@ -2204,8 +2195,7 @@ impl Render for Workspace {
                 .h_full()
                 .flex()
                 .flex_col()
-                .child(if self.focus_mode.on() { self.focus_bar(cx) } else { self.top_bar(f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. }
-                    - if !self.quick_note && self.agent.read(cx).open { self.agent.read(cx).panel_width(window) } else { 0. }, cx).into_any_element() })
+                .child(if self.focus_mode.on() { self.focus_bar(cx) } else { self.top_bar(f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. }, cx).into_any_element() })
                 .children(self.render_history_banner(cx))
                 .child(
                     div()
@@ -2263,11 +2253,10 @@ impl Render for Workspace {
             .children(file_drop)
             .children(load_layer)
             .children(history);
-        // 专注模式 keeps the page bare: the toggle is a header button and goes with them.
-        let note = note.when(self.agent_header_space(cx) > 0. && !self.focus_mode.on(), |d| d.child(
-            crate::agent::toggle_button("agent-open", false).absolute().top(px(8.)).right(px(crate::ui::header_right_inset()))
-                .on_click(cx.listener(|w, _, window, cx| w.agent.update(cx, |p, cx| p.toggle(window, cx))))
-        ));
+        let show_agent = !self.quick_note
+            && !self.focus_mode.on()
+            && self.history.is_none()
+            && !(self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).board_open()));
         div()
             .id("workspace")
             .key_context("Workspace")
@@ -2423,9 +2412,8 @@ impl Render for Workspace {
             }))
             .children(sidebar.map(|s| if inset_top + inset_bottom > 0. { div().flex_none().h_full().pt(px(inset_top)).pb(px(if keyboard > 0. { 0. } else { inset_bottom })).child(s).into_any_element() } else { s }))
             .child(note)
-            .when(!self.quick_note && self.agent.read(cx).open, |d| d.child(self.agent.clone()))
+            .when(show_agent, |d| d.child(self.agent.clone()))
             .children(resize)
-            .children(agent_resize)
             // 专注模式: the caption buttons come and go with the top strip
             .children(crate::ui::window_controls(window).and_then(|c| if !self.focus_mode.on() { Some(c) } else { let o = self.focus_mode.opacity(); (o > 0.).then(|| c.opacity(o)) }))
             .children(row_menu)
@@ -2444,7 +2432,6 @@ impl Render for Workspace {
             .children(import_apps)
             .children(search)
             .children(resize_overlay)
-            .children(agent_resize_overlay)
             .children(folder_drag_overlay)
             .when(self.file_history.busy || self.store.file_task_busy(), |d| d.child(deferred(div().id("file-history-pending").absolute().inset_0().occlude()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -2469,7 +2456,7 @@ pub(crate) fn check_markdown_refresh(cx: &mut App) {
     for _ in 0..2 {
         let id = id.clone();
         windows.push(cx.open_window(WindowOptions { focus: false, ..Default::default() }, |window, cx| {
-            cx.new(|cx| Workspace::new_document_window(Some(id), window, cx))
+            cx.new(|cx| Workspace::new_document_window(Some(id), None, window, cx))
         }).unwrap());
     }
     // The window is on GPUI's stack here, as in its activation callback.

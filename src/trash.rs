@@ -46,7 +46,7 @@ pub(crate) fn page_header_with(ws: &Workspace, title: impl IntoElement, left: f3
         .items_center()
         // Clear of the traffic lights, like the document header.
         .pl(if ws.sidebar_open { px(left) } else { px(theme::TRAFFIC_LIGHTS_W) })
-        .pr(px(crate::ui::header_right_inset() + ws.agent_header_space(cx)))
+        .pr(px(crate::ui::header_right_inset()))
         .title_bar()
         // 回收站 (设置's sidebar): 展开侧栏, as 设置's own header; a folder's page: the toggle. Either
         // way then the document header's rule, so the text after it starts where a document's

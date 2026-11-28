@@ -249,6 +249,7 @@ pub struct Settings {
     /// Agent workspace, chosen explicitly rather than inferred from the note library.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_directory: Option<String>,
+    /// Retained for reading settings written by earlier builds with a resizable sidebar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_width: Option<f32>,
     /// The top-level folder's look (`Store::look_at`), kept through other writes.

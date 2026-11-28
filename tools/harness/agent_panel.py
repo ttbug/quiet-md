@@ -91,14 +91,14 @@ for line in sys.stdin:
 ''')
 fake.chmod(0o755)
 
-def run(name, steps, fixture_mode="normal"):
+def run(name, steps, fixture_mode="normal", lib=library):
     folder = work / name
     folder.mkdir()
     script = folder / "script.txt"
     script.write_text(f"resize 1200 800\nwait 600\nmove 600 400\n{steps}\nquit\n")
     binary = Path(os.environ.get("FDL_BIN", repo / "target/release/quiet_md"))
     assert b"devtools: cannot read" in binary.read_bytes(), "Build with --features devtools"
-    env = dict(os.environ, QUIET_MD_HOME=str(library), FDL_SCRIPT=str(script), FDL_SHOTS=str(folder),
+    env = dict(os.environ, QUIET_MD_HOME=str(lib), FDL_SCRIPT=str(script), FDL_SHOTS=str(folder),
                FDL_NOBLINK="1", PATH=str(bin_dir) + os.pathsep + os.defpath,
                AGENT_FIXTURE_LOG=str(work / "protocol.jsonl"), AGENT_FIXTURE_MODE=fixture_mode)
     with (folder / "log").open("w") as log:
@@ -108,160 +108,87 @@ def run(name, steps, fixture_mode="normal"):
 
 run("conversation", f"""
 shot collapsed
-click 1180 24
+click 1158 757
 wait 100
-click 920 730
+click 900 649
 type hello
 key enter
 wait 100
 shot no-directory
 pick {project}
-click 950 773
+click 813 683
 wait 150
-click 920 730
+click 900 649
 type hello
 key enter
 wait 500
 shot first-response
-click 950 655
-wait 300
+click 1038 683
+wait 1500
 shot models
-click 950 612
+click 1000 641
 wait 100
-click 920 730
+click 900 649
 type selected-model
 key enter
 wait 300
-click 950 655
-wait 300
-click 950 548
+click 1038 683
+wait 1500
+click 1000 577
 wait 100
-click 920 730
+click 900 649
 type restored-model
 key enter
 wait 300
-move 950 773
+move 813 683
 wait 700
 shot directory-tooltip
-click 1170 24
+click 1152 172
 wait 100
 shot folded
-click 1180 24
+click 1158 757
 wait 100
 shot resumed
-click 920 730
+click 900 649
 type approval
 key enter
 wait 400
 shot approval
-click 965 573
+click 900 524
 wait 400
 shot approved
-click 920 730
+click 900 649
 type approval
 key enter
 wait 300
-click 870 573
+click 811 524
 wait 300
 shot declined
-click 920 730
+click 900 649
 type slow
 key enter
 wait 300
-click 950 655
-wait 100
+click 1038 683
+wait 1500
 shot model-disabled
-click 1160 773
+click 1137 683
 wait 300
 shot stopped
-click 1110 24
+click 1116 172
 wait 100
-click 920 730
+click 900 649
 type new-session
 key enter
 wait 400
 pick {other}
-click 950 773
+click 813 683
 wait 100
-click 920 730
+click 900 649
 type changed-directory
 key enter
 wait 400
 shot final
 """)
-run("resize", """
-check-agent-references setup
-click 1180 24
-wait 100
-down 820 400
-wait 100
-dragto 700 400
-wait 100
-up 700 400
-move 600 400
-wait 100
-shot wide
-click 1170 24
-wait 100
-click 1180 24
-wait 100
-shot reopened
-down 700 400
-wait 100
-dragto 1180 400
-wait 100
-up 1180 400
-move 600 400
-wait 100
-shot minimum
-down 900 400
-wait 100
-dragto 300 400
-wait 100
-up 300 400
-move 500 400
-wait 100
-shot maximum
-resize 1000 800
-wait 100
-shot smaller-window
-resize 1200 800
-wait 100
-down 540 400
-wait 100
-dragto 700 400
-wait 100
-up 700 400
-wait 100
-down 280 400
-wait 100
-dragto 320 400
-wait 100
-up 320 400
-move 600 400
-wait 100
-shot final
-""")
-run("resize-restart", """
-click 1180 24
-wait 100
-move 600 400
-shot final
-""")
-def panel_edge(folder, shot):
-    image = Image.open(work / folder / f"{shot}.png").convert("RGB")
-    scale = image.width / (1000 if shot == "smaller-window" else 1200)
-    y = round(400 * scale)
-    background = image.getpixel((image.width - 10, y))
-    x = image.width - 10
-    while x > 0 and image.getpixel((x, y)) == background:
-        x -= 1
-    return (x + 1) / scale
-for shot, edge in [("wide", 700), ("reopened", 700), ("minimum", 900), ("maximum", 540), ("smaller-window", 540), ("final", 700)]:
-    assert abs(panel_edge("resize", shot) - edge) <= 2, (shot, panel_edge("resize", shot), edge)
-assert abs(panel_edge("resize-restart", "final") - 700) <= 2
-settings = json.loads((library / ".quiet/settings.json").read_text())
-assert settings["agent_width"] == 500 and settings["sidebar_width"] == 320, settings
 records = [json.loads(line) for line in (work / "protocol.jsonl").read_text().splitlines()]
 starts = [r["started"] for r in records if "started" in r]
 assert starts == [str(project), str(project), str(other)], starts
@@ -277,35 +204,35 @@ settings = json.loads((library / ".quiet/settings.json").read_text())
 assert settings["agent_directory"] == str(other)
 (work / "empty-clipboard.txt").write_text("")
 run("markdown", f"""
-click 1180 24
+click 1158 757
 wait 100
-click 920 730
+click 900 649
 type **markdown-demo**
 key enter
 wait 500
 move 600 400
 shot inline
-click 1090 24
+click 1116 172
 wait 100
-click 920 730
+click 900 649
 type markdown-code
 key enter
 wait 500
 shot streaming-code
 wait 1700
 shot code-table
-wheel 950 280 0 200
+wheel 1000 400 0 200
 wait 100
 shot wide-table
 clip text {work / 'empty-clipboard.txt'}
-click 1140 176
+click 1126 297
 wait 100
-click 920 730
+click 900 649
 key cmd-v
 key enter
 wait 300
 shot copied-code
-wheel 950 215 0 200
+wheel 1000 340 0 200
 wait 100
 shot final
 """)
@@ -315,95 +242,142 @@ def changed_region(before, after, box):
     scale = a.width / 1200
     crop = tuple(round(v * scale) for v in box)
     return ImageChops.difference(a.crop(crop), b.crop(crop)).getbbox() is not None
-assert changed_region("code-table", "wide-table", (720, 250, 1185, 315)), "Wide table did not scroll"
-assert changed_region("copied-code", "final", (720, 202, 1185, 234)), "Code block did not scroll"
+assert changed_region("code-table", "wide-table", (800, 360, 1170, 445)), "Wide table did not scroll"
+assert changed_region("copied-code", "final", (814, 325, 1164, 355)), "Code block did not scroll"
 for name in ["collapsed", "folded"]:
     image = Image.open(work / "conversation" / f"{name}.png").convert("RGB")
     x, y = round(1199 * image.width / 1200), round(200 * image.height / 800)
-    assert min(image.getpixel((x, y))) >= 250, f"Collapsed sidebar still occupies a column: {name}"
-run("reopen", "click 1180 24\nwait 100\nclick 920 730\ntype reopened\nkey enter\nwait 400\nshot final")
-run("home-header", "key cmd-alt-home\nwait 200\nclick 1180 24\nwait 100\nclick 1170 24\nwait 100\nshot final")
-run("model-error", "click 1180 24\nwait 100\nclick 950 655\nwait 500\nshot model-error\nkey escape\nwait 100\nclick 920 730\ntype after-model-error\nkey enter\nwait 400\nshot final", fixture_mode="error")
+    assert min(image.getpixel((x, y))) >= 250, f"Collapsed floating card still covers the note: {name}"
+run("small-window", """
+resize 500 340
+wait 150
+click 458 298
+wait 150
+shot small
+click 452 92
+wait 150
+shot final
+""")
+small_img = Image.open(work / "small-window" / "small.png").convert("RGB")
+small_closed = Image.open(work / "small-window" / "final.png").convert("RGB")
+assert small_img.getpixel((round(452 * small_img.width / 500), round(92 * small_img.height / 340))) != small_closed.getpixel((round(452 * small_closed.width / 500), round(92 * small_closed.height / 340))), "Small-window close button was clipped or did not collapse card"
+library_dark = work / "library-dark"
+shutil.copytree(here / "lib_clean", library_dark)
+(library_dark / "preferences.json").write_text(json.dumps({
+    "language": "en", "english": True, "appearance": "dark", "opaque_window": True,
+    "auto_update": False, "quick_hotkey": False, "seen_version": tomllib.loads((repo / "Cargo.toml").read_text())["package"]["version"],
+}))
+run("dark-mode", f"""
+click 1158 757
+wait 150
+pick {other}
+click 813 683
+wait 150
+click 900 649
+type dark-hello
+key enter
+wait 500
+shot final
+""", lib=library_dark)
+dark_img = Image.open(work / "dark-mode" / "final.png").convert("RGB")
+assert max(dark_img.getpixel((round(900 * dark_img.width / 1200), round(400 * dark_img.height / 800)))) < 80, "Dark mode card background is not dark"
+run("focus-mode", """
+click 1158 757
+wait 150
+key cmd-.
+wait 250
+shot hidden
+key cmd-.
+wait 250
+shot final
+""")
+focus_hidden = Image.open(work / "focus-mode" / "hidden.png").convert("RGB")
+focus_restored = Image.open(work / "focus-mode" / "final.png").convert("RGB")
+assert min(focus_hidden.getpixel((round(1158 * focus_hidden.width / 1200), round(757 * focus_hidden.height / 800)))) >= 250, "Agent avatar remained visible in focus mode"
+assert focus_hidden.getpixel((round(1158 * focus_hidden.width / 1200), round(757 * focus_hidden.height / 800))) != focus_restored.getpixel((round(1158 * focus_restored.width / 1200), round(757 * focus_restored.height / 800))), "Agent avatar did not restore after exiting focus mode"
+run("reopen", "click 1158 757\nwait 100\nclick 900 649\ntype reopened\nkey enter\nwait 400\nshot final")
+run("home-header", "key cmd-alt-home\nwait 200\nclick 1158 757\nwait 100\nclick 1152 172\nwait 100\nshot final")
+run("model-error", "click 1158 757\nwait 100\nclick 1038 683\nwait 1500\nshot model-error\nkey escape\nwait 100\nclick 900 649\ntype after-model-error\nkey enter\nwait 400\nshot final", fixture_mode="error")
 run("document-references", """
 check-agent-references setup
 wait 100
-click 1180 24
+click 1158 757
 wait 100
 check-agent-references check-a
 shot reference-added
-click 1170 24
+click 1152 172
 wait 100
-click 1180 24
+click 1158 757
 wait 100
 check-agent-references check-a
 check-agent-references edit-a
 check-agent-references preview-a
-click 1170 24
+click 1152 172
 wait 100
-click 1180 24
+click 1158 757
 wait 100
-click 920 730
+click 900 649
 type live-reference
 key enter
 wait 300
 check-agent-references exit-preview
 check-agent-references open-b
 wait 150
-click 920 730
+click 900 649
 type pinned-reference
 key enter
 wait 300
-click 1170 24
+click 1152 172
 wait 100
-click 1180 24
+click 1158 757
 wait 100
 check-agent-references check-both
 shot reference-two
-click 920 730
+click 900 649
 type two-references
 key enter
 wait 300
 check-agent-references reopen-a
 wait 150
-click 920 730
+click 900 649
 type reopened-reference
 key enter
 wait 300
 check-agent-references peer
 wait 150
-click 920 730
+click 900 649
 type peer-reference
 key enter
 wait 300
 check-agent-references close-peer
 wait 100
-click 1170 692
+click 1152 600
 wait 100
-click 1170 692
+click 1152 600
 wait 100
 check-agent-references check-empty
-click 920 730
+click 900 649
 type without-reference
 key enter
 wait 300
-click 1170 24
+click 1152 172
 wait 100
 check-agent-references home
 wait 100
-click 1180 24
+click 1158 757
 wait 100
 check-agent-references check-empty
 shot reference-home
-click 1170 24
+click 1152 172
 wait 100
 check-agent-references settings
 wait 100
-click 1180 24
+click 1158 757
 wait 100
 check-agent-references check-empty
 check-agent-references missing
 wait 100
-click 920 730
+click 900 649
 type missing-reference
 key enter
 wait 100

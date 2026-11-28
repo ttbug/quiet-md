@@ -2,10 +2,11 @@
 
 ## 当前阶段
 
-右侧 Agent 面板第一版已实现；当前合并 main（`4a2158a`）的文件夹顶层、专注模式与打字机模式更新，保留本机 Codex 面板。
+Agent 面板第一版已实现，并已改为右下角浮动卡片样式（仅样式，后端未动）；已合并 main（`aa6a182`）。
 
 ## 已完成
 
+- 2026-11-28 22:06 Agent 面板改为右下角浮动卡片：宽 420（窄窗自动收窄至下限 240）、高最多 580（矮窗随可用高度裁剪），覆盖在正文上；头部为头像、标题、「已连接」标签、新会话（`+`）和收起（`−`）；用户消息为右侧灰色气泡，AI 回复带头像；输入框为圆角 `Textarea`，下方同一行为工作目录、模型选择和 28 px 圆角发送／停止图标按钮（空输入禁用）；右下角 44 px 头像按钮负责展开收起并拦截穿透点击。去掉面板拖拽宽度、顶栏右上角入口和正文宽度避让；专注模式、画板和版本历史打开时自动隐藏入口和卡片并保留会话；全部组件迁至 `design` token 与滚动条；新增并按 `docs/ICONS.md` 规范修正自绘 `arrow-up` 图标。头像暂用应用图标；标题无会话下拉，因后端尚无多会话；左下为工作目录而非「添加上下文」。修正主合并遗留的 `new_document_window` 调用参数。`agent_width` 设置项保留以兼容旧配置但不再写入。
 - 2026-11-26 解决 main（`4a2158a`）合并冲突：`src/app.rs` 顶栏在专注模式下改用 `focus_bar`，否则用保留 Agent 面板宽度避让的 `top_bar`；窗口控件随专注条淡出并保留 Agent 面板拖拽把手；专注模式下隐藏浮在页面上的 Agent 展开按钮。`src/agent.rs` 的界面回放 `home` 阶段适配被移除的主页，改用 `View::Default`。Release workspace 测试、两种配置 Clippy、中英文指南往返及 Agent 面板界面回放通过，尚未创建合并提交。
 - 2026-11-25 解决 main（`10a6306`）合并冲突：保留 Agent 工作目录、面板宽度及两侧存储回归测试；外观设置测试适配 `FolderLook`／`look_at`，Markdown 防闪退回归适配 `refresh_external`。Release workspace 测试、三种配置 Clippy、中英文指南往返及 Agent／Markdown 界面回归通过，尚未创建合并提交。
 - 2026-11-24 解决 main（`6102152`）合并冲突：主页搜索使用新版 `Field` 并保留 Agent 面板宽度避让；Agent 模型菜单及操作／代码复制按钮适配 main 的设计组件；设置回归适配应用级设置与 FORMAT 5 根目录外观分离。Release workspace 测试、三种配置 Clippy、指南及 Agent／Markdown 界面回归通过，尚未创建合并提交。
@@ -16,29 +17,25 @@
 - 2026-11-18 合并 main（`159e3d4`）：解决 CONTRIBUTING.md 冲突，保留 AI 面板使用说明及 main 的 `vendor/zed` 维护流程；适配新版 GPUI 的焦点、滚动边界、菜单锚点和异步测试回调 API。构建说明改用 `gpui_platform/runtime_shaders`，未修改 vendor 源码。
 - 2026-11-15 合并 main（`672a1ad`）：解决 README 功能列表与窗口渲染冲突，保留版本历史、拖拽导入和 AI 面板；标题栏／搜索按实际 AI 面板宽度布局。历史预览期间，当前及其他窗口的 AI 引用仍读取当前版本的正文和标题。
 - 可折叠面板、目录选择与重启后的目录记忆；折叠保留会话。
-- AI 面板左边缘支持手工拖拽宽度，交互沿用左侧栏；默认 380，最小 300，最大 800 并随窗口限制。松开后独立保存宽度，折叠展开和重启恢复，窗口缩小时收紧显示宽度。
 - 仅 AI 回复使用只读 Markdown 渲染，用户问题保留原文；支持标题、行内样式、链接、嵌套列表、引用、分隔线、代码块和表格。代码可复制并横向滚动，宽表格可横向滚动，流式未闭合围栏可显示；复用现有解析器，无新增依赖，不创建编辑器或笔记记录。
-- 工作目录入口位于输入框下方左侧，与发送／停止按钮同一行；显示文件夹图标和目录名，长名称截断，悬停显示完整路径，生成期间不可切换。
-- 模型选择位于会话输入框上方，读取本机模型列表并支持分页，保留跟随配置；切换对下一条消息生效且沿用当前线程，生成期间禁用，新会话恢复默认选择。
-- 展开 Agent 侧栏时自动引用当前打开的文档，按文档 ID 去重，输入框上方可移除；切换文档、新会话和选择目录保留引用。发送时导出最新 Markdown 正文，优先读取当前及其他窗口的未保存缓冲区，未打开的文档从文档库读取；读取失败保留输入并阻止发送。添加引用本身不发送内容，首页／设置不自动引用，图片和附件不随正文发送。
-- 右侧入口改为右上角的展开／收起图标；折叠后不保留整列 AI 入口或面板宽度，正文填满剩余空间。顶栏按钮和主页搜索为该入口留位。
+- 工作目录入口、模型选择与发送／停止位于输入框下方同一行：工作目录在左侧，显示文件夹图标和目录名，长名称截断，悬停显示完整路径；模型选择读取本机模型列表并支持分页，保留跟随配置，切换对下一条消息生效且沿用当前线程；生成期间目录和模型均不可切换，新会话恢复默认选择。
+- 展开 Agent 浮动卡片时自动引用当前打开的文档，按文档 ID 去重，输入框上方可移除；切换文档、新会话和选择目录保留引用。发送时导出最新 Markdown 正文，优先读取当前及其他窗口的未保存缓冲区，未打开的文档从文档库读取；读取失败保留输入并阻止发送。添加引用本身不发送内容，首页／设置不自动引用，图片和附件不随正文发送。
 - Codex 多轮会话、流式消息、停止、新会话、命令和文件修改审批；未知交互明确拒绝。
 - 新会话、切换目录、窗口关闭及应用退出时清理本面板的 Codex 子进程。
 - `src/agent.rs` 负责 GPUI 面板，`src/agent/codex.rs` 负责子进程与协议；文档内核不承载 Agent 逻辑。
 - 补充使用说明、架构说明、协议回归测试和模拟 Agent 的界面回放。
 - 上一轮本地 Apple Silicon DMG：`dist-release.local-233b3_rl/quiet-md-0.1.11-agent-preview-macos-arm64.dmg`，应用名为 Quiet.md Preview，临时签名、未公证，关闭 `devtools`；尚不含右上角入口调整。
 - 最新 Preview Apple Silicon DMG：`dist-release.local-c08rodqb/quiet-md-0.1.11-agent-preview-macos-arm64.dmg`，包含仅 AI 回复 Markdown 渲染、面板手工调宽和当前文档自动引用；模型选择位于输入框上方，目录与发送／停止位于输入框下方，临时签名、未公证，关闭 `devtools`。
-- 最新本地 Release DMG：`dist-release.local-1t7xu6vx/quiet-md-0.1.11-release-macos-arm64.dmg`，版本 0.1.11，应用名 `Quiet.md.app`，使用正式图标和 `app.quietmd.mac` 标识，包含当前工作区功能；Release 优化构建，关闭 `devtools`，临时签名、未公证，未公开发布。
 
 ## 进行中
 
-- main（`4a2158a`）合并到 `feat/own`：冲突及自动合并后的接口兼容问题已解决并验证，已暂存，保留合并状态，等待创建合并提交。
+- 无。
 
 ## 待办
 
 - 接入 Claude Code、Pi，分别保留会话上下文。
 - Agent 修改当前笔记时的保存与外部变更协调，待单独设计。
-- Windows、Linux 实机验证；跨重启恢复聊天记录尚未实现，当前只记忆工作目录和面板宽度。
+- Windows、Linux 实机验证；跨重启恢复聊天记录尚未实现，当前只记忆工作目录。
 - 重拍指南桌面截图：`shared-mock/guides/shots/shots.sh` 本机运行失败，现有截图未修改。
 
 ## 阻塞
@@ -48,6 +45,9 @@
 
 ## 最近验证
 
+- 2026-11-28 22:48 本地 Apple Silicon DMG：`dist-release.local.VwWdTG/quiet-md-0.2.0-macos-arm64-unsigned.dmg`（20,098,940 字节，SHA-256 `945a8d2236e7cc6b2044af41f8d644abae0abac9fe6fd9f11a1f172bdcee0311`），使用 `dist` profile、关闭 `devtools`、启用 `gpui_platform/runtime_shaders`、ad-hoc 临时签名（未公证）。`plutil -lint`、`codesign --verify --deep --strict`、`hdiutil verify`、只读挂载验证与 `/Applications` 软链、`quiet --version`（`quiet 0.2.0`）及独立临时 `QUIET_MD_HOME` 启动存活 3 秒冒烟测试均通过，随后清理临时库并确认无残留 `quiet_md` 进程。
+
+- 2026-11-28 22:28 浮动面板样式与完整检查：Release workspace 测试（`gpui_platform/runtime_shaders`、`MACOSX_DEPLOYMENT_TARGET=13.0`）1401 项通过、0 项失败、10 项忽略（沙箱外完整跑通，含本地 HTTP 与恢复目录用例）；普通与 `devtools` 两种配置 Release Clippy（`--workspace --all-targets --features gpui_platform/runtime_shaders -- -D warnings`）均零警告；`tools/vendor-sync` 测试 9 项通过、1 项忽略；中英文指南 XML 往返及 6 个指南资源字节一致性检查通过；沙箱外运行更新后的 `tools/harness/agent_panel.py` 全部通过，并通过截图核对浅色、深色、小窗口（500×340）及专注模式隐藏／恢复效果。`git diff --check` 无空白错误。
 - 2026-11-26 合并验证：Release workspace 测试（`devtools`）1288 项通过、10 项忽略；普通、`devtools` 两种配置 Release Clippy（`--workspace --all-targets -- -D warnings`）通过，均使用 `gpui_platform/runtime_shaders` 和 `MACOSX_DEPLOYMENT_TARGET=13.0`。中英文指南 XML 往返、6 个指南资源一致性及模拟 Agent 面板回放通过。冲突标记与 `git diff --check` 检查通过。
 - 2026-11-25 合并验证：Release workspace 测试（`devtools`）1247 项通过、10 项忽略；普通、`devtools`、`devtools,datatable` 三种配置 Release Clippy（`--workspace --all-targets -- -D warnings`）通过，均使用 `gpui_platform/runtime_shaders` 和 `MACOSX_DEPLOYMENT_TARGET=13.0`。中英文指南 XML 往返、6 个指南资源一致性、完整模拟 Agent 面板回放及 Markdown 刷新防闪退回归通过。测试使用临时文档库；沙箱内恢复目录及本地 HTTP 用例因权限失败，沙箱外完整重跑通过。无未解决索引项，本次修复文件空白检查通过；全量暂存的 5 处空白提示来自与 main 完全一致的 4 个 vendor 补丁，保留原样。
 - 2026-11-24 合并验证：Release workspace 测试（`devtools`）1046 项通过、8 项忽略；普通、`devtools`、`devtools,datatable` 三种配置 Release Clippy（`--all-targets -- -D warnings`）通过，均使用 `gpui_platform/runtime_shaders` 和 `MACOSX_DEPLOYMENT_TARGET=13.0`。中英文指南 XML 往返、6 个指南资源一致性、完整模拟 Agent 面板回放及 Markdown 刷新防闪退回归通过；截图确认主页搜索与右侧按钮无重叠、模型菜单正常。测试使用临时文档库、独立 `QUIET_MD_ROOTS` 和英文测试配置；恢复及本地 HTTP 用例在沙箱外验证通过。旧设置回归已适配新存储职责；未配置多根目录／英文时分别触发根目录改名限制／字体英文断言。无未解决索引项，本次修复文件空白检查通过；全量暂存空白提示涉及四个文件，内容均与 main 完全一致，保留原样。
@@ -66,12 +66,3 @@
 - Release Clippy：普通和 `devtools` 两种配置均通过 `-D warnings`，均附加 `gpui/runtime_shaders`；`vendor/xattr` 保留原有 5 条依赖弃用警告。
 - 内置指南 XML 原样往返通过，6 个指南资源与源文件一致，`git diff --check` 通过。
 - 本地 DMG：20,377,171 字节；完整性校验、只读挂载、Applications 入口、Info.plist、应用签名、thin arm64 架构及挂载后二进制与签名源逐字节一致性验证通过。校验摘要和详细结果保存在产物目录的 `.sha256` 与 `verification.json`。
-- 右上角入口调整：`agent_panel.py` 新增折叠后无侧栏背景列的像素断言及主页顶栏回放，全部通过；原对话、审批、停止、会话和目录回归继续通过。Release Clippy（`gpui/runtime_shaders,devtools`，`-D warnings`）及 `git diff --check` 通过。
-- 最新 Release DMG：20,494,505 字节，SHA-256 为 `c2b3fb4b3badd524d69d488dd55eebac8029037919e3416fba6212f19930944f`；完整性、只读挂载、Applications 入口、Info.plist、应用临时签名、arm64 架构及签名后二进制内容比对均通过。
-- 目录入口下移：`agent_panel.py` 已从输入框下方选择和切换目录，长目录名截断及完整路径提示经截图确认；多轮对话、审批、停止、目录记忆和进程清理回归通过。Release Clippy（`gpui/runtime_shaders,devtools`，`-D warnings`）通过。
-- 模型选择：本机真实读取 37 个模型并完成两轮对话；模拟 Agent 界面回放验证分页列表、切换、恢复配置模型、生成期间禁用、读取失败后的继续对话和 Esc 关闭菜单，且消息没有写入笔记。Release Clippy（`gpui/runtime_shaders,devtools`，`-D warnings`）及 `git diff --check` 通过。
-- 模型选择框上移：已确认位于输入框上方；下方目录与发送按钮同排。新版界面回放覆盖模型选择、恢复默认、禁用、失败回退及目录／会话回归，全部通过；截图检查、Release Clippy（`gpui/runtime_shaders,devtools`，`-D warnings`）通过。
-- 文档引用：模拟 Agent 实际收到的正文经核对，覆盖添加后再次编辑、未保存内容、跨文档保留、关闭／重新打开后的最新正文、跨窗口未保存内容、去重、移除、首页／设置不自动添加、读取失败保留输入。界面截图检查及原模型、目录、会话回归通过。
-- AI 面板调宽：208 项 release 测试及普通／devtools Release Clippy 通过。界面回放核对拉宽／拉窄、最小／最大宽度、窗口缩小约束、折叠重开、重启恢复和左右栏独立保存；原对话、模型、引用回归通过。
-- AI 回复 Markdown：完整界面回放通过；截图核对 AI 样式与用户原文、未闭合代码块、表格，并以像素差异验证长代码和宽表格实际横向滚动。复制经模拟剪贴板粘回输入框后，核对 Agent 收到原始代码；通用输入框接入已有模拟剪贴板，测试不依赖系统剪贴板。原模型、目录、引用及宽度回归通过，普通／devtools Release Clippy 通过。
-- 本地 Release 打包：`cargo build --release --locked --features gpui/runtime_shaders`、无 `devtools` 的 workspace 测试（210 项通过、5 项忽略）和 Clippy（`--all-targets -- -D warnings`）通过。钥匙串查询为 0 个有效签名身份，未执行 Developer ID 签名或公证；沿用运行时着色器构建以适配本机 CLT 环境。

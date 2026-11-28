@@ -16,7 +16,7 @@ main.rs — window
        ├─ store.rs — library directories and .quiet/meta/ (see FORMAT.md) [core]
        ├─ meta.rs — FORMAT 5/6: metadata, deletions and hand order split by device, merged field by field [core]
        ├─ sidebar / folder_page / search / trash / tree / docmenu / docinfo / modes
-       ├─ agent::Panel — right-side Codex chat and independent working directory
+       ├─ agent::Panel — floating Codex chat card and independent working directory
        └─ editor::Editor (view.rs) — open document
             └─ editor::Core (core.rs) — document, selection and undo stack [core]
 ```
@@ -25,7 +25,7 @@ main.rs — window
 
 `src/agent.rs` owns the collapsible GPUI panel; `src/agent/codex.rs` manages its Codex App Server subprocess and stdio JSON protocol. The document engine remains independent of Agent protocols.
 
-The panel opens from the upper-right corner, can be resized from its left edge, and remembers its width. Model selection sits above the input; the working directory and send/stop controls sit below. Replies render as read-only Markdown; user messages remain plain text.
+The floating card opens from the round avatar button in the lower-right corner with a fixed width, without shifting the note, and hides while focus mode, a board, or version history is open. Working directory selection, model selection, and send/stop controls share one row below the input. Replies render as read-only Markdown; user messages remain plain text.
 
 Opening the panel on a document adds a removable reference. Sending reads the latest editor buffer, including unsaved changes, and respects the current document when previewing history. References carry document text as Markdown context without uploading images or attachments.
 

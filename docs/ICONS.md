@@ -107,7 +107,7 @@ Checked 2026-11-24 against the official packages `nucleo-ui-outline-18` 1.5.0 an
 | `whiteboard.svg` | UI Essential Outline 18 | Shapes | identical to the package |
 | `x.svg` | UI Outline 18 | Xmark | identical to the package |
 
-The 19 project-drawn icons in this folder (MIT; `diamond`, the board's diamond tool, as Nucleo has no diamond outline) are listed in THIRD_PARTY.md; each opens with a comment saying so.
+The 20 project-drawn icons (`arrow-up` among them, for the AI panel's send button) in this folder (MIT; `diamond`, the board's diamond tool, as Nucleo has no diamond outline) are listed in THIRD_PARTY.md; each opens with a comment saying so.
 
 ## `assets/editor-icons/`: 170 icons
 

@@ -16,7 +16,7 @@ FDL_BIN=/other/quiet_md python3 tools/harness/run.py my.txt
 
 ## Screenshot regression checks
 
-`python3 tools/harness/agent_panel.py` 使用临时文档库和模拟 Codex，验证右侧面板的多轮对话、折叠保留、审批、停止、新会话、目录切换及重启后的目录记忆，不启动真实 Agent。需要带 `devtools` 的构建；本机缺少 Metal 编译器时可同时启用 GPUI 平台层的 `gpui_platform/runtime_shaders`。
+`python3 tools/harness/agent_panel.py` 使用临时文档库和模拟 Codex，验证右下角浮动面板的多轮对话、折叠保留、审批、停止、新会话、目录切换及重启后的目录记忆，不启动真实 Agent。需要带 `devtools` 的构建；本机缺少 Metal 编译器时可同时启用 GPUI 平台层的 `gpui_platform/runtime_shaders`。
 
 同一回放还通过 `check-agent-references <阶段>` 在临时文档库构造可控的编辑器缓冲区，验证引用去重、添加后再次编辑、未保存正文、关闭后读取及重新打开后的最新缓冲区、跨窗口未保存内容、跨文档引用、移除、首页／设置不自动添加、读取失败保留输入。跨窗口阶段短暂打开不抢焦点的测试窗口并在结束时关闭。回归会核对模拟 Agent 实际收到的正文，不调用真实模型。
 
